@@ -168,7 +168,7 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
     poster_data = []
 
 
-    type = None  # Changed variable name for clarity
+    type = None
     if item_type == "Movie":
         type = "movie"
     elif item_type == "Series":
@@ -176,10 +176,10 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
 
     search_query = item_title  # Initialize with Jellyfin title as a fallback
 
-    # Use TMDB ID to get the official title for ThePosterDB search if available
+    # Step 1: Use TMDB ID to get the official title for ThePosterDB search if available
     if tmdb_id and type:
         try:
-            # Construct TMDB API URL using the correct media_type_for_tmdb_api
+            # Construct TMDB API URL using the correct type
             tmdb_response = requests.get(f"https://api.themoviedb.org/3/{type}/{tmdb_id}?api_key={Config.TMDB_API_KEY}&language=en-US")
             tmdb_response.raise_for_status()
             tmdb_data = tmdb_response.json()
