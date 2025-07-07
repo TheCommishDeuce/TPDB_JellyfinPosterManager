@@ -1,0 +1,768 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<!-- Filter and Sort Controls -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body py-3">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h1 class="mb-1">
+                            <i class="fas fa-film me-2"></i>
+                            {{ server_info.name }} Library
+                        </h1>
+                        <p class="text-muted mb-0">
+                            Found <strong><span id="totalItemCount">{{ items|length }}</span></strong> items.
+                            {% if server_info.version %}
+                            <small class="ms-2">
+                                <i class="fas fa-server me-1"></i>
+                                v{{ server_info.version }}
+                            </small>
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div class="col-md-4">
+                        <!-- Filter Buttons Only -->
+                        <div class="btn-group w-100" role="group" aria-label="Filter content type">
+                            <input type="radio" class="btn-check" name="contentFilter" id="filterAll" 
+                                   {{ 'checked' if not current_filter else '' }}>
+                            <label class="btn btn-outline-primary" for="filterAll" onclick="filterContent('all')">
+                                <i class="fas fa-th me-1"></i>All
+                            </label>
+
+                            <input type="radio" class="btn-check" name="contentFilter" id="filterMovies"
+                                   {{ 'checked' if current_filter == 'movies' else '' }}>
+                            <label class="btn btn-outline-primary" for="filterMovies" onclick="filterContent('movie')">
+                                <i class="fas fa-film me-1"></i>Movies
+                            </label>
+
+                            <input type="radio" class="btn-check" name="contentFilter" id="filterSeries"
+                                   {{ 'checked' if current_filter == 'series' else '' }}>
+                            <label class="btn btn-outline-primary" for="filterSeries" onclick="filterContent('series')">
+                                <i class="fas fa-tv me-1"></i>Series
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Sort Dropdown Row - Separate to avoid z-index issues -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-end">
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" 
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="fas fa-sort me-1"></i>
+                    Sort by
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a class="dropdown-item {{ 'active' if current_sort == 'name' else '' }}" 
+                        href="#" onclick="sortContent('name')">
+                        <i class="fas fa-sort-alpha-down me-2"></i>Name (A-Z)
+                    </a></li>
+                    <li><a class="dropdown-item {{ 'active' if current_sort == 'year' else '' }}" 
+                        href="#" onclick="sortContent('year')">
+                        <i class="fas fa-calendar me-2"></i>Year
+                    </a></li>
+                    <li><a class="dropdown-item {{ 'active' if current_sort == 'date_added' else '' }}" 
+                        href="#" onclick="sortContent('date_added')">
+                        <i class="fas fa-clock me-2"></i>Recently Added
+                    </a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Batch Operations - Split into two sections for better z-index control -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body py-3">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h5 class="mb-0">
+                            <i class="fas fa-tasks me-2"></i>Manual Selection
+                        </h5>
+                        <small class="text-muted">
+                            <span id="selectedCount">0</span> items selected for manual upload
+                        </small>
+                    </div>
+                    <div class="col-md-4 text-md-end">
+                        <button class="btn btn-success" id="uploadAllBtn" onclick="uploadAllSelected()" disabled>
+                            <i class="fas fa-cloud-upload-alt me-2"></i>
+                            Upload All Selected
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Auto Batch Operations - Separate card with higher z-index -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card" style="position: relative; z-index: 1070;">
+            <div class="card-body py-3">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h5 class="mb-0">
+                            <i class="fas fa-magic me-2"></i>Automatic Batch Operations
+                        </h5>
+                        <small class="text-muted">
+                            Automatically find and upload the first available poster for items
+                        </small>
+                    </div>
+                    <div class="col-md-4 text-md-end">
+                        <div class="dropdown" style="position: relative; z-index: 1071;">
+                            <button type="button" class="btn btn-outline-primary dropdown-toggle" 
+                                    data-bs-toggle="dropdown" aria-expanded="false" id="autoPosterBtn"
+                                    style="position: relative; z-index: 1072;">
+                                <i class="fas fa-magic me-1"></i>
+                                Auto-Get Posters
+                            </button>
+                            <ul class="dropdown-menu" style="position: absolute; z-index: 1073 !important;">
+                                <li>
+                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('no-poster')">
+                                        <i class="fas fa-exclamation-circle me-2 text-warning"></i>
+                                        Items Without Posters
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('all')">
+                                        <i class="fas fa-th me-2 text-primary"></i>
+                                        All Items
+                                    </a>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li>
+                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('movies')">
+                                        <i class="fas fa-film me-2 text-info"></i>
+                                        Movies Only
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('series')">
+                                        <i class="fas fa-tv me-2 text-success"></i>
+                                        TV Series Only
+                                    </a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Error Display -->
+{% if error %}
+<div class="alert alert-danger mb-4">
+    <i class="fas fa-exclamation-triangle me-2"></i>
+    <strong>Connection Error:</strong> {{ error }}
+</div>
+{% endif %}
+
+<!-- Items Grid - Bootstrap Grid -->
+<div class="row" id="itemsGrid">
+    {% for item in items %}
+    <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6 mb-4 item-card-wrapper" 
+         data-item-id="{{ item.id }}" 
+         data-type="{{ item.type.lower() }}">
+        <div class="card h-100 item-card">
+            <!-- Large Jellyfin Thumbnail -->
+            <div class="card-img-top-wrapper">
+                {% if item.thumbnail_url %}
+                <img src="/jellyfin-image?url={{ item.thumbnail_url|urlencode }}" 
+                     alt="{{ item.title }} poster" 
+                     class="card-img-top jellyfin-poster-large"
+                     loading="lazy"
+                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                <div class="jellyfin-poster-placeholder-large" style="display: none;">
+                    <i class="fas fa-image"></i>
+                    <small>No Image</small>
+                </div>
+                {% else %}
+                <div class="jellyfin-poster-placeholder-large">
+                    <i class="fas fa-image"></i>
+                    <small>No Image</small>
+                </div>
+                {% endif %}
+                
+                <!-- Type Badge Overlay -->
+                <div class="item-type-overlay">
+                    <span class="badge item-type-badge-{{ item.type.lower() }}">
+                        {{ item.type }}
+                    </span>
+                </div>
+            </div>
+            
+            <div class="card-body p-2">
+                <h6 class="card-title text-truncate mb-1" title="{{ item.title }}">
+                    {{ item.title }}
+                </h6>
+                {% if item.year %}
+                <small class="text-muted d-block mb-2">
+                    <i class="fas fa-calendar me-1"></i>{{ item.year }}
+                </small>
+                {% endif %}
+                
+                <!-- Action Button -->
+                <div class="d-grid">
+                    <button class="btn btn-outline-primary btn-sm" onclick="loadPosters('{{ item.id }}')">
+                        <i class="fas fa-search me-1"></i>
+                        Find Posters
+                    </button>
+                </div>
+                
+                <!-- Status Area -->
+                <div class="mt-2" id="status-{{ item.id }}">
+                    <!-- Status will be updated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if not items %}
+<div class="text-center py-5">
+    <i class="fas fa-film fa-3x text-muted mb-3"></i>
+    <h3 class="text-muted">No items found</h3>
+    <p class="text-muted">
+        Make sure your Jellyfin server is accessible and configured correctly.
+        <br>
+        <small>Server: {{ server_info.name }}</small>
+    </p>
+</div>
+{% endif %}
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loadingModal" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <h6 id="loadingText">Searching and converting posters...</h6>
+                <small class="text-muted">This may take a few moments</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Poster Selection Modal -->
+<div class="modal fade" id="posterModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-images me-2"></i>
+                    Choose Poster
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="posterModalBody">
+                <!-- Posters will be loaded here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Batch Upload Results Modal -->
+<div class="modal fade" id="resultsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-chart-bar me-2"></i>
+                    Upload Results
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="resultsModalBody">
+                <!-- Results will be shown here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Custom Styles -->
+<style>
+/* Poster Image Container - Fixed Height with Aspect Ratio Preservation */
+.card-img-top-wrapper {
+    position: relative;
+    height: 280px; /* Fixed height for consistency */
+    overflow: hidden;
+    border-radius: 0.375rem 0.375rem 0 0;
+    background-color: #f8f9fa;
+}
+
+/* Poster Images - Contain instead of Cover to prevent cropping */
+.jellyfin-poster-large {
+    width: 100%;
+    height: 100%;
+    object-fit: contain; /* Prevents cropping */
+    object-position: center;
+    transition: transform 0.3s ease;
+    background-color: #f8f9fa;
+}
+
+.jellyfin-poster-placeholder-large {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: #f8f9fa;
+    color: #6c757d;
+    font-size: 2rem;
+    border: 2px dashed #dee2e6;
+}
+
+.jellyfin-poster-placeholder-large small {
+    font-size: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+/* Type Badge Overlay */
+.item-type-overlay {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 10;
+}
+
+.item-type-badge-movie {
+    background-color: rgba(25, 118, 210, 0.9);
+    color: white;
+}
+
+.item-type-badge-series {
+    background-color: rgba(123, 31, 162, 0.9);
+    color: white;
+}
+
+/* Card Hover Effects */
+.item-card {
+    transition: all 0.3s ease;
+    border: 1px solid #dee2e6;
+}
+
+.item-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+    border-color: #007bff;
+}
+
+.item-card:hover .jellyfin-poster-large {
+    transform: scale(1.02); /* Reduced scale to prevent cropping issues */
+}
+
+/* Selection States */
+.item-card.selected {
+    border: 2px solid #28a745;
+    box-shadow: 0 0 15px rgba(40, 167, 69, 0.3);
+}
+
+/* Filter Controls */
+.btn-check:checked + .btn-outline-primary {
+    background-color: #007bff;
+    border-color: #007bff;
+    color: white;
+}
+
+.dropdown-item.active {
+    background-color: #007bff;
+    color: white;
+}
+
+/* Fix dropdown z-index to appear above cards */
+.dropdown {
+    position: relative;
+    z-index: 1050;
+}
+
+.dropdown-menu {
+    z-index: 1051 !important;
+    position: absolute !important;
+}
+
+.dropdown-menu.show {
+    z-index: 1052 !important;
+}
+
+/* Item visibility for filtering */
+.item-card-wrapper.hidden {
+    display: none !important;
+}
+
+/* Selected counter styling */
+#selectedCount {
+    font-weight: 600;
+    color: #007bff;
+}
+
+/* Responsive adjustments */
+@media (max-width: 575px) {
+    .card-img-top-wrapper {
+        height: 240px; /* Smaller height on mobile */
+    }
+    
+    .btn-group.w-100 .btn {
+        font-size: 0.8rem;
+        padding: 0.375rem 0.5rem;
+    }
+}
+</style>
+
+<script>
+// Filter and Sort Functions
+function filterContent(type) {
+    const items = document.querySelectorAll('.item-card-wrapper');
+    let visibleCount = 0;
+    
+    items.forEach(item => {
+        const itemType = item.getAttribute('data-type');
+        
+        if (type === 'all' || itemType === type) {
+            item.classList.remove('hidden');
+            visibleCount++;
+        } else {
+            item.classList.add('hidden');
+        }
+    });
+    
+    // Update count
+    document.getElementById('totalItemCount').textContent = visibleCount;
+    
+    // Update URL without page reload
+    const url = new URL(window.location);
+    if (type === 'all') {
+        url.searchParams.delete('type');
+    } else {
+        url.searchParams.set('type', type);
+    }
+    window.history.pushState({}, '', url);
+}
+
+function sortContent(sortBy) {
+    const url = new URL(window.location);
+    url.searchParams.set('sort', sortBy);
+    window.location.href = url.toString();
+}
+
+// Initialize filter on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Set initial filter state
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentFilter = urlParams.get('type') || 'all';
+    
+    if (currentFilter !== 'all') {
+        filterContent(currentFilter);
+    }
+    
+    updateUploadAllButton();
+});
+
+// Update upload all button state
+function updateUploadAllButton() {
+    const uploadBtn = document.getElementById('uploadAllBtn');
+    const selectedCountSpan = document.getElementById('selectedCount');
+    const selectedCount = Object.keys(selectedPosters || {}).length;
+    
+    // Update counter
+    if (selectedCountSpan) {
+        selectedCountSpan.textContent = selectedCount;
+    }
+    
+    if (selectedCount > 0) {
+        uploadBtn.disabled = false;
+        uploadBtn.innerHTML = `<i class="fas fa-cloud-upload-alt me-2"></i>Upload All Selected (${selectedCount})`;
+    } else {
+        uploadBtn.disabled = true;
+        uploadBtn.innerHTML = '<i class="fas fa-cloud-upload-alt me-2"></i>Upload All Selected';
+    }
+}
+// Global variables for batch operations
+let selectedItems = new Set();
+let autoBatchInProgress = false;
+
+// Load posters for item (existing function - update if needed)
+function loadPosters(itemId) {
+    // Find the item details
+    const itemCard = document.querySelector(`[data-item-id="${itemId}"]`);
+    const itemTitle = itemCard.querySelector('.card-title').textContent;
+    
+    // Show loading modal
+    showLoadingModal('Searching for posters...');
+    
+    fetch(`/item/${itemId}/posters`)
+        .then(response => response.json())
+        .then(data => {
+            hideLoadingModal();
+            
+            if (data.error) {
+                alert('Error loading posters: ' + data.error);
+                return;
+            }
+            
+            showPosterModal(itemId, itemTitle, data.posters);
+        })
+        .catch(error => {
+            hideLoadingModal();
+            console.error('Error loading posters:', error);
+            alert('Error loading posters: ' + error.message);
+        });
+}
+
+// Show poster selection modal
+function showPosterModal(itemId, itemTitle, posters) {
+    const modal = document.getElementById('posterModal');
+    const modalBody = document.getElementById('posterModalBody');
+    const modalTitle = modal.querySelector('.modal-title');
+    
+    modalTitle.innerHTML = `<i class="fas fa-images me-2"></i>Choose Poster for ${itemTitle}`;
+    
+    if (posters.length === 0) {
+        modalBody.innerHTML = `
+            <div class="text-center py-4">
+                <i class="fas fa-search fa-3x text-muted mb-3"></i>
+                <h5 class="text-muted">No posters found</h5>
+                <p class="text-muted">Try searching manually on ThePosterDB</p>
+            </div>
+        `;
+    } else {
+        modalBody.innerHTML = `
+            <div class="row">
+                ${posters.map(poster => `
+                    <div class="col-lg-3 col-md-4 col-6 mb-3">
+                        <div class="card poster-option" onclick="selectPoster('${itemId}', '${poster.url}')">
+                            <img src="${poster.base64}" class="card-img-top" alt="Poster option" style="height: 200px; object-fit: cover;">
+                            <div class="card-body p-2">
+                                <small class="text-muted">${poster.title}</small>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+    
+    // Show the modal
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+}
+
+// Select and upload poster
+function selectPoster(itemId, posterUrl) {
+    // Hide the modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('posterModal'));
+    modal.hide();
+    
+    showLoadingModal('Uploading poster...');
+    
+    fetch('/upload-poster', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            item_id: itemId,
+            poster_url: posterUrl
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideLoadingModal();
+        
+        if (data.success) {
+            alert('Poster uploaded successfully!');
+            // Refresh the page to show updated poster
+            window.location.reload();
+        } else {
+            alert('Error uploading poster: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        hideLoadingModal();
+        console.error('Error uploading poster:', error);
+        alert('Error uploading poster: ' + error.message);
+    });
+}
+
+// Auto Batch Poster Functions
+function startAutoBatchPoster(filter) {
+    if (autoBatchInProgress) {
+        alert('Auto-poster operation already in progress!');
+        return;
+    }
+    
+    const filterNames = {
+        'all': 'all items',
+        'no-poster': 'items without posters',
+        'movies': 'movies only',
+        'series': 'TV series only'
+    };
+    
+    const filterName = filterNames[filter] || filter;
+    
+    if (!confirm(`Are you sure you want to automatically get posters for ${filterName}?\n\nThis will:\n• Search for the first available poster for each item\n• Automatically download and upload it to Jellyfin\n• This may take several minutes for large libraries`)) {
+        return;
+    }
+    
+    autoBatchInProgress = true;
+    
+    showLoadingModal('Starting auto-poster operation...');
+    
+    // Start the batch operation
+    fetch('/batch-auto-poster', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            filter: filter
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideLoadingModal();
+        
+        if (data.success) {
+            // Show results
+            showAutoBatchResults(data);
+            
+            // Refresh the page to show updated posters
+            setTimeout(() => {
+                window.location.reload();
+            }, 3000);
+            
+        } else {
+            alert('Auto-poster operation failed: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        hideLoadingModal();
+        console.error('Error in auto-poster operation:', error);
+        alert('Auto-poster operation failed: ' + error.message);
+    })
+    .finally(() => {
+        autoBatchInProgress = false;
+    });
+}
+
+function showAutoBatchResults(data) {
+    const resultsModalBody = document.getElementById('resultsModalBody');
+    
+    let successfulItems = data.results.filter(r => r.success);
+    let failedItems = data.results.filter(r => !r.success);
+    
+    let html = `
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <div class="text-center">
+                    <h3 class="text-success">${data.successful}</h3>
+                    <small class="text-muted">Successful</small>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="text-center">
+                    <h3 class="text-danger">${data.failed}</h3>
+                    <small class="text-muted">Failed</small>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="text-center">
+                    <h3 class="text-primary">${data.total_items}</h3>
+                    <small class="text-muted">Total Processed</small>
+                </div>
+            </div>
+        </div>
+        <hr>
+    `;
+    
+    if (successfulItems.length > 0) {
+        html += `
+            <h6 class="text-success">
+                <i class="fas fa-check-circle me-2"></i>
+                Successfully Updated (${successfulItems.length})
+            </h6>
+            <div class="mb-3" style="max-height: 200px; overflow-y: auto;">
+        `;
+        
+        successfulItems.forEach(item => {
+            html += `
+                <div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+                    <span>${item.item_title}</span>
+                    <span class="badge bg-success">Success</span>
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+    }
+    
+    if (failedItems.length > 0) {
+        html += `
+            <h6 class="text-danger">
+                <i class="fas fa-exclamation-circle me-2"></i>
+                Failed Items (${failedItems.length})
+            </h6>
+            <div class="mb-3" style="max-height: 200px; overflow-y: auto;">
+        `;
+        
+        failedItems.forEach(item => {
+            html += `
+                <div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+                    <div>
+                        <div>${item.item_title}</div>
+                        <small class="text-muted">${item.error}</small>
+                    </div>
+                    <span class="badge bg-danger">Failed</span>
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+    }
+    
+    resultsModalBody.innerHTML = html;
+    
+    // Show the modal
+    const resultsModal = new bootstrap.Modal(document.getElementById('resultsModal'));
+    resultsModal.show();
+}
+
+// Utility functions
+function showLoadingModal(text = 'Loading...') {
+    document.getElementById('loadingText').textContent = text;
+    const modal = new bootstrap.Modal(document.getElementById('loadingModal'));
+    modal.show();
+}
+
+function hideLoadingModal() {
+    const modal = bootstrap.Modal.getInstance(document.getElementById('loadingModal'));
+    if (modal) {
+        modal.hide();
+    }
+}
+
+// Placeholder functions for batch operations (if you want to implement manual selection later)
+function uploadAllSelected() {
+    alert('Manual batch upload not yet implemented');
+}
+</script>
+{% endblock %}

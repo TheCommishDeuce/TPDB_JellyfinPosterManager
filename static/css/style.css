@@ -1,0 +1,833 @@
+/* =============================================================================
+   JELLYFIN POSTER MANAGER - COMPLETE STYLESHEET
+   ============================================================================= */
+
+/* =============================================================================
+   BASE STYLES & VARIABLES
+   ============================================================================= */
+:root {
+    --primary-color: #007bff;
+    --success-color: #28a745;
+    --warning-color: #ffc107;
+    --danger-color: #dc3545;
+    --info-color: #17a2b8;
+    --light-color: #f8f9fa;
+    --dark-color: #343a40;
+    --muted-color: #6c757d;
+    
+    --border-radius: 8px;
+    --border-radius-sm: 4px;
+    --box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    --box-shadow-hover: 0 4px 20px rgba(0,0,0,0.15);
+    --transition: all 0.3s ease;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f5f5f5;
+    color: #333;
+    line-height: 1.6;
+}
+
+/* =============================================================================
+   HEADER & NAVIGATION
+   ============================================================================= */
+.navbar {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    box-shadow: var(--box-shadow);
+    padding: 1rem 0;
+}
+
+.navbar-brand {
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: white !important;
+}
+
+.navbar-brand i {
+    margin-right: 0.5rem;
+    color: #ffd700;
+}
+
+/* =============================================================================
+   MAIN CONTAINER & LAYOUT
+   ============================================================================= */
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem 15px;
+}
+
+.main-header {
+    text-align: center;
+    margin-bottom: 3rem;
+}
+
+.main-header h1 {
+    color: var(--dark-color);
+    font-weight: 300;
+    margin-bottom: 0.5rem;
+}
+
+.main-header p {
+    color: var(--muted-color);
+    font-size: 1.1rem;
+}
+
+/* =============================================================================
+   CARDS & PANELS
+   ============================================================================= */
+.card {
+    border: none;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    transition: var(--transition);
+    background: white;
+}
+
+.card:hover {
+    box-shadow: var(--box-shadow-hover);
+    transform: translateY(-2px);
+}
+
+.card-header {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-bottom: 1px solid #dee2e6;
+    border-radius: var(--border-radius) var(--border-radius) 0 0 !important;
+    padding: 1rem 1.5rem;
+}
+
+.card-body {
+    padding: 1.5rem;
+}
+
+/* =============================================================================
+   BUTTONS
+   ============================================================================= */
+.btn {
+    border-radius: var(--border-radius-sm);
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    transition: var(--transition);
+    border: none;
+    cursor: pointer;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary-color) 0%, #0056b3 100%);
+}
+
+.btn-success {
+    background: linear-gradient(135deg, var(--success-color) 0%, #1e7e34 100%);
+}
+
+.btn-warning {
+    background: linear-gradient(135deg, var(--warning-color) 0%, #e0a800 100%);
+    color: #212529;
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, var(--danger-color) 0%, #c82333 100%);
+}
+
+.btn-outline-secondary {
+    border: 1px solid #dee2e6;
+    color: var(--muted-color);
+    background: transparent;
+}
+
+.btn-outline-secondary:hover {
+    background-color: var(--muted-color);
+    border-color: var(--muted-color);
+    color: white;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+/* =============================================================================
+   JELLYFIN ITEMS GRID
+   ============================================================================= */
+.jellyfin-items {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+
+.jellyfin-item {
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    overflow: hidden;
+    transition: var(--transition);
+    border: 2px solid transparent;
+}
+
+.jellyfin-item:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--box-shadow-hover);
+    border-color: var(--primary-color);
+}
+
+.jellyfin-item-header {
+    padding: 1rem;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-bottom: 1px solid #dee2e6;
+}
+
+.jellyfin-item-title {
+    font-weight: 600;
+    color: var(--dark-color);
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.jellyfin-item-meta {
+    color: var(--muted-color);
+    font-size: 0.9rem;
+    margin-top: 0.25rem;
+}
+
+.jellyfin-item-body {
+    padding: 1rem;
+}
+
+.jellyfin-item-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+/* Item type badges */
+.item-type-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.item-type-movie {
+    background-color: #e3f2fd;
+    color: #1976d2;
+}
+
+.item-type-series {
+    background-color: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.item-type-season {
+    background-color: #e8f5e8;
+    color: #388e3c;
+}
+
+/* =============================================================================
+   POSTER MODAL & GRID
+   ============================================================================= */
+.modal-dialog {
+    max-width: 1200px;
+}
+
+.modal-content {
+    border: none;
+    border-radius: var(--border-radius);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+.modal-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: var(--border-radius) var(--border-radius) 0 0;
+    padding: 1rem 1.5rem;
+}
+
+.modal-title {
+    font-weight: 600;
+    margin: 0;
+}
+
+.btn-close {
+    filter: invert(1);
+    opacity: 0.8;
+}
+
+.btn-close:hover {
+    opacity: 1;
+}
+
+.modal-body {
+    padding: 1.5rem;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+/* Poster Grid Layout for 12 posters */
+.poster-container {
+    position: relative;
+    height: 280px;
+    background-color: var(--light-color);
+    border-radius: var(--border-radius-sm);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #dee2e6;
+}
+
+.poster-loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--light-color);
+    z-index: 2;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted-color);
+}
+
+.poster-image {
+    height: 280px;
+    width: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+    position: relative;
+    z-index: 3;
+    border-radius: var(--border-radius-sm);
+}
+
+/* Poster Cards */
+.poster-card {
+    cursor: pointer;
+    transition: var(--transition);
+    border: 2px solid transparent;
+    position: relative;
+    height: 100%;
+}
+
+.poster-card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--box-shadow-hover);
+    border-color: var(--primary-color);
+}
+
+.poster-card:hover .poster-image {
+    transform: scale(1.03);
+}
+
+.poster-card.selected {
+    border: 3px solid var(--success-color);
+    box-shadow: 0 0 20px rgba(40, 167, 69, 0.3);
+}
+
+.poster-card.selected::after {
+    content: '✓';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: var(--success-color);
+    color: white;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 16px;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+/* Poster metadata */
+.poster-card .card-body {
+    padding: 0.75rem;
+    background: white;
+}
+
+.poster-card .card-body small {
+    display: block;
+    line-height: 1.4;
+}
+
+/* =============================================================================
+   RESPONSIVE GRID FOR 12 POSTERS
+   ============================================================================= */
+
+/* Extra large screens - 6 columns */
+@media (min-width: 1200px) {
+    .col-lg-2 {
+        flex: 0 0 auto;
+        width: 16.66666667%;
+    }
+}
+
+/* Large screens - 4 columns */
+@media (max-width: 1199px) and (min-width: 992px) {
+    .poster-container,
+    .poster-image {
+        height: 250px;
+    }
+}
+
+/* Medium screens - 3 columns */
+@media (max-width: 991px) and (min-width: 768px) {
+    .poster-container,
+    .poster-image {
+        height: 220px;
+    }
+}
+
+/* Small screens - 2 columns */
+@media (max-width: 767px) {
+    .poster-container,
+    .poster-image {
+        height: 200px;
+    }
+    
+    .modal-dialog {
+        max-width: 95%;
+        margin: 1rem auto;
+    }
+    
+    .jellyfin-items {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+}
+
+/* Extra small screens */
+@media (max-width: 575px) {
+    .poster-container,
+    .poster-image {
+        height: 180px;
+    }
+    
+    .container {
+        padding: 1rem;
+    }
+    
+    .card-body {
+        padding: 1rem;
+    }
+}
+
+/* =============================================================================
+   LOADING STATES & ANIMATIONS
+   ============================================================================= */
+.spinner-border {
+    width: 2rem;
+    height: 2rem;
+    border-width: 0.2em;
+}
+
+.spinner-border-sm {
+    width: 1rem;
+    height: 1rem;
+    border-width: 0.1em;
+}
+
+/* Loading overlay for base64 conversion */
+.converting-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.converting-content {
+    background: white;
+    padding: 2rem;
+    border-radius: var(--border-radius);
+    text-align: center;
+    max-width: 400px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+}
+
+/* Fade in animation for poster cards */
+@keyframes posterFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.poster-card {
+    animation: posterFadeIn 0.4s ease-out;
+}
+
+/* Stagger animation for multiple posters */
+.poster-card:nth-child(1) { animation-delay: 0.1s; }
+.poster-card:nth-child(2) { animation-delay: 0.15s; }
+.poster-card:nth-child(3) { animation-delay: 0.2s; }
+.poster-card:nth-child(4) { animation-delay: 0.25s; }
+.poster-card:nth-child(5) { animation-delay: 0.3s; }
+.poster-card:nth-child(6) { animation-delay: 0.35s; }
+.poster-card:nth-child(7) { animation-delay: 0.4s; }
+.poster-card:nth-child(8) { animation-delay: 0.45s; }
+.poster-card:nth-child(9) { animation-delay: 0.5s; }
+.poster-card:nth-child(10) { animation-delay: 0.55s; }
+.poster-card:nth-child(11) { animation-delay: 0.6s; }
+.poster-card:nth-child(12) { animation-delay: 0.65s; }
+
+/* =============================================================================
+   ALERTS & NOTIFICATIONS
+   ============================================================================= */
+.alert {
+    border: none;
+    border-radius: var(--border-radius);
+    padding: 1rem 1.5rem;
+    margin-bottom: 1rem;
+    border-left: 4px solid;
+}
+
+.alert-success {
+    background-color: #d4edda;
+    color: #155724;
+    border-left-color: var(--success-color);
+}
+
+.alert-danger {
+    background-color: #f8d7da;
+    color: #721c24;
+    border-left-color: var(--danger-color);
+}
+
+.alert-warning {
+    background-color: #fff3cd;
+    color: #856404;
+    border-left-color: var(--warning-color);
+}
+
+.alert-info {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border-left-color: var(--info-color);
+}
+
+/* =============================================================================
+   BADGES & LABELS
+   ============================================================================= */
+.badge {
+    font-weight: 500;
+    border-radius: 12px;
+    padding: 0.3rem 0.6rem;
+}
+
+.badge-sm {
+    font-size: 0.65rem;
+    padding: 0.2rem 0.4rem;
+}
+
+.badge.bg-secondary {
+    background-color: var(--muted-color) !important;
+}
+
+/* =============================================================================
+   FORM ELEMENTS
+   ============================================================================= */
+.form-control {
+    border-radius: var(--border-radius-sm);
+    border: 1px solid #ced4da;
+    padding: 0.5rem 0.75rem;
+    transition: var(--transition);
+}
+
+.form-control:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.form-select {
+    border-radius: var(--border-radius-sm);
+    border: 1px solid #ced4da;
+}
+
+/* =============================================================================
+   PROGRESS BARS
+   ============================================================================= */
+.progress {
+    height: 8px;
+    border-radius: 4px;
+    background-color: #e9ecef;
+    overflow: hidden;
+}
+
+.progress-bar {
+    background: linear-gradient(90deg, var(--primary-color) 0%, #0056b3 100%);
+    transition: width 0.3s ease;
+}
+
+/* =============================================================================
+   UTILITIES
+   ============================================================================= */
+.text-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.shadow-sm {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075) !important;
+}
+
+.shadow {
+    box-shadow: var(--box-shadow) !important;
+}
+
+.shadow-lg {
+    box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.175) !important;
+}
+
+/* =============================================================================
+   CUSTOM SCROLLBAR
+   ============================================================================= */
+.modal-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* =============================================================================
+   ERROR STATES
+   ============================================================================= */
+.poster-error {
+    background-color: var(--light-color);
+    border: 2px dashed #dee2e6;
+    color: var(--muted-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    padding: 1rem;
+}
+
+.poster-error i {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    opacity: 0.5;
+}
+
+/* =============================================================================
+   DARK MODE SUPPORT (Optional)
+   ============================================================================= */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --light-color: #2d3748;
+        --dark-color: #f7fafc;
+        --muted-color: #a0aec0;
+    }
+    
+    body {
+        background-color: #1a202c;
+        color: #f7fafc;
+    }
+    
+    .card {
+        background-color: #2d3748;
+        color: #f7fafc;
+    }
+    
+    .modal-content {
+        background-color: #2d3748;
+        color: #f7fafc;
+    }
+    
+    .poster-container {
+        background-color: #4a5568;
+        border-color: #4a5568;
+    }
+}
+
+/* =============================================================================
+   PRINT STYLES
+   ============================================================================= */
+@media print {
+    .navbar,
+    .btn,
+    .modal {
+        display: none !important;
+    }
+    
+    .container {
+        max-width: none !important;
+        padding: 0 !important;
+    }
+    
+    .card {
+        box-shadow: none !important;
+        border: 1px solid #dee2e6 !important;
+    }
+}
+
+/* =============================================================================
+   ACCESSIBILITY IMPROVEMENTS
+   ============================================================================= */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Focus styles for keyboard navigation */
+.btn:focus,
+.poster-card:focus {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .card {
+        border: 2px solid #000;
+    }
+    
+    .btn {
+        border: 2px solid #000;
+    }
+    
+    .poster-card {
+        border: 2px solid #000;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+/* =============================================================================
+   JELLYFIN THUMBNAILS
+   ============================================================================= */
+.jellyfin-thumbnail {
+    flex-shrink: 0;
+    width: 60px;
+    height: 90px;
+    position: relative;
+    border-radius: var(--border-radius-sm);
+    overflow: hidden;
+    background-color: var(--light-color);
+    border: 1px solid #dee2e6;
+}
+
+.jellyfin-poster-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.jellyfin-poster-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--light-color);
+    color: var(--muted-color);
+    font-size: 1.5rem;
+}
+
+.jellyfin-item:hover .jellyfin-poster-thumb {
+    transform: scale(1.05);
+}
+
+/* Update existing jellyfin-item-header to use flexbox */
+.jellyfin-item-header {
+    padding: 1rem;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-bottom: 1px solid #dee2e6;
+}
+
+.jellyfin-item-title {
+    font-weight: 600;
+    color: var(--dark-color);
+    margin: 0 0 0.25rem 0;
+    font-size: 1.1rem;
+    line-height: 1.3;
+}
+
+.jellyfin-item-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* Responsive adjustments for thumbnails */
+@media (max-width: 767px) {
+    .jellyfin-thumbnail {
+        width: 50px;
+        height: 75px;
+    }
+    
+    .jellyfin-item-header {
+        padding: 0.75rem;
+    }
+    
+    .jellyfin-item-title {
+        font-size: 1rem;
+    }
+}
+
+/* Server info in navbar */
+.navbar .text-white-50 {
+    font-size: 0.875rem;
+}
+
+/* Selected items counter */
+#selectedCount {
+    font-weight: 600;
+    color: var(--primary-color);
+}
