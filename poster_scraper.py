@@ -14,6 +14,7 @@ import hashlib
 import base64
 from urllib.parse import quote_plus
 from config import Config
+import logging
 
 # Global Selenium driver
 selenium_driver = None
@@ -158,39 +159,64 @@ def get_image_as_base64(image_url):
         print(f"Error converting image to base64: {e}")
         return None
 
-def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None, max_posters=18):
+
+def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None, tmdb_id=None, max_posters=18):
     """
     Modified version that returns up to 12 poster URLs with base64 data
     """
     global selenium_driver
     poster_data = []
-    
-    # Step 1: Determine if year is already in title and create expected title format
-    year_in_title_pattern = r'[(]\d{4}[)]$'
-    has_year_in_title = bool(re.search(year_in_title_pattern, item_title.strip()))
-    
-    if has_year_in_title:
-        expected_title = item_title.strip()
-        search_query = item_title.strip()
-    else:
-        if item_year:
-            expected_title = f"{item_title.strip()} ({item_year})"
-            search_query = expected_title
-        else:
-            expected_title = item_title.strip()
-            search_query = item_title.strip()
 
-    print(f"Searching for {max_posters} posters: '{search_query}'")
+
+    type = None  # Changed variable name for clarity
+    if item_type == "Movie":
+        type = "movie"
+    elif item_type == "Series":
+        type = "tv"  # TMDB uses 'tv' for series
+
+    search_query = item_title  # Initialize with Jellyfin title as a fallback
+
+    # Use TMDB ID to get the official title for ThePosterDB search if available
+    if tmdb_id and type:
+        try:
+            # Construct TMDB API URL using the correct media_type_for_tmdb_api
+            tmdb_response = requests.get(f"https://api.themoviedb.org/3/{type}/{tmdb_id}?api_key={Config.TMDB_API_KEY}&language=en-US")
+            tmdb_response.raise_for_status()
+            tmdb_data = tmdb_response.json()
+
+            if type == "tv":
+                tmdb_title = tmdb_data.get("name")
+            else:  # movie
+                tmdb_title = tmdb_data.get("title")
+
+            if tmdb_title:
+                search_query = tmdb_title
+                logging.info(f"Using TMDB official title for TPDB search: {search_query} (from TMDB ID: {tmdb_id})")
+            else:
+                logging.warning(
+                    f"TMDB data for {item_title} (ID: {tmdb_id}, Type: {item_type}) did not contain a 'title' or 'name'. Falling back to Jellyfin title.")
+
+        except Exception as e:
+            logging.warning(
+                f"Failed to fetch TMDB title for {item_title} (ID: {tmdb_id}, Type: {item_type}): {e}. Falling back to Jellyfin title for search.")
+
+    else:
+        logging.info(f"No TMDB ID or type information provided. Using Jellyfin title '{item_title}' for TPDB search.")
+
+    logging.info(f"Searching for {max_posters} posters for TPDB query: '{search_query}'")
 
     # Step 2: Properly encode the search query for URL
     encoded_query = quote_plus(search_query)
 
     # Build search URL with properly encoded query
     search_url = Config.TPDB_SEARCH_URL_TEMPLATE.format(query=encoded_query)
+
     if item_type == "Movie":
         search_url += "&section=movies"
     elif item_type == "Series":
         search_url += "&section=shows"
+
+    logging.info(f"TPDB search URL: {search_url}")
 
     try:
         # Step 3: Search TPDB for the item title
@@ -216,7 +242,7 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
                 if title_element:
                     result_title = title_element.get_text(strip=True)
 
-                match_score = calculate_title_match_score(expected_title, result_title)
+                match_score = calculate_title_match_score(search_query, result_title)
 
                 if match_score > best_match_score:
                     best_match_score = match_score
@@ -255,9 +281,9 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
             class_="bg-transparent border-0 text-white",
             href=True
         )[:max_posters]
-        
+
         print(f"Found {len(poster_links)} poster links, converting to base64...")
-        
+
         for i, poster_link in enumerate(poster_links):
             href = poster_link['href']
             if href.startswith('http'):
@@ -266,19 +292,19 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
                 poster_url = Config.TPDB_BASE_URL + href
             else:
                 continue
-                
+
             # Get poster metadata
             poster_info = extract_poster_metadata(poster_link)
-            
+
             # Convert to base64 for embedding
-            print(f"Processing poster {i+1}/{len(poster_links)}: {poster_info.get('title', f'Poster {i+1}')}")
+            print(f"Processing poster {i + 1}/{len(poster_links)}: {poster_info.get('title', f'Poster {i + 1}')}")
             base64_image = get_image_as_base64(poster_url)
             
             poster_data.append({
                 'id': i + 1,
                 'url': poster_url,  # Keep original URL for upload
                 'base64': base64_image,  # Add base64 version for display
-                'title': poster_info.get('title', f'Poster {i+1}'),
+                'title': poster_info.get('title', f'Poster {i + 1}'),
                 'uploader': poster_info.get('uploader', 'Unknown'),
                 'likes': poster_info.get('likes', 0)
             })
@@ -450,7 +476,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
             # Fetch movies and series in one combined request if no filter is applied
             if item_type is None:
                 # Get both movies and series in one API call
-                all_items_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes=Movie,Series&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
+                all_items_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes=Movie,Series&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
                 response = requests.get(all_items_url, headers=headers, timeout=10)
                 response.raise_for_status()
                 all_data = response.json()
@@ -470,7 +496,8 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
                             "year": item.get('ProductionYear'),
                             "type": item_type_name,
                             "thumbnail_url": thumbnail_url,
-                            "date_created": item.get('DateCreated', '')
+                            "date_created": item.get('DateCreated', ''),
+                            'ProviderIds': item.get('ProviderIds', {})
                         })
                 
                 print(f"Successfully fetched {len(items)} items (mixed movies and series).")
@@ -481,7 +508,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
                 
                 for current_type in item_types:
                     jellyfin_type = 'Movie' if current_type == 'movies' else 'Series'
-                    type_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes={jellyfin_type}&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
+                    type_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes={jellyfin_type}&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
                     response = requests.get(type_url, headers=headers, timeout=10)
                     response.raise_for_status()
                     type_data = response.json()
@@ -500,7 +527,8 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
                                 "year": item.get('ProductionYear'),
                                 "type": item_type_name,
                                 "thumbnail_url": thumbnail_url,
-                                "date_created": item.get('DateCreated', '')
+                                "date_created": item.get('DateCreated', ''),
+                                'ProviderIds': item.get('ProviderIds', {})
                             })
                 
                 # Sort the combined results by date_created in Python to ensure proper mixing
@@ -522,7 +550,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
             # For other sorting methods, keep movies and series separate as before
             if item_type == 'movies' or item_type is None:
                 print(f"Fetching movies from Jellyfin (sorted by {sort_by})...")
-                movies_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
+                movies_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
                 response = requests.get(movies_url, headers=headers, timeout=10)
                 response.raise_for_status()
                 movies_data = response.json()
@@ -539,13 +567,13 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
                             "year": item.get('ProductionYear'),
                             "type": "Movie",
                             "thumbnail_url": thumbnail_url,
-                            "date_created": item.get('DateCreated', '')
+                            "date_created": item.get('DateCreated', ''),
+                            'ProviderIds': item.get('ProviderIds', {})
                         })
                     print(f"Successfully fetched {len(movies_data['Items'])} movies.")
 
             if item_type == 'series' or item_type is None:
-                print(f"Fetching TV shows from Jellyfin (sorted by {sort_by})...")
-                shows_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes=Series&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
+                shows_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes=Series&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated,ProviderIds&SortBy={sort_by_param}&SortOrder={sort_order}"
                 response = requests.get(shows_url, headers=headers, timeout=10)
                 response.raise_for_status()
                 shows_data = response.json()
@@ -555,17 +583,17 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
                         thumbnail_url = None
                         if item.get('ImageTags', {}).get('Primary'):
                             thumbnail_url = f"{Config.JELLYFIN_URL}/Items/{item.get('Id')}/Images/Primary?maxWidth=300&quality=85&tag={item['ImageTags']['Primary']}"
-                        
+
                         items.append({
                             "id": item.get('Id'),
                             "title": item.get('Name'),
                             "year": item.get('ProductionYear'),
                             "type": "Series",
                             "thumbnail_url": thumbnail_url,
-                            "date_created": item.get('DateCreated', '')
+                            "date_created": item.get('DateCreated', ''),
+                            'ProviderIds': item.get('ProviderIds', {})
                         })
                     print(f"Successfully fetched {len(shows_data['Items'])} TV shows.")
-
     except Exception as e:
         print(f"Error fetching items from Jellyfin: {e}")
         return []

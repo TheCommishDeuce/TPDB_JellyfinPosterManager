@@ -85,12 +85,13 @@ def get_item_posters(item_id):
     
     try:
         logging.info(f"Searching posters for: {item['title']}")
-        
+
         # Get posters
         posters = search_tpdb_for_posters_multiple(
             item['title'], 
             item.get('year'), 
             item.get('type'),
+            tmdb_id = item.get('ProviderIds', {}).get('Tmdb'),
             max_posters=Config.MAX_POSTERS_PER_ITEM
         )
         
@@ -432,7 +433,8 @@ def batch_auto_poster():
                         item_title, 
                         item_year, 
                         item_type,
-                        max_posters=1  # Only get the first poster
+                        tmdb_id=item.get('ProviderIds', {}).get('Tmdb'),
+                        max_posters=1, # Only get the first poster
                     )
                     
                     if not posters or len(posters) == 0:

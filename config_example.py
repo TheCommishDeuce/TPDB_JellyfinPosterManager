@@ -15,7 +15,10 @@ class Config:
     TPDB_SEARCH_URL_TEMPLATE = "https://theposterdb.com/search?term={query}"
     TPDB_EMAIL = ""
     TPDB_PASSWORD = ""
-    
+
+    # TMDB Configuration
+    TMDB_API_KEY = ""
+
     # Application Settings
     MAX_POSTERS_PER_ITEM = 18
     TEMP_POSTER_DIR = "temp_posters"
