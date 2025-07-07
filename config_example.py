@@ -8,7 +8,6 @@ class Config:
     # Jellyfin Configuration
     JELLYFIN_URL = ""
     JELLYFIN_API_KEY = ""
-    JELLYFIN_USER_ID = ""
     
     # TPDB Configuration
     TPDB_BASE_URL = "https://theposterdb.com"
