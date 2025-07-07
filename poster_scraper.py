@@ -420,7 +420,7 @@ def get_jellyfin_server_info():
         return {'name': 'Jellyfin Server', 'version': '', 'id': ''}
 def get_jellyfin_items(item_type=None, sort_by='name'):
     """Fetches a list of movies and TV shows from the Jellyfin server with thumbnail URLs."""
-    if not Config.JELLYFIN_URL or not Config.JELLYFIN_API_KEY or not Config.JELLYFIN_USER_ID:
+    if not Config.JELLYFIN_URL or not Config.JELLYFIN_API_KEY:
         print("Error: Jellyfin configuration is missing.")
         return []
 
@@ -450,7 +450,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
             # Fetch movies and series in one combined request if no filter is applied
             if item_type is None:
                 # Get both movies and series in one API call
-                all_items_url = f"{Config.JELLYFIN_URL}/Users/{Config.JELLYFIN_USER_ID}/Items?IncludeItemTypes=Movie,Series&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
+                all_items_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes=Movie,Series&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
                 response = requests.get(all_items_url, headers=headers, timeout=10)
                 response.raise_for_status()
                 all_data = response.json()
@@ -481,7 +481,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
                 
                 for current_type in item_types:
                     jellyfin_type = 'Movie' if current_type == 'movies' else 'Series'
-                    type_url = f"{Config.JELLYFIN_URL}/Users/{Config.JELLYFIN_USER_ID}/Items?IncludeItemTypes={jellyfin_type}&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
+                    type_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes={jellyfin_type}&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
                     response = requests.get(type_url, headers=headers, timeout=10)
                     response.raise_for_status()
                     type_data = response.json()
@@ -522,7 +522,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
             # For other sorting methods, keep movies and series separate as before
             if item_type == 'movies' or item_type is None:
                 print(f"Fetching movies from Jellyfin (sorted by {sort_by})...")
-                movies_url = f"{Config.JELLYFIN_URL}/Users/{Config.JELLYFIN_USER_ID}/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
+                movies_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
                 response = requests.get(movies_url, headers=headers, timeout=10)
                 response.raise_for_status()
                 movies_data = response.json()
@@ -545,7 +545,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
 
             if item_type == 'series' or item_type is None:
                 print(f"Fetching TV shows from Jellyfin (sorted by {sort_by})...")
-                shows_url = f"{Config.JELLYFIN_URL}/Users/{Config.JELLYFIN_USER_ID}/Items?IncludeItemTypes=Series&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
+                shows_url = f"{Config.JELLYFIN_URL}/Items?IncludeItemTypes=Series&Recursive=true&Fields=Id,Name,ProductionYear,Path,ImageTags,DateCreated&SortBy={sort_by_param}&SortOrder={sort_order}"
                 response = requests.get(shows_url, headers=headers, timeout=10)
                 response.raise_for_status()
                 shows_data = response.json()
