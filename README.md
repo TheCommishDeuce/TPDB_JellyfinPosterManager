@@ -35,13 +35,12 @@ A modern web application for automatically finding and uploading high-quality po
 - Automatic image format conversion (WebP/AVIF → JPEG)
 - Smart error handling and retry logic
 - Comprehensive logging and debugging
-- Secure API key management
 
 ## 📋 Requirements
 
 - **Python 3.8+**
 - **Jellyfin Server** (any recent version)
-- **ThePosterDB API Key** (free registration required)
+- **ThePosterDB Credentials** (free registration required)
 - **Network access** to both Jellyfin server and ThePosterDB
 
 ## 🚀 Quick Start
@@ -125,24 +124,6 @@ import logging
 logging.getLogger().setLevel(logging.DEBUG)  # For verbose logging
 ```
 
-## 🛠️ Troubleshooting
-
-### Common Issues
-
-**"Connection refused" errors**
-- Verify your Jellyfin URL is correct and accessible
-- Check if Jellyfin is running and the port is correct
-- Ensure your API key is valid
-
-**"No posters found" for most items**
-- Verify your ThePosterDB API key is correct
-- Check if ThePosterDB is accessible from your network
-- Some items may not have posters available
-
-**Posters not uploading**
-- Ensure your Jellyfin API key has sufficient permissions
-- Check Jellyfin logs for upload errors
-- Verify network connectivity between the app and Jellyfin
 
 ### Debug Mode
 
