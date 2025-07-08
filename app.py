@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from poster_scraper import *
 from config import Config
+import threading
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -658,24 +659,31 @@ def create_placeholder_thumbnail():
     '''
     return Response(svg_content, mimetype='image/svg+xml')
 
-if __name__ == '__main__':
-    # Initialize Selenium
+def background_setup():
     try:
         setup_selenium_and_login()
         logging.info("Selenium initialized successfully")
-        
+
         # Test Jellyfin connection
         try:
             server_info = get_jellyfin_server_info()
             logging.info(f"Connected to Jellyfin server: {server_info['name']} (v{server_info.get('version', 'Unknown')})")
         except Exception as e:
             logging.warning(f"Could not connect to Jellyfin server: {e}")
-        
-        # Start Flask app
-        app.run(debug=Config.DEBUG, host='0.0.0.0', port=5000)
-        
+
     except Exception as e:
-        logging.error(f"Failed to start application: {e}")
+        logging.error(f"Failed to perform background setup: {e}")
+
+
+if __name__ == '__main__':
+    setup_thread = threading.Thread(target=background_setup)
+    setup_thread.daemon = True
+    setup_thread.start()
+
+    try:
+        app.run(debug=Config.DEBUG, host='0.0.0.0', port=5000)
+    except Exception as e:
+        logging.error(f"Failed to start Flask application: {e}")
     finally:
         teardown_selenium()
         logging.info("Application shutdown complete")
