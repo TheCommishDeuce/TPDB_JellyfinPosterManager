@@ -37,6 +37,7 @@ def setup_selenium_and_login():
     password_input.send_keys(Config.TPDB_PASSWORD)
     password_input.send_keys(Keys.RETURN)
     time.sleep(5)  # Wait for login
+    logging.info("Selenium initialized successfully")
 
 def teardown_selenium():
     global selenium_driver

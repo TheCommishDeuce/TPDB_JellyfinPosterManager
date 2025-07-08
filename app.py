@@ -26,6 +26,7 @@ logging.basicConfig(
 
 # Global storage for session data
 user_sessions = {}
+selenium_ready_event = threading.Event()
 
 @app.route('/')
 def index():
@@ -73,6 +74,10 @@ def index():
 @app.route('/item/<item_id>/posters')
 def get_item_posters(item_id):
     """Get 10 posters for a specific item"""
+    if not selenium_ready_event.wait(timeout=30):
+        logging.error("Selenium not ready in time for /item/<item_id>/posters")
+        return jsonify({'error': 'Backend service (Selenium) is not ready. Please try again in a moment.'}), 503
+
     session_id = session.get('session_id')
     if not session_id or session_id not in user_sessions:
         return jsonify({'error': 'Session not found'}), 400
@@ -128,6 +133,10 @@ def select_poster(item_id):
 @app.route('/upload/<item_id>', methods=['POST'])
 def upload_poster(item_id):
     """Upload selected poster to Jellyfin"""
+    if not selenium_ready_event.wait(timeout=30):
+        logging.error("Selenium not ready in time for /item/<item_id>/posters")
+        return jsonify({'error': 'Backend service (Selenium) is not ready. Please try again in a moment.'}), 503
+
     session_id = session.get('session_id')
     if not session_id or session_id not in user_sessions:
         return jsonify({'error': 'Session not found'}), 400
@@ -182,6 +191,10 @@ def upload_poster(item_id):
 @app.route('/upload-all', methods=['POST'])
 def upload_all_selected():
     """Upload all selected posters"""
+    if not selenium_ready_event.wait(timeout=30):
+        logging.error("Selenium not ready in time for /item/<item_id>/posters")
+        return jsonify({'error': 'Backend service (Selenium) is not ready. Please try again in a moment.'}), 503
+
     session_id = session.get('session_id')
     if not session_id or session_id not in user_sessions:
         return jsonify({'error': 'Session not found'}), 400
@@ -369,7 +382,6 @@ def batch_auto_poster():
         
         # Setup Selenium and login to TPDB
         try:
-            setup_selenium_and_login()
             logging.info("Successfully logged into TPDB")
         except Exception as e:
             logging.error(f"Failed to setup Selenium/login to TPDB: {e}")
@@ -580,6 +592,10 @@ def jellyfin_items():
 def upload_poster_direct():
     """Upload a poster directly from URL to Jellyfin"""
     try:
+        if not selenium_ready_event.wait(timeout=30):
+            logging.error("Selenium not ready in time for /item/<item_id>/posters")
+            return jsonify({'error': 'Backend service (Selenium) is not ready. Please try again in a moment.'}), 503
+
         data = request.get_json()
         item_id = data.get('item_id')
         poster_url = data.get('poster_url')
@@ -589,9 +605,6 @@ def upload_poster_direct():
                 'success': False,
                 'error': 'Missing item_id or poster_url'
             }), 400
-        
-        # Setup Selenium for downloading
-        setup_selenium_and_login()
         
         try:
             # Create temp directory if it doesn't exist
@@ -662,7 +675,7 @@ def create_placeholder_thumbnail():
 def background_setup():
     try:
         setup_selenium_and_login()
-        logging.info("Selenium initialized successfully")
+        selenium_ready_event.set()
 
         # Test Jellyfin connection
         try:
