@@ -64,6 +64,9 @@ JELLYFIN_USER_ID = ""
 TPDB_EMAIL = ""
 TPDB_PASSWORD = ""
 
+# TMDB Configuration
+TMDB_API_KEY = ""
+
 # Application Settings
 MAX_POSTERS_PER_ITEM = 18
 TEMP_POSTER_DIR = "temp_posters"
