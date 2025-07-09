@@ -46,6 +46,9 @@ A modern web application for automatically finding and uploading high-quality po
 ## 🚀 Quick Start
 
 ### 1. Clone the Repository
+```bash
+git clone https://github.com/TheCommishDeuce/TPDB_JellyfinPosterManager
+```
 ### 2. Install Dependencies
 ```bash
 pip install -r requirements.txt
