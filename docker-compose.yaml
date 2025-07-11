@@ -9,8 +9,8 @@
 # https://github.com/docker/awesome-compose
 services:
   tpdb-jellyfinpostermanager:
-    build:
-      context: .
+    container_name: jellyfinpostermanager
+    image: ndauphin/tpdb-jellyfinpostermanager:latest
     ports:
       - 5000:5000 # Update for your use-case
     volumes:
