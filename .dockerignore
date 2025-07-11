@@ -30,6 +30,6 @@
 **/obj
 **/secrets.dev.yaml
 **/values.dev.yaml
-*app.log*
+**/app.log
 LICENSE
 README.md

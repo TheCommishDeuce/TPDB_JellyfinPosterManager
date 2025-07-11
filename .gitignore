@@ -54,4 +54,4 @@ ENV/
 env.bak/
 venv.bak/
 
-*app.log*
+*app.log
