@@ -1,0 +1,30 @@
+# Comments are provided throughout this file to help you get started.
+# If you need more help, visit the Docker Compose reference guide at
+# https://docs.docker.com/go/compose-spec-reference/
+
+# Here the instructions define your application as a service called "server".
+# This service is built from the Dockerfile in the current directory.
+# You can add other services your application may depend on here, such as a
+# database or a cache. For examples, see the Awesome Compose repository:
+# https://github.com/docker/awesome-compose
+services:
+  tpdb-jellyfinpostermanager:
+    build:
+      context: .
+    ports:
+      - 5000:5000 # Update for your use-case
+    volumes:
+      - temp_posters:/TEMP/POSTERS/DIRECTORY # Update for your use-case
+      - logs:/LOGS/DIRECTORY # Update for your use-case
+      - config:/CONFIG/DIRECTORY # Update for your use-case
+    environment:
+      JELLYFIN_URL: 'https://your.jellyfin.url' # Update for your use-case
+      JELLYFIN_API_KEY: JELLYFIN_API_KEY # Update for your use-case
+      TPDB_EMAIL: change@me.com # Update for your use-case
+      TPDB_PASSWORD: TPDB_PASSWORD # Update for your use-case
+      TMDB_API_KEY: TMDB_API_KEY # Update for your use-case
+ 
+volumes:
+  temp_posters:
+  logs:
+  config:
