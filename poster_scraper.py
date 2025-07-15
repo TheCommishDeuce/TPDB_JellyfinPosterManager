@@ -187,11 +187,13 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
 
             if type == "tv":
                 tmdb_title = tmdb_data.get("name")
+                year = tmdb_data.get("first_air_date")[:4]
             else:  # movie
                 tmdb_title = tmdb_data.get("title")
+                year = tmdb_data.get("release_date")[:4]
 
             if tmdb_title:
-                search_query = tmdb_title
+                search_query = f'{tmdb_title} ({year})'
                 logging.info(f"Using TMDB official title for TPDB search: {search_query} (from TMDB ID: {tmdb_id})")
             else:
                 logging.warning(
