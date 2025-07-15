@@ -11,24 +11,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
     posterModal = new bootstrap.Modal(document.getElementById('posterModal'));
     resultsModal = new bootstrap.Modal(document.getElementById('resultsModal'));
-    var dropdownToggles = document.querySelectorAll('[data-bs-toggle="dropdown"]');
-    dropdownToggles.forEach(function(toggle) {
-        new bootstrap.Dropdown(toggle, {
-            popperConfig: function(defaultBsPopperConfig) {
-                defaultBsPopperConfig.modifiers.push({
-                    name: 'appendToBody',
-                    enabled: true,
-                    phase: 'write',
-                    fn({ state }) {
-                        if (state.elements && state.elements.popper && state.elements.popper.parentNode !== document.body) {
-                            document.body.appendChild(state.elements.popper);
-                        }
-                    }
-                });
-                return defaultBsPopperConfig;
-            }
-        });
-    });
+    
     console.log('Jellyfin Poster Manager initialized');
 });
 
