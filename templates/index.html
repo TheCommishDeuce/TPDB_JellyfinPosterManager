@@ -108,8 +108,7 @@
 <!-- Auto Batch Operations - Separate card with higher z-index -->
 <div class="row mb-4">
     <div class="col-12">
-        <!-- Removed z-index from this card -->
-        <div class="card" style="position: relative;">
+        <div class="card" style="position: relative; z-index: 1070;">
             <div class="card-body py-3">
                 <div class="row align-items-center">
                     <div class="col-md-8">
@@ -121,14 +120,14 @@
                         </small>
                     </div>
                     <div class="col-md-4 text-md-end">
-                        <!-- No z-index on dropdown -->
-                        <div class="dropdown">
+                        <div class="dropdown" style="position: relative; z-index: 1071;">
                             <button type="button" class="btn btn-outline-primary dropdown-toggle" 
-                                    data-bs-toggle="dropdown" aria-expanded="false" id="autoPosterBtn">
+                                    data-bs-toggle="dropdown" aria-expanded="false" id="autoPosterBtn"
+                                    style="position: relative; z-index: 1072;">
                                 <i class="fas fa-magic me-1"></i>
                                 Auto-Get Posters
                             </button>
-                            <ul class="dropdown-menu">
+                            <ul class="dropdown-menu" style="position: absolute; z-index: 1073 !important;">
                                 <li>
                                     <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('no-poster')">
                                         <i class="fas fa-exclamation-circle me-2 text-warning"></i>
@@ -390,11 +389,19 @@
     color: white;
 }
 
-/* CHANGED: Remove or lower z-index for dropdowns and cards */
-.dropdown,
-.dropdown-menu,
+/* Fix dropdown z-index to appear above cards */
+.dropdown {
+    position: relative;
+    z-index: 1050;
+}
+
+.dropdown-menu {
+    z-index: 1051 !important;
+    position: absolute !important;
+}
+
 .dropdown-menu.show {
-    z-index: auto !important;
+    z-index: 1052 !important;
 }
 
 /* Item visibility for filtering */
