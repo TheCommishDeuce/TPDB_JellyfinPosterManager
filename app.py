@@ -28,6 +28,9 @@ user_sessions = {}
 selenium_ready_event = threading.Event()
 BATCH_DELAY_SEC = getattr(Config, 'TPDB_BATCH_DELAY_SEC', 1.5)
 FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR, 'failed.log'))
+RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_DIR, 'results.log'))
+auto_batch_jobs = {}
+auto_batch_jobs_lock = threading.Lock()
 
 
 def _evict_stale_user_sessions(max_age_sec=7200):
@@ -71,14 +74,205 @@ def _sweep_stale_temp_posters(max_age_sec=3600):
         logging.info("Removed %d stale temp poster files.", removed_count)
 
 
+def _create_auto_batch_job(target_filter, skip_processed=False):
+    job_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+    job = {
+        'job_id': job_id,
+        'filter': target_filter,
+        'skip_processed': skip_processed,
+        'status': 'starting',
+        'phase': 'starting',
+        'message': 'Starting automatic poster batch...',
+        'cancel_requested': False,
+        'current_item': None,
+        'current_item_id': None,
+        'current_item_type': None,
+        'current_item_year': None,
+        'old_poster_url': None,
+        'new_poster_url': None,
+        'total_items': 0,
+        'processed': 0,
+        'remaining': 0,
+        'successful': 0,
+        'failed': 0,
+        'results': [],
+        'done': False,
+        'success': None,
+        'error': None,
+        'created_at': now,
+        'updated_at': now,
+    }
+    with auto_batch_jobs_lock:
+        auto_batch_jobs[job_id] = job
+    return job_id
+
+
+def _update_auto_batch_job(job_id, **updates):
+    updates['updated_at'] = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+    with auto_batch_jobs_lock:
+        job = auto_batch_jobs.get(job_id)
+        if not job:
+            return
+        job.update(updates)
+        if 'processed' in updates or 'total_items' in updates:
+            job['remaining'] = max(job.get('total_items', 0) - job.get('processed', 0), 0)
+
+
+def _get_auto_batch_job(job_id):
+    with auto_batch_jobs_lock:
+        job = auto_batch_jobs.get(job_id)
+        if not job:
+            return None
+        snapshot = dict(job)
+        snapshot['results'] = list(job.get('results', []))
+        return snapshot
+
+
+def _is_auto_batch_cancelled(job_id):
+    with auto_batch_jobs_lock:
+        job = auto_batch_jobs.get(job_id)
+        return bool(job and job.get('cancel_requested'))
+
+
+def _cancel_auto_batch_job(job_id):
+    with auto_batch_jobs_lock:
+        job = auto_batch_jobs.get(job_id)
+        if not job:
+            return None
+        if job.get('done'):
+            return dict(job)
+        job['cancel_requested'] = True
+        job['status'] = 'cancelling'
+        job['phase'] = 'cancelling'
+        job['message'] = 'Cancelling after the current step...'
+        job['updated_at'] = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+        return dict(job)
+
+
+def _finish_auto_batch_cancelled(job_id, results, successful_count, failed_count):
+    _update_auto_batch_job(
+        job_id,
+        status='cancelled',
+        phase='cancelled',
+        message='Automatic batch cancelled.',
+        current_item=None,
+        current_item_id=None,
+        old_poster_url=None,
+        new_poster_url=None,
+        results=list(results),
+        successful=successful_count,
+        failed=failed_count,
+        done=True,
+        success=False,
+        error='Cancelled by user',
+    )
+
+
 def _get_failed_log_path():
     return FAILED_LOG_FILE
+
+
+def _get_results_log_path():
+    return RESULTS_LOG_FILE
 
 
 def _write_failed_log_entry(entry):
     os.makedirs(Config.LOG_DIR, exist_ok=True)
     with open(_get_failed_log_path(), 'a', encoding='utf-8') as failed_log:
         failed_log.write(json.dumps(entry, ensure_ascii=False) + '\n')
+
+
+def _write_results_log_entry(entry):
+    os.makedirs(Config.LOG_DIR, exist_ok=True)
+    with open(_get_results_log_path(), 'a', encoding='utf-8') as results_log:
+        results_log.write(json.dumps(entry, ensure_ascii=False) + '\n')
+
+
+def _log_processed_item(item=None, operation='auto-poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None):
+    """Append one structured successful poster application entry to results.log."""
+    try:
+        resolved_item = item
+        resolved_item_id = item_id or (item or {}).get('id')
+        resolved_item_title = item_title or (item or {}).get('title') or 'Unknown'
+        resolved_item_type = item_type or (item or {}).get('type')
+        resolved_item_year = item_year if item_year is not None else (item or {}).get('year')
+        entry = {
+            'id': str(uuid.uuid4()),
+            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'status': 'success',
+            'operation': operation,
+            'item_id': resolved_item_id,
+            'item_title': resolved_item_title,
+            'item_type': resolved_item_type,
+            'item_year': resolved_item_year,
+            'poster_url': poster_url,
+        }
+        _write_results_log_entry(entry)
+        _log_resolved_item(
+            resolved_item,
+            operation=operation,
+            poster_url=poster_url,
+            item_id=resolved_item_id,
+            item_title=resolved_item_title,
+            item_type=resolved_item_type,
+            item_year=resolved_item_year,
+        )
+    except Exception as results_log_error:
+        logging.warning(f"Failed to write processed item log: {results_log_error}")
+
+
+def _read_processed_item_ids():
+    results_log_path = _get_results_log_path()
+    if not os.path.exists(results_log_path):
+        return set()
+
+    processed_item_ids = set()
+    with open(results_log_path, 'r', encoding='utf-8') as results_log:
+        for line in results_log:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get('status') == 'success' and entry.get('item_id'):
+                processed_item_ids.add(entry['item_id'])
+
+    return processed_item_ids
+
+
+def _read_processed_items(limit=500):
+    results_log_path = _get_results_log_path()
+    if not os.path.exists(results_log_path):
+        return []
+
+    entries = []
+    with open(results_log_path, 'r', encoding='utf-8') as results_log:
+        for line in results_log:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get('status') == 'success':
+                entries.append(entry)
+
+    latest_entries = []
+    seen_item_ids = set()
+    for entry in reversed(entries):
+        item_id = entry.get('item_id')
+        if not item_id or item_id in seen_item_ids:
+            continue
+        seen_item_ids.add(item_id)
+        latest_entries.append(entry)
+        if len(latest_entries) >= limit:
+            break
+
+    return latest_entries
 
 
 def _log_failed_item(item=None, error=None, operation='poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None):
@@ -223,6 +417,7 @@ def _auto_fetch_and_upload_item(item, operation='retry-auto-poster'):
 
         upload_success = upload_image_to_jellyfin_improved(item_id, save_path)
         if upload_success:
+            _log_processed_item(item, operation=operation, poster_url=poster_url)
             return {
                 'item_id': item_id,
                 'item_title': item_title,
@@ -386,6 +581,7 @@ def upload_poster(item_id):
                 pass
 
             if success:
+                _log_processed_item(item, operation='manual-upload', poster_url=poster_url)
                 return jsonify({'success': True})
             else:
                 _log_failed_item(item, 'Failed to upload to Jellyfin', operation='manual-upload', poster_url=poster_url)
@@ -446,7 +642,9 @@ def upload_all_selected():
                     'error': None if success else 'Upload failed'
                 }
                 results.append(result)
-                if not success:
+                if success:
+                    _log_processed_item(item, operation='batch-upload', poster_url=poster_url)
+                else:
                     _log_failed_item(item, result['error'], operation='batch-upload', poster_url=poster_url)
             else:
                 _log_failed_item(item, 'Download failed', operation='batch-upload', poster_url=poster_url)
@@ -613,6 +811,349 @@ def debug_tpdb_search():
             'selenium_url': _get_selenium_current_url(),
         }), 500
 
+
+def _select_auto_batch_target_items(all_items, target_filter, skip_processed=False):
+    if target_filter == 'all':
+        target_items = all_items
+    elif target_filter == 'no-poster':
+        target_items = [item for item in all_items if not item.get('thumbnail_url')]
+    elif target_filter == 'movies':
+        target_items = [item for item in all_items if item.get('type') == 'Movie']
+    elif target_filter == 'series':
+        target_items = [item for item in all_items if item.get('type') == 'Series']
+    else:
+        target_items = []
+
+    # TEMP: constrain auto-poster runs for issue #18 testing.
+    test_titles = {'cowboy bebop', 'crash landing on you', 'claymore'}
+    target_items = [
+        item for item in all_items
+        if (item.get('title') or '').strip().lower() in test_titles
+    ]
+
+    if skip_processed:
+        processed_item_ids = _read_processed_item_ids()
+        target_items = [item for item in target_items if item.get('id') not in processed_item_ids]
+
+    return target_items
+
+
+def _run_auto_batch_job(job_id, target_filter, skip_processed=False):
+    results = []
+    successful_count = 0
+    failed_count = 0
+
+    try:
+        _update_auto_batch_job(job_id, status='running', phase='preparing', message='Preparing TPDB login...')
+        try:
+            if not selenium_driver:
+                setup_selenium_and_login()
+            logging.info("Selenium/TPDB login ready for auto-batch job.")
+        except Exception as e:
+            logging.error(f"Failed to setup Selenium/login to TPDB: {e}")
+            _update_auto_batch_job(
+                job_id,
+                status='failed',
+                phase='failed',
+                message='Failed to login to TPDB',
+                error=f'Failed to login to TPDB: {str(e)}',
+                done=True,
+                success=False,
+            )
+            return
+
+        _update_auto_batch_job(job_id, phase='loading', message='Loading Jellyfin items...')
+        all_items = get_jellyfin_items()
+        target_items = _select_auto_batch_target_items(all_items, target_filter, skip_processed=skip_processed)
+        total_items = len(target_items)
+        _update_auto_batch_job(
+            job_id,
+            total_items=total_items,
+            remaining=total_items,
+            message=f'Found {total_items} item(s) to process.',
+        )
+
+        if not target_items:
+            message = (
+                'No unprocessed items found matching the filter criteria.'
+                if skip_processed else
+                'No items found matching the filter criteria.'
+            )
+            _update_auto_batch_job(
+                job_id,
+                status='completed',
+                phase='completed',
+                message=message,
+                results=[],
+                done=True,
+                success=True,
+            )
+            return
+
+        logging.info(f"Processing {total_items} items for auto-poster job")
+        os.makedirs(Config.TEMP_POSTER_DIR, exist_ok=True)
+        _sweep_stale_temp_posters()
+
+        for i, item in enumerate(target_items):
+            if _is_auto_batch_cancelled(job_id):
+                _finish_auto_batch_cancelled(job_id, results, successful_count, failed_count)
+                return
+
+            item_id = item.get('id', 'Unknown')
+            item_title = item.get('title', 'Unknown')
+            item_year = item.get('year')
+            item_type = item.get('type')
+            old_poster_url = item.get('thumbnail_url')
+            poster_url = None
+
+            try:
+                _update_auto_batch_job(
+                    job_id,
+                    status='running',
+                    phase='searching',
+                    current_item=item_title,
+                    current_item_id=item_id,
+                    current_item_type=item_type,
+                    current_item_year=item_year,
+                    old_poster_url=old_poster_url,
+                    new_poster_url=None,
+                    processed=i,
+                    successful=successful_count,
+                    failed=failed_count,
+                    message=f'Searching posters for {item_title}...',
+                )
+
+                logging.info(f"Processing item {i+1}/{total_items}: {item_title}")
+                posters = search_tpdb_for_posters_multiple(
+                    item_title,
+                    item_year,
+                    item_type,
+                    tmdb_id=item.get('ProviderIds', {}).get('Tmdb'),
+                    max_posters=1,
+                )
+
+                if _is_auto_batch_cancelled(job_id):
+                    _finish_auto_batch_cancelled(job_id, results, successful_count, failed_count)
+                    return
+
+                if not posters:
+                    result = {
+                        'item_id': item_id,
+                        'item_title': item_title,
+                        'success': False,
+                        'error': 'No posters found',
+                        'old_poster_url': old_poster_url,
+                        'poster_url': None
+                    }
+                    _log_failed_item(item, result['error'], operation='auto-poster')
+                    results.append(result)
+                    failed_count += 1
+                    _update_auto_batch_job(
+                        job_id,
+                        phase='failed',
+                        processed=i + 1,
+                        failed=failed_count,
+                        results=list(results),
+                        message=f'No posters found for {item_title}.',
+                    )
+                    continue
+
+                poster_url = posters[0]['url']
+                safe_title = "".join(c for c in item_title if c.isalnum() or c in " _-").rstrip()
+                save_path = os.path.join(Config.TEMP_POSTER_DIR, f"auto_{safe_title}_{item_id}.jpg")
+
+                _update_auto_batch_job(
+                    job_id,
+                    phase='downloading',
+                    new_poster_url=poster_url,
+                    message=f'Downloading poster for {item_title}...'
+                )
+                if _is_auto_batch_cancelled(job_id):
+                    _finish_auto_batch_cancelled(job_id, results, successful_count, failed_count)
+                    return
+
+                if download_image_with_cookies(poster_url, save_path):
+                    _update_auto_batch_job(job_id, phase='applying', message=f'Applying poster to {item_title}...')
+                    if _is_auto_batch_cancelled(job_id):
+                        _finish_auto_batch_cancelled(job_id, results, successful_count, failed_count)
+                        return
+
+                    upload_success = upload_image_to_jellyfin_improved(item_id, save_path)
+
+                    try:
+                        if os.path.exists(save_path):
+                            os.remove(save_path)
+                    except Exception as cleanup_error:
+                        logging.warning(f"Failed to cleanup temp file {save_path}: {cleanup_error}")
+
+                    if upload_success:
+                        _log_processed_item(item, operation='auto-poster', poster_url=poster_url)
+                        result = {
+                            'item_id': item_id,
+                            'item_title': item_title,
+                            'success': True,
+                            'error': None,
+                            'old_poster_url': old_poster_url,
+                            'poster_url': poster_url
+                        }
+                        results.append(result)
+                        successful_count += 1
+                        logging.info(f"Successfully uploaded poster for: {item_title}")
+                        _update_auto_batch_job(
+                            job_id,
+                            phase='applied',
+                            processed=i + 1,
+                            successful=successful_count,
+                            results=list(results),
+                            message=f'Applied poster to {item_title}.',
+                        )
+                    else:
+                        result = {
+                            'item_id': item_id,
+                            'item_title': item_title,
+                            'success': False,
+                            'error': 'Failed to upload to Jellyfin',
+                            'old_poster_url': old_poster_url,
+                            'poster_url': poster_url
+                        }
+                        _log_failed_item(item, result['error'], operation='auto-poster', poster_url=poster_url)
+                        results.append(result)
+                        failed_count += 1
+                        _update_auto_batch_job(
+                            job_id,
+                            phase='failed',
+                            processed=i + 1,
+                            failed=failed_count,
+                            results=list(results),
+                            message=f'Failed to apply poster to {item_title}.',
+                        )
+                else:
+                    result = {
+                        'item_id': item_id,
+                        'item_title': item_title,
+                        'success': False,
+                        'error': 'Failed to download poster',
+                        'old_poster_url': old_poster_url,
+                        'poster_url': poster_url
+                    }
+                    _log_failed_item(item, result['error'], operation='auto-poster', poster_url=poster_url)
+                    results.append(result)
+                    failed_count += 1
+                    _update_auto_batch_job(
+                        job_id,
+                        phase='failed',
+                        processed=i + 1,
+                        failed=failed_count,
+                        results=list(results),
+                        message=f'Failed to download poster for {item_title}.',
+                    )
+            except TPDBRateLimited as e:
+                rate_limited_error = str(e)
+                logging.warning(f"TPDB rate-limit detected during batch job; aborting early: {rate_limited_error}")
+                result = {
+                    'item_id': item_id,
+                    'item_title': item_title,
+                    'success': False,
+                    'error': f'Aborted due to TPDB rate limit: {rate_limited_error}',
+                    'old_poster_url': old_poster_url,
+                    'poster_url': None
+                }
+                _log_failed_item(item, result['error'], operation='auto-poster')
+                results.append(result)
+                failed_count += 1
+                _update_auto_batch_job(
+                    job_id,
+                    status='failed',
+                    phase='rate_limited',
+                    processed=i + 1,
+                    failed=failed_count,
+                    results=list(results),
+                    message='Batch aborted due to TPDB rate limit.',
+                    error=result['error'],
+                    done=True,
+                    success=False,
+                )
+                return
+            except Exception as e:
+                logging.error(f"Error processing item {item_title}: {e}")
+                result = {
+                    'item_id': item_id,
+                    'item_title': item_title,
+                    'success': False,
+                    'error': str(e),
+                    'old_poster_url': old_poster_url,
+                    'poster_url': None
+                }
+                _log_failed_item(item, e, operation='auto-poster')
+                results.append(result)
+                failed_count += 1
+                _update_auto_batch_job(
+                    job_id,
+                    phase='failed',
+                    processed=i + 1,
+                    failed=failed_count,
+                    results=list(results),
+                    message=f'Failed processing {item_title}.',
+                )
+            finally:
+                time.sleep(BATCH_DELAY_SEC)
+
+        _update_auto_batch_job(
+            job_id,
+            status='completed',
+            phase='completed',
+            current_item=None,
+            processed=len(results),
+            successful=successful_count,
+            failed=failed_count,
+            results=list(results),
+            message=f'Batch completed: {successful_count} successful, {failed_count} failed.',
+            done=True,
+            success=True,
+        )
+    except Exception as e:
+        logging.error(f"Error in auto-batch job: {e}")
+        _update_auto_batch_job(
+            job_id,
+            status='failed',
+            phase='failed',
+            message='Automatic batch failed.',
+            error=str(e),
+            results=list(results),
+            successful=successful_count,
+            failed=failed_count,
+            done=True,
+            success=False,
+        )
+
+
+@app.route('/batch-auto-poster/start', methods=['POST'])
+def start_batch_auto_poster():
+    data = request.get_json() or {}
+    target_filter = data.get('filter', 'no-poster')
+    skip_processed = bool(data.get('skip_processed'))
+    job_id = _create_auto_batch_job(target_filter, skip_processed=skip_processed)
+    worker = threading.Thread(target=_run_auto_batch_job, args=(job_id, target_filter, skip_processed), daemon=True)
+    worker.start()
+    return jsonify({'success': True, 'job_id': job_id})
+
+
+@app.route('/batch-auto-poster/progress/<job_id>')
+def batch_auto_poster_progress(job_id):
+    job = _get_auto_batch_job(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Batch job not found'}), 404
+    return jsonify({'success': True, 'job': job})
+
+
+@app.route('/batch-auto-poster/cancel/<job_id>', methods=['POST'])
+def cancel_batch_auto_poster(job_id):
+    job = _cancel_auto_batch_job(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Batch job not found'}), 404
+    return jsonify({'success': True, 'job': job})
+
+
 @app.route('/batch-auto-poster', methods=['POST'])
 def batch_auto_poster():
     """
@@ -724,6 +1265,7 @@ def batch_auto_poster():
                         logging.warning(f"Failed to cleanup temp file {save_path}: {cleanup_error}")
 
                     if upload_success:
+                        _log_processed_item(item, operation='auto-poster', poster_url=poster_url)
                         results.append({
                             'item_id': item_id,
                             'item_title': item_title,
@@ -828,6 +1370,21 @@ def failed_items():
         })
     except Exception as e:
         logging.error(f"Error reading failed items log: {e}")
+        return jsonify({'items': [], 'error': str(e)}), 500
+
+
+@app.route('/processed-items')
+def processed_items():
+    """Return the most recent successful poster applications from results.log."""
+    limit = request.args.get('limit', default=500, type=int)
+    limit = max(1, min(limit, 1000))
+    try:
+        return jsonify({
+            'items': _read_processed_items(limit=limit),
+            'log_file': _get_results_log_path(),
+        })
+    except Exception as e:
+        logging.error(f"Error reading processed items log: {e}")
         return jsonify({'items': [], 'error': str(e)}), 500
 
 
@@ -992,6 +1549,7 @@ def upload_poster_direct():
                 logging.warning(f"Failed to cleanup temp file {save_path}: {cleanup_error}")
 
             if upload_success:
+                _log_processed_item(item, operation='direct-upload', poster_url=poster_url)
                 return jsonify({'success': True, 'message': 'Poster uploaded successfully'})
             else:
                 _log_failed_item(item, 'Failed to upload to Jellyfin', operation='direct-upload', poster_url=poster_url)

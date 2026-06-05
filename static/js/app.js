@@ -70,6 +70,12 @@ let posterModal = null;
 let resultsModal = null;
 let failedItemsPanelVisible = false;
 let activeFailedItemIds = new Set();
+let activeFailedItemDetails = new Map();
+let activeProcessedItemDetails = new Map();
+let autoBatchPollTimer = null;
+let currentAutoBatchJobId = null;
+let autoBatchStartedAt = null;
+let manualSelectionVisible = false;
 
 document.addEventListener('DOMContentLoaded', function() {
     // Theme first
@@ -91,6 +97,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize counters/buttons
     updateUploadAllButton();
     loadFailedItems();
+    loadProcessedItems();
 
     // If URL has filter param, apply it on load
     const urlParams = new URLSearchParams(window.location.search);
@@ -133,6 +140,7 @@ function filterContent(type) {
         url.searchParams.set('type', type); // keep 'movies'/'series'
     }
     window.history.pushState({}, '', url);
+    applyProcessedItemMarkers(activeProcessedItemDetails);
     applyFailedItemMarkers(activeFailedItemIds);
 }
 
@@ -384,6 +392,7 @@ async function uploadAllSelected() {
 
         showBatchResults(data.results);
         loadFailedItems({ autoExpand: true });
+        loadProcessedItems();
 
         // Refresh after short delay to update any thumbnails
         setTimeout(() => {
@@ -514,9 +523,11 @@ function renderBatchResults(results, filter) {
 function updateUploadAllButton() {
     const uploadBtn = document.getElementById('uploadAllBtn');
     const selectedCountSpan = document.getElementById('selectedCount');
+    const toolbarCount = document.getElementById('manualSelectionToolbarCount');
     const selectedCount = Object.keys(selectedPosters).length;
 
     if (selectedCountSpan) selectedCountSpan.textContent = selectedCount;
+    if (toolbarCount) toolbarCount.textContent = selectedCount;
 
     if (uploadBtn) {
         if (selectedCount > 0) {
@@ -527,6 +538,26 @@ function updateUploadAllButton() {
             uploadBtn.innerHTML = '<i class="fas fa-cloud-upload-alt me-2"></i>Upload All Selected';
         }
     }
+
+    updateManualSelectionVisibility();
+}
+
+function updateManualSelectionVisibility() {
+    const manualRow = document.getElementById('manualSelectionRow');
+    const toolbarBtn = document.getElementById('manualSelectionToolbarBtn');
+    const selectedCount = Object.keys(selectedPosters).length;
+    const shouldShow = selectedCount > 0 || manualSelectionVisible;
+
+    if (manualRow) manualRow.style.display = shouldShow ? '' : 'none';
+    if (toolbarBtn) {
+        toolbarBtn.classList.toggle('active', shouldShow);
+        toolbarBtn.setAttribute('aria-expanded', shouldShow ? 'true' : 'false');
+    }
+}
+
+function toggleManualSelectionPanel() {
+    manualSelectionVisible = !manualSelectionVisible;
+    updateManualSelectionVisibility();
 }
 
 // Notifications
@@ -571,6 +602,13 @@ function formatOperationLabel(operation) {
         .replace(/\b\w/g, letter => letter.toUpperCase());
 }
 
+function formatLogTimestamp(timestamp) {
+    if (!timestamp) return 'Unknown time';
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return timestamp;
+    return date.toLocaleString();
+}
+
 async function loadFailedItems(options = {}) {
     const failedItemsBody = document.getElementById('failedItemsBody');
     const failedItemsCount = document.getElementById('failedItemsCount');
@@ -587,8 +625,12 @@ async function loadFailedItems(options = {}) {
 
         const items = data.items || [];
         activeFailedItemIds = new Set(items.map(item => item.item_id).filter(Boolean));
+        activeFailedItemDetails = new Map(items.filter(item => item.item_id).map(item => [item.item_id, item]));
+        applyProcessedItemMarkers(activeProcessedItemDetails);
         applyFailedItemMarkers(activeFailedItemIds);
         failedItemsCount.textContent = items.length;
+        const toolbarCount = document.getElementById('failedItemsToolbarCount');
+        if (toolbarCount) toolbarCount.textContent = items.length;
         retryAllBtn.disabled = items.length === 0;
         clearBtn.disabled = items.length === 0;
         failedItemsRow.style.display = items.length === 0 ? 'none' : '';
@@ -646,24 +688,71 @@ async function loadFailedItems(options = {}) {
 
 function updateFailedItemsPanelVisibility() {
     const failedItemsPanel = document.getElementById('failedItemsPanel');
-    const toggleBtn = document.getElementById('toggleFailedItemsBtn');
     const failedItemsCount = document.getElementById('failedItemsCount');
     const failedItemsRow = document.getElementById('failedItemsRow');
-    if (!failedItemsPanel || !toggleBtn || !failedItemsCount || !failedItemsRow) return;
+    const toolbarBtn = document.getElementById('failedItemsToolbarBtn');
+    if (!failedItemsPanel || !failedItemsCount || !failedItemsRow) return;
 
     const hasItems = Number(failedItemsCount.textContent) > 0;
-    failedItemsRow.style.display = hasItems ? '' : 'none';
-    toggleBtn.disabled = !hasItems;
+    failedItemsRow.style.display = hasItems && failedItemsPanelVisible ? '' : 'none';
     failedItemsPanel.style.display = hasItems && failedItemsPanelVisible ? 'block' : 'none';
-    toggleBtn.setAttribute('aria-expanded', hasItems && failedItemsPanelVisible ? 'true' : 'false');
-    toggleBtn.innerHTML = hasItems && failedItemsPanelVisible ?
-        '<i class="fas fa-eye-slash me-1"></i>Hide' :
-        '<i class="fas fa-eye me-1"></i>Show';
+    if (toolbarBtn) {
+        toolbarBtn.disabled = !hasItems;
+        toolbarBtn.classList.toggle('active', hasItems && failedItemsPanelVisible);
+        toolbarBtn.setAttribute('aria-expanded', hasItems && failedItemsPanelVisible ? 'true' : 'false');
+    }
 }
 
-function toggleFailedItemsPanel() {
+async function toggleFailedItemsFromToolbar() {
+    if (!failedItemsPanelVisible) {
+        await loadFailedItems();
+    }
+    const failedItemsCount = document.getElementById('failedItemsCount');
+    if (!failedItemsCount || Number(failedItemsCount.textContent) === 0) return;
     failedItemsPanelVisible = !failedItemsPanelVisible;
     updateFailedItemsPanelVisibility();
+}
+
+async function loadProcessedItems() {
+    try {
+        const response = await fetch('/processed-items?limit=1000');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to load processed items');
+
+        const items = data.items || [];
+        activeProcessedItemDetails = new Map(items.filter(item => item.item_id).map(item => [item.item_id, item]));
+        applyProcessedItemMarkers(activeProcessedItemDetails);
+        applyFailedItemMarkers(activeFailedItemIds);
+    } catch (error) {
+        console.error('Processed items error:', error);
+    }
+}
+
+function applyProcessedItemMarkers(itemDetails) {
+    document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
+        const itemId = wrapper.getAttribute('data-item-id');
+        const card = wrapper.querySelector('.item-card');
+        const posterWrapper = wrapper.querySelector('.card-img-top-wrapper');
+        if (!card || !posterWrapper) return;
+
+        const detail = itemDetails.get(itemId);
+        const isProcessed = Boolean(detail) && !activeFailedItemIds.has(itemId);
+        card.classList.toggle('processed-item', isProcessed);
+
+        let overlay = wrapper.querySelector('.processed-item-overlay');
+        if (isProcessed && !overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'processed-item-overlay';
+            posterWrapper.insertBefore(overlay, posterWrapper.firstChild);
+        }
+
+        if (isProcessed && overlay) {
+            overlay.title = `Processed ${formatLogTimestamp(detail.timestamp)}`;
+            overlay.innerHTML = '<span class="badge bg-success"><i class="fas fa-check me-1"></i>Processed</span>';
+        } else if (!isProcessed && overlay) {
+            overlay.remove();
+        }
+    });
 }
 
 function applyFailedItemMarkers(itemIds) {
@@ -674,14 +763,27 @@ function applyFailedItemMarkers(itemIds) {
         if (!card || !posterWrapper) return;
 
         const isFailed = itemIds.has(itemId);
+        const detail = activeFailedItemDetails.get(itemId);
         card.classList.toggle('failed-item', isFailed);
+
+        const processedOverlay = wrapper.querySelector('.processed-item-overlay');
+        if (isFailed && processedOverlay) {
+            processedOverlay.remove();
+            card.classList.remove('processed-item');
+        }
 
         let overlay = wrapper.querySelector('.failed-item-overlay');
         if (isFailed && !overlay) {
             overlay = document.createElement('div');
             overlay.className = 'failed-item-overlay';
-            overlay.innerHTML = '<span class="badge bg-danger"><i class="fas fa-triangle-exclamation me-1"></i>Failed</span>';
             posterWrapper.insertBefore(overlay, posterWrapper.firstChild);
+        }
+
+        if (isFailed && overlay) {
+            const reason = detail?.error || 'Unknown failure';
+            const timestamp = formatLogTimestamp(detail?.timestamp);
+            overlay.title = `Failed ${timestamp}\n${reason}`;
+            overlay.innerHTML = '<span class="badge bg-danger"><i class="fas fa-triangle-exclamation me-1"></i>Failed</span>';
         } else if (!isFailed && overlay) {
             overlay.remove();
         }
@@ -732,10 +834,14 @@ async function clearFailedItems() {
         const failedItemsCount = document.getElementById('failedItemsCount');
         const failedItemsPanel = document.getElementById('failedItemsPanel');
         const failedItemsRow = document.getElementById('failedItemsRow');
+        const failedToolbarCount = document.getElementById('failedItemsToolbarCount');
         if (failedItemsBody) failedItemsBody.innerHTML = '';
         if (failedItemsCount) failedItemsCount.textContent = '0';
+        if (failedToolbarCount) failedToolbarCount.textContent = '0';
         activeFailedItemIds = new Set();
+        activeFailedItemDetails = new Map();
         applyFailedItemMarkers(activeFailedItemIds);
+        applyProcessedItemMarkers(activeProcessedItemDetails);
         failedItemsPanelVisible = false;
         if (failedItemsRow) failedItemsRow.style.display = 'none';
         if (failedItemsPanel) updateFailedItemsPanelVisibility();
@@ -771,6 +877,7 @@ async function retryFailedItem(itemId, button) {
 
         showAlert(`Poster retry succeeded for ${data.item_title || itemId}`, 'success');
         loadFailedItems();
+        loadProcessedItems();
     } catch (error) {
         console.error('Retry failed item error:', error);
         showAlert('Retry failed: ' + error.message, 'danger');
@@ -801,6 +908,7 @@ async function retryAllFailedItems() {
 
         showBatchResults(data.results || []);
         loadFailedItems({ autoExpand: true });
+        loadProcessedItems();
     } catch (error) {
         console.error('Retry all failed items error:', error);
         showAlert('Retry all failed: ' + error.message, 'danger');
@@ -808,6 +916,160 @@ async function retryAllFailedItems() {
         if (retryAllBtn) {
             retryAllBtn.disabled = false;
             retryAllBtn.innerHTML = '<i class="fas fa-rotate-right me-1"></i>Retry All';
+        }
+    }
+}
+
+function formatPhaseLabel(phase) {
+    const labels = {
+        starting: 'Starting',
+        preparing: 'Preparing',
+        loading: 'Loading',
+        searching: 'Searching',
+        downloading: 'Downloading',
+        applying: 'Applying',
+        applied: 'Applied',
+        failed: 'Failed',
+        rate_limited: 'Rate Limited',
+        completed: 'Completed'
+    };
+    return labels[phase] || formatOperationLabel(phase || 'starting');
+}
+
+function setAutoBatchRunning(isRunning) {
+    const autoBtn = document.getElementById('autoPosterBtn');
+    const cancelBtn = document.getElementById('cancelAutoBatchBtn');
+
+    if (autoBtn) {
+        autoBtn.disabled = isRunning;
+        autoBtn.innerHTML = isRunning ?
+            '<i class="fas fa-spinner fa-spin me-1"></i> Running...' :
+            '<i class="fas fa-magic me-1"></i> Auto-Get Posters';
+    }
+    if (cancelBtn) {
+        cancelBtn.style.display = isRunning ? 'inline-block' : 'none';
+        cancelBtn.disabled = !isRunning;
+        cancelBtn.innerHTML = '<i class="fas fa-stop me-1"></i>Cancel';
+    }
+}
+
+function formatDuration(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return 'Calculating...';
+    const rounded = Math.round(seconds);
+    const minutes = Math.floor(rounded / 60);
+    const remainingSeconds = rounded % 60;
+    if (minutes <= 0) return `${remainingSeconds}s`;
+    return `${minutes}m ${remainingSeconds}s`;
+}
+
+function updateAutoBatchCurrentPoster(url) {
+    const img = document.getElementById('autoBatchCurrentPoster');
+    const empty = document.getElementById('autoBatchCurrentPosterEmpty');
+    if (!img || !empty) return;
+
+    if (!url) {
+        img.removeAttribute('src');
+        img.style.display = 'none';
+        empty.style.display = 'inline-block';
+        return;
+    }
+
+    img.src = '/jellyfin-image?url=' + encodeURIComponent(url);
+    img.style.display = 'block';
+    empty.style.display = 'none';
+}
+
+function calculateAutoBatchEta(job, processed, remaining) {
+    if (!autoBatchStartedAt || processed <= 0 || remaining <= 0 || job.done) {
+        return job.done ? 'Done' : 'Calculating...';
+    }
+    const elapsedSeconds = (Date.now() - autoBatchStartedAt) / 1000;
+    return formatDuration((elapsedSeconds / processed) * remaining);
+}
+
+function updateAutoBatchProgress(job) {
+    const panel = document.getElementById('autoBatchProgressPanel');
+    if (!panel || !job) return;
+
+    const total = Number(job.total_items || 0);
+    const processed = Number(job.processed || 0);
+    const remaining = Number(job.remaining ?? Math.max(total - processed, 0));
+    const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+    panel.style.display = 'block';
+    document.getElementById('autoBatchProgressStatus').textContent = job.message || 'Running automatic poster batch...';
+    document.getElementById('autoBatchCurrentItem').textContent = job.current_item ? `Current item: ${job.current_item}` : 'No item currently processing';
+    document.getElementById('autoBatchProgressCounts').textContent = `${processed} / ${total}`;
+    document.getElementById('autoBatchProgressBar').style.width = `${percent}%`;
+    document.getElementById('autoBatchProgressBar').setAttribute('aria-valuenow', String(percent));
+    document.getElementById('autoBatchRemaining').textContent = remaining;
+    document.getElementById('autoBatchSuccessful').textContent = job.successful || 0;
+    document.getElementById('autoBatchFailed').textContent = job.failed || 0;
+    document.getElementById('autoBatchPhase').textContent = formatPhaseLabel(job.phase);
+    document.getElementById('autoBatchEta').textContent = calculateAutoBatchEta(job, processed, remaining);
+    updateAutoBatchCurrentPoster(job.old_poster_url);
+}
+
+function stopAutoBatchPolling() {
+    if (autoBatchPollTimer) {
+        clearInterval(autoBatchPollTimer);
+        autoBatchPollTimer = null;
+    }
+}
+
+async function pollAutoBatchProgress(jobId) {
+    try {
+        const response = await fetch(`/batch-auto-poster/progress/${jobId}`);
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load batch progress');
+
+        const job = data.job;
+        updateAutoBatchProgress(job);
+
+        if (job.done) {
+            stopAutoBatchPolling();
+            setAutoBatchRunning(false);
+            currentAutoBatchJobId = null;
+            loadFailedItems({ autoExpand: true });
+            loadProcessedItems();
+
+            if (job.results && job.results.length > 0) {
+                showBatchResults(job.results);
+            }
+            if (!job.success && job.error) {
+                showAlert(job.error, 'danger');
+            }
+        }
+    } catch (error) {
+        stopAutoBatchPolling();
+        setAutoBatchRunning(false);
+        currentAutoBatchJobId = null;
+        console.error('Auto-batch progress error:', error);
+        showAlert('Failed to update auto-batch progress: ' + error.message, 'danger');
+    }
+}
+
+async function cancelAutoBatch() {
+    if (!currentAutoBatchJobId) return;
+    if (!confirm('Cancel the running Auto-Get Posters job?')) return;
+
+    const cancelBtn = document.getElementById('cancelAutoBatchBtn');
+    if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Cancelling';
+    }
+
+    try {
+        const response = await fetch(`/batch-auto-poster/cancel/${currentAutoBatchJobId}`, { method: 'POST' });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to cancel batch');
+        updateAutoBatchProgress(data.job);
+    } catch (error) {
+        console.error('Auto-batch cancel error:', error);
+        showAlert('Failed to cancel auto-batch: ' + error.message, 'danger');
+        if (cancelBtn) {
+            cancelBtn.disabled = false;
+            cancelBtn.innerHTML = '<i class="fas fa-stop me-1"></i>Cancel';
         }
     }
 }
@@ -823,45 +1085,49 @@ async function startAutoBatchPoster(filter) {
             'movies': 'Automatically find and upload posters for all Movies?',
             'series': 'Automatically find and upload posters for all Series?'
         }[filter] || 'Start automatic poster upload?';
+        const skipProcessed = Boolean(document.getElementById('skipProcessedAutoBatch')?.checked);
+        const fullConfirmText = skipProcessed ?
+            `${confirmText}\n\nAlready processed items in results.log will be skipped.` :
+            confirmText;
 
-        if (!confirm(confirmText)) return;
+        if (!confirm(fullConfirmText)) return;
 
-        const autoBtn = document.getElementById('autoPosterBtn');
-        if (autoBtn) {
-            autoBtn.disabled = true;
-            autoBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Running...';
-        }
+        stopAutoBatchPolling();
+        setAutoBatchRunning(true);
+        currentAutoBatchJobId = null;
+        autoBatchStartedAt = Date.now();
 
-        const lt = document.getElementById('loadingText');
-        if (lt) lt.textContent = 'Running automatic poster batch...';
-        if (loadingModal) loadingModal.show();
+        updateAutoBatchProgress({
+            total_items: 0,
+            processed: 0,
+            remaining: 0,
+            successful: 0,
+            failed: 0,
+            phase: 'starting',
+            message: 'Starting automatic poster batch...',
+            current_item: null,
+            old_poster_url: null,
+            new_poster_url: null
+        });
 
-        const resp = await fetch('/batch-auto-poster', {
+        const resp = await fetch('/batch-auto-poster/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filter })
+            body: JSON.stringify({ filter, skip_processed: skipProcessed })
         });
 
         const data = await resp.json();
-        if (loadingModal) loadingModal.hide();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Automatic batch failed');
 
-        if (!data.success) {
-            showAlert(data.error || 'Automatic batch failed', 'danger');
-            return;
-        }
-
-        showBatchResults(data.results);
-        loadFailedItems({ autoExpand: true });
+        currentAutoBatchJobId = data.job_id;
+        await pollAutoBatchProgress(data.job_id);
+        autoBatchPollTimer = setInterval(() => pollAutoBatchProgress(data.job_id), 1000);
 
     } catch (err) {
         console.error('Auto-batch error:', err);
-        if (loadingModal) loadingModal.hide();
+        stopAutoBatchPolling();
+        setAutoBatchRunning(false);
+        currentAutoBatchJobId = null;
         showAlert('Automatic batch failed: ' + err.message, 'danger');
-    } finally {
-        const autoBtn = document.getElementById('autoPosterBtn');
-        if (autoBtn) {
-            autoBtn.disabled = false;
-            autoBtn.innerHTML = '<i class="fas fa-magic me-1"></i> Auto-Get Posters';
-        }
     }
 }

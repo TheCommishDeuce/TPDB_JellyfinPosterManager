@@ -85,10 +85,13 @@ body {
 .item-card:hover { transform: translateY(-5px); box-shadow: var(--box-shadow-hover); border-color: var(--primary-color); }
 .item-card:hover .jellyfin-poster-large { transform: scale(1.02); }
 .item-card.selected { border: 2px solid var(--success-color); box-shadow: 0 0 15px rgba(40, 167, 69, 0.3); }
+.item-card.processed-item { border-color: var(--success-color); box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.18), var(--box-shadow); }
+.item-card.processed-item:hover { border-color: var(--success-color); box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.28), var(--box-shadow-hover); }
 .item-card.failed-item { border-color: var(--danger-color); box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.25), var(--box-shadow); }
 .item-card.failed-item:hover { border-color: var(--danger-color); box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.35), var(--box-shadow-hover); }
 .item-card.failed-item .find-posters-btn { border: 1px solid var(--danger-color); color: var(--danger-color); }
 .item-card.failed-item .find-posters-btn:hover { background-color: var(--danger-color); color: #fff; }
+.processed-item-overlay { position: absolute; top: 0.5rem; left: 0.5rem; z-index: 10; }
 .failed-item-overlay { position: absolute; top: 0.5rem; left: 0.5rem; z-index: 10; }
 .failed-card-focus { animation: failed-card-pulse 1.4s ease-out; }
 
@@ -102,6 +105,29 @@ body {
 
 /* Selected counter */
 #selectedCount { font-weight: 600; color: var(--primary-color); }
+#manualSelectionToolbarBtn.active #manualSelectionToolbarCount {
+    background-color: var(--primary-color) !important;
+    color: #fff;
+}
+
+/* Auto-batch progress */
+.auto-batch-progress {
+    border-top: 1px solid var(--border-color);
+    padding-top: 1rem;
+}
+.auto-batch-current-preview {
+    align-items: center;
+    background: var(--surface-muted);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    display: flex;
+    flex: 0 0 42px;
+    height: 56px;
+    justify-content: center;
+    overflow: hidden;
+    width: 42px;
+}
+.auto-batch-current-preview img { height: 100%; object-fit: cover; width: 100%; }
 
 /* Modals */
 .modal-dialog { max-width: 1200px; }
@@ -146,6 +172,13 @@ body {
 
 /* Tables in results modal */
 .results-table { color: var(--app-text); }
+.results-table > :not(caption) > * > * {
+    border-bottom-color: var(--border-color);
+    border-top-color: var(--border-color);
+}
+.results-table > :not(:first-child) {
+    border-top: 1px solid var(--border-color);
+}
 .results-table thead th { border-bottom: 1px solid var(--border-color); }
 .results-table tbody td { border-top: 1px solid var(--border-color); }
 
