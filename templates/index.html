@@ -167,6 +167,48 @@
     </div>
 </div>
 
+<!-- Failed Items -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card failed-items-card">
+            <div class="card-body py-3">
+                <div class="row align-items-center g-3">
+                    <div class="col-md-6">
+                        <h5 class="mb-0">
+                            <i class="fas fa-triangle-exclamation me-2"></i>Failed Items
+                            <span class="badge bg-danger ms-2" id="failedItemsCount">0</span>
+                        </h5>
+                        <small class="text-muted">Recent poster fetch or upload failures from failed.log</small>
+                    </div>
+                    <div class="col-md-6 text-md-end">
+                        <button class="btn btn-outline-secondary btn-sm me-2" type="button" onclick="loadFailedItems()">
+                            <i class="fas fa-rotate me-1"></i>Refresh
+                        </button>
+                        <button class="btn btn-outline-warning btn-sm" type="button" id="retryAllFailedBtn" onclick="retryAllFailedItems()" disabled>
+                            <i class="fas fa-rotate-right me-1"></i>Retry All
+                        </button>
+                    </div>
+                </div>
+
+                <div class="table-responsive mt-3" id="failedItemsPanel" style="display: none;">
+                    <table class="table table-sm align-middle results-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Type</th>
+                                <th>Operation</th>
+                                <th>Error</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="failedItemsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Items Grid -->
 <div class="row" id="itemsGrid">
     {% for item in items %}

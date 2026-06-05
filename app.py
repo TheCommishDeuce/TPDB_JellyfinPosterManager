@@ -27,6 +27,7 @@ logging.basicConfig(
 user_sessions = {}
 selenium_ready_event = threading.Event()
 BATCH_DELAY_SEC = getattr(Config, 'TPDB_BATCH_DELAY_SEC', 1.5)
+FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR, 'failed.log'))
 
 
 def _evict_stale_user_sessions(max_age_sec=7200):
@@ -68,6 +69,140 @@ def _sweep_stale_temp_posters(max_age_sec=3600):
             logging.warning(f"Failed to sweep stale temp file {file_path}: {cleanup_error}")
     if removed_count:
         logging.info("Removed %d stale temp poster files.", removed_count)
+
+
+def _get_failed_log_path():
+    return FAILED_LOG_FILE
+
+
+def _log_failed_item(item=None, error=None, operation='poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None):
+    """Append one structured failed item entry to failed.log."""
+    try:
+        os.makedirs(Config.LOG_DIR, exist_ok=True)
+        entry = {
+            'id': str(uuid.uuid4()),
+            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'operation': operation,
+            'item_id': item_id or (item or {}).get('id'),
+            'item_title': item_title or (item or {}).get('title') or 'Unknown',
+            'item_type': item_type or (item or {}).get('type'),
+            'item_year': item_year if item_year is not None else (item or {}).get('year'),
+            'error': str(error or 'Unknown failure'),
+            'poster_url': poster_url,
+        }
+        with open(_get_failed_log_path(), 'a', encoding='utf-8') as failed_log:
+            failed_log.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    except Exception as failed_log_error:
+        logging.warning(f"Failed to write failed item log: {failed_log_error}")
+
+
+def _read_failed_items(limit=100):
+    failed_log_path = _get_failed_log_path()
+    if not os.path.exists(failed_log_path):
+        return []
+
+    entries = []
+    with open(failed_log_path, 'r', encoding='utf-8') as failed_log:
+        for line in failed_log:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                entries.append({
+                    'id': str(uuid.uuid4()),
+                    'timestamp': None,
+                    'operation': 'poster',
+                    'item_id': None,
+                    'item_title': 'Unknown',
+                    'item_type': None,
+                    'item_year': None,
+                    'error': line,
+                    'poster_url': None,
+                })
+
+    return list(reversed(entries[-limit:]))
+
+
+def _find_jellyfin_item(item_id):
+    if not item_id:
+        return None
+
+    session_id = session.get('session_id')
+    session_items = user_sessions.get(session_id, {}).get('items', [])
+    item = next((current_item for current_item in session_items if current_item.get('id') == item_id), None)
+    if item:
+        return item
+
+    return next((current_item for current_item in get_jellyfin_items() if current_item.get('id') == item_id), None)
+
+
+def _auto_fetch_and_upload_item(item):
+    item_id = item['id']
+    item_title = item['title']
+    posters = search_tpdb_for_posters_multiple(
+        item_title,
+        item.get('year'),
+        item.get('type'),
+        tmdb_id=item.get('ProviderIds', {}).get('Tmdb'),
+        max_posters=1,
+    )
+
+    if not posters:
+        error = 'No posters found'
+        _log_failed_item(item, error, operation='retry-auto-poster')
+        return {
+            'item_id': item_id,
+            'item_title': item_title,
+            'success': False,
+            'error': error,
+            'poster_url': None,
+        }
+
+    poster_url = posters[0]['url']
+    os.makedirs(Config.TEMP_POSTER_DIR, exist_ok=True)
+    _sweep_stale_temp_posters()
+    safe_title = "".join(c for c in item_title if c.isalnum() or c in " _-").rstrip()
+    save_path = os.path.join(Config.TEMP_POSTER_DIR, f"retry_{safe_title}_{item_id}.jpg")
+
+    try:
+        if not download_image_with_cookies(poster_url, save_path):
+            error = 'Failed to download poster'
+            _log_failed_item(item, error, operation='retry-auto-poster', poster_url=poster_url)
+            return {
+                'item_id': item_id,
+                'item_title': item_title,
+                'success': False,
+                'error': error,
+                'poster_url': poster_url,
+            }
+
+        upload_success = upload_image_to_jellyfin_improved(item_id, save_path)
+        if upload_success:
+            return {
+                'item_id': item_id,
+                'item_title': item_title,
+                'success': True,
+                'error': None,
+                'poster_url': poster_url,
+            }
+
+        error = 'Failed to upload to Jellyfin'
+        _log_failed_item(item, error, operation='retry-auto-poster', poster_url=poster_url)
+        return {
+            'item_id': item_id,
+            'item_title': item_title,
+            'success': False,
+            'error': error,
+            'poster_url': poster_url,
+        }
+    finally:
+        try:
+            if os.path.exists(save_path):
+                os.remove(save_path)
+        except Exception as cleanup_error:
+            logging.warning(f"Failed to cleanup temp file {save_path}: {cleanup_error}")
 
 @app.route('/')
 def index():
@@ -210,12 +345,15 @@ def upload_poster(item_id):
             if success:
                 return jsonify({'success': True})
             else:
+                _log_failed_item(item, 'Failed to upload to Jellyfin', operation='manual-upload', poster_url=poster_url)
                 return jsonify({'error': 'Failed to upload to Jellyfin'}), 500
         else:
+            _log_failed_item(item, 'Failed to download poster', operation='manual-upload', poster_url=poster_url)
             return jsonify({'error': 'Failed to download poster'}), 500
 
     except Exception as e:
         logging.error(f"Error uploading poster for {item_id}: {e}")
+        _log_failed_item(item, e, operation='manual-upload', poster_url=poster_url, item_id=item_id)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/upload-all', methods=['POST'])
@@ -239,9 +377,11 @@ def upload_all_selected():
     _sweep_stale_temp_posters()
 
     for item_id, poster_url in selections.items():
+        item = None
         try:
             item = next((i for i in items if i['id'] == item_id), None)
             if not item:
+                _log_failed_item(error='Item not found', operation='batch-upload', poster_url=poster_url, item_id=item_id)
                 results.append({'item_id': item_id, 'success': False, 'error': 'Item not found'})
                 continue
 
@@ -256,13 +396,17 @@ def upload_all_selected():
                 except Exception:
                     pass
 
-                results.append({
+                result = {
                     'item_id': item_id,
                     'item_title': item['title'],
                     'success': success,
                     'error': None if success else 'Upload failed'
-                })
+                }
+                results.append(result)
+                if not success:
+                    _log_failed_item(item, result['error'], operation='batch-upload', poster_url=poster_url)
             else:
+                _log_failed_item(item, 'Download failed', operation='batch-upload', poster_url=poster_url)
                 results.append({
                     'item_id': item_id,
                     'item_title': item['title'],
@@ -271,9 +415,10 @@ def upload_all_selected():
                 })
 
         except Exception as e:
+            _log_failed_item(item, e, operation='batch-upload', poster_url=poster_url, item_id=item_id)
             results.append({
                 'item_id': item_id,
-                'item_title': item.get('title', 'Unknown'),
+                'item_title': item.get('title', 'Unknown') if item else 'Unknown',
                 'success': False,
                 'error': str(e)
             })
@@ -509,6 +654,7 @@ def batch_auto_poster():
                 )
 
                 if not posters:
+                    _log_failed_item(item, 'No posters found', operation='auto-poster')
                     results.append({
                         'item_id': item_id,
                         'item_title': item_title,
@@ -545,6 +691,7 @@ def batch_auto_poster():
                         successful_count += 1
                         logging.info(f"Successfully uploaded poster for: {item_title}")
                     else:
+                        _log_failed_item(item, 'Failed to upload to Jellyfin', operation='auto-poster', poster_url=poster_url)
                         results.append({
                             'item_id': item_id,
                             'item_title': item_title,
@@ -554,6 +701,7 @@ def batch_auto_poster():
                         })
                         failed_count += 1
                 else:
+                    _log_failed_item(item, 'Failed to download poster', operation='auto-poster', poster_url=poster_url)
                     results.append({
                         'item_id': item_id,
                         'item_title': item_title,
@@ -565,6 +713,7 @@ def batch_auto_poster():
             except TPDBRateLimited as e:
                 rate_limited_error = str(e)
                 logging.warning(f"TPDB rate-limit detected during batch; aborting early: {rate_limited_error}")
+                _log_failed_item(item, f'Aborted due to TPDB rate limit: {rate_limited_error}', operation='auto-poster')
                 results.append({
                     'item_id': item.get('id', 'Unknown'),
                     'item_title': item.get('title', 'Unknown'),
@@ -576,6 +725,7 @@ def batch_auto_poster():
                 break
             except Exception as e:
                 logging.error(f"Error processing item {item.get('title', 'Unknown')}: {e}")
+                _log_failed_item(item, e, operation='auto-poster')
                 results.append({
                     'item_id': item.get('id', 'Unknown'),
                     'item_title': item.get('title', 'Unknown'),
@@ -621,6 +771,104 @@ def batch_auto_poster():
             'successful': 0,
             'failed': 0
         }), 500
+
+
+@app.route('/failed-items')
+def failed_items():
+    """Return the most recent failed poster operations from failed.log."""
+    limit = request.args.get('limit', default=100, type=int)
+    limit = max(1, min(limit, 500))
+    try:
+        return jsonify({
+            'items': _read_failed_items(limit=limit),
+            'log_file': _get_failed_log_path(),
+        })
+    except Exception as e:
+        logging.error(f"Error reading failed items log: {e}")
+        return jsonify({'items': [], 'error': str(e)}), 500
+
+
+@app.route('/failed-items/retry', methods=['POST'])
+def retry_failed_item():
+    """Retry auto-fetching and uploading a poster for one failed item."""
+    if not selenium_ready_event.wait(timeout=30):
+        logging.error("Selenium not ready in time for /failed-items/retry")
+        return jsonify({'success': False, 'error': 'Backend service (Selenium) is not ready. Please try again in a moment.'}), 503
+
+    data = request.get_json() or {}
+    item_id = data.get('item_id')
+    if not item_id:
+        return jsonify({'success': False, 'error': 'Missing item_id'}), 400
+
+    try:
+        item = _find_jellyfin_item(item_id)
+        if not item:
+            _log_failed_item(error='Item not found', operation='retry-auto-poster', item_id=item_id)
+            return jsonify({'success': False, 'error': 'Item not found', 'item_id': item_id}), 404
+
+        result = _auto_fetch_and_upload_item(item)
+        return jsonify(result), 200 if result['success'] else 500
+    except TPDBRateLimited as e:
+        _log_failed_item(error=e, operation='retry-auto-poster', item_id=item_id)
+        return jsonify({'success': False, 'error': str(e), 'item_id': item_id}), 429
+    except Exception as e:
+        logging.error(f"Error retrying failed item {item_id}: {e}")
+        _log_failed_item(error=e, operation='retry-auto-poster', item_id=item_id)
+        return jsonify({'success': False, 'error': str(e), 'item_id': item_id}), 500
+
+
+@app.route('/failed-items/retry-all', methods=['POST'])
+def retry_all_failed_items():
+    """Retry auto-fetching and uploading posters for recent failed item IDs."""
+    if not selenium_ready_event.wait(timeout=30):
+        logging.error("Selenium not ready in time for /failed-items/retry-all")
+        return jsonify({'success': False, 'error': 'Backend service (Selenium) is not ready. Please try again in a moment.'}), 503
+
+    data = request.get_json() or {}
+    try:
+        limit = int(data.get('limit', 100))
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 500))
+    failed_entries = _read_failed_items(limit=limit)
+    item_ids = []
+    for entry in failed_entries:
+        item_id = entry.get('item_id')
+        if item_id and item_id not in item_ids:
+            item_ids.append(item_id)
+
+    results = []
+    for item_id in item_ids:
+        try:
+            item = _find_jellyfin_item(item_id)
+            if not item:
+                _log_failed_item(error='Item not found', operation='retry-all-auto-poster', item_id=item_id)
+                results.append({'item_id': item_id, 'success': False, 'error': 'Item not found'})
+                continue
+
+            result = _auto_fetch_and_upload_item(item)
+            results.append(result)
+        except TPDBRateLimited as e:
+            _log_failed_item(error=e, operation='retry-all-auto-poster', item_id=item_id)
+            results.append({'item_id': item_id, 'success': False, 'error': str(e)})
+            break
+        except Exception as e:
+            logging.error(f"Error retrying failed item {item_id}: {e}")
+            _log_failed_item(error=e, operation='retry-all-auto-poster', item_id=item_id)
+            results.append({'item_id': item_id, 'success': False, 'error': str(e)})
+        finally:
+            time.sleep(BATCH_DELAY_SEC)
+
+    successful_count = len([result for result in results if result.get('success')])
+    failed_count = len(results) - successful_count
+    return jsonify({
+        'success': failed_count == 0,
+        'results': results,
+        'processed': len(results),
+        'successful': successful_count,
+        'failed': failed_count,
+    })
+
 
 @app.route('/jellyfin-items')
 def jellyfin_items():
@@ -686,12 +934,15 @@ def upload_poster_direct():
             if upload_success:
                 return jsonify({'success': True, 'message': 'Poster uploaded successfully'})
             else:
+                _log_failed_item(item, 'Failed to upload to Jellyfin', operation='direct-upload', poster_url=poster_url)
                 return jsonify({'success': False, 'error': 'Failed to upload to Jellyfin'}), 500
         else:
+            _log_failed_item(item, 'Failed to download poster', operation='direct-upload', poster_url=poster_url)
             return jsonify({'success': False, 'error': 'Failed to download poster'}), 500
 
     except Exception as e:
         logging.error(f"Error uploading poster: {e}")
+        _log_failed_item(item if 'item' in locals() else None, e, operation='direct-upload', poster_url=poster_url if 'poster_url' in locals() else None, item_id=item_id if 'item_id' in locals() else None)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 def create_placeholder_thumbnail():

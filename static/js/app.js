@@ -85,6 +85,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize counters/buttons
     updateUploadAllButton();
+    loadFailedItems();
 
     // If URL has filter param, apply it on load
     const urlParams = new URLSearchParams(window.location.search);
@@ -483,10 +484,11 @@ function updateUploadAllButton() {
 
 // Notifications
 function showAlert(message, type = 'info') {
+    const safeMessage = escapeHtml(message);
     const alertHtml = `
         <div class="alert alert-${type} alert-dismissible fade show" role="alert">
             <i class="fas fa-info-circle me-2"></i>
-            ${message}
+            ${safeMessage}
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
     `;
@@ -496,6 +498,127 @@ function showAlert(message, type = 'info') {
         const alert = container.querySelector('.alert');
         if (alert) alert.remove();
     }, 5000);
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+async function loadFailedItems() {
+    const failedItemsBody = document.getElementById('failedItemsBody');
+    const failedItemsCount = document.getElementById('failedItemsCount');
+    const failedItemsPanel = document.getElementById('failedItemsPanel');
+    const retryAllBtn = document.getElementById('retryAllFailedBtn');
+    if (!failedItemsBody || !failedItemsCount || !failedItemsPanel || !retryAllBtn) return;
+
+    try {
+        const response = await fetch('/failed-items?limit=100');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to load failed items');
+
+        const items = data.items || [];
+        failedItemsCount.textContent = items.length;
+        retryAllBtn.disabled = items.length === 0;
+
+        if (items.length === 0) {
+            failedItemsPanel.style.display = 'none';
+            failedItemsBody.innerHTML = '';
+            return;
+        }
+
+        failedItemsPanel.style.display = 'block';
+        failedItemsBody.innerHTML = items.map(item => {
+            const label = item.item_year ? `${item.item_title || 'Unknown'} (${item.item_year})` : (item.item_title || 'Unknown');
+            const canRetry = Boolean(item.item_id);
+            return `
+                <tr>
+                    <td>${escapeHtml(label)}</td>
+                    <td>${escapeHtml(item.item_type || '-')}</td>
+                    <td>${escapeHtml(item.operation || 'poster')}</td>
+                    <td>${escapeHtml(item.error || '-')}</td>
+                    <td class="text-end">
+                        <button class="btn btn-outline-warning btn-sm retry-failed-item-btn"
+                                type="button"
+                                data-item-id="${escapeHtml(item.item_id || '')}"
+                                ${canRetry ? '' : 'disabled'}>
+                            <i class="fas fa-rotate-right me-1"></i>Retry
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        document.querySelectorAll('.retry-failed-item-btn').forEach(button => {
+            button.addEventListener('click', () => retryFailedItem(button.getAttribute('data-item-id'), button));
+        });
+    } catch (error) {
+        console.error('Failed items error:', error);
+        showAlert('Failed to load failed items: ' + error.message, 'danger');
+    }
+}
+
+async function retryFailedItem(itemId, button) {
+    if (!itemId) return;
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Retrying';
+    }
+
+    try {
+        const response = await fetch('/failed-items/retry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ item_id: itemId })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Retry failed');
+
+        showAlert(`Poster retry succeeded for ${data.item_title || itemId}`, 'success');
+        loadFailedItems();
+    } catch (error) {
+        console.error('Retry failed item error:', error);
+        showAlert('Retry failed: ' + error.message, 'danger');
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-rotate-right me-1"></i>Retry';
+        }
+    }
+}
+
+async function retryAllFailedItems() {
+    const retryAllBtn = document.getElementById('retryAllFailedBtn');
+    if (!confirm('Retry poster fetch and upload for all recent failed items?')) return;
+
+    if (retryAllBtn) {
+        retryAllBtn.disabled = true;
+        retryAllBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Retrying...';
+    }
+
+    try {
+        const response = await fetch('/failed-items/retry-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit: 100 })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Retry all failed');
+
+        showBatchResults(data.results || []);
+        loadFailedItems();
+    } catch (error) {
+        console.error('Retry all failed items error:', error);
+        showAlert('Retry all failed: ' + error.message, 'danger');
+    } finally {
+        if (retryAllBtn) {
+            retryAllBtn.disabled = false;
+            retryAllBtn.innerHTML = '<i class="fas fa-rotate-right me-1"></i>Retry All';
+        }
+    }
 }
 
 // Start automatic batch poster job
