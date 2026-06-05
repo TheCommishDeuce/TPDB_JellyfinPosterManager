@@ -89,6 +89,11 @@ body {
 /* Hide/Show by filter */
 .item-card-wrapper.hidden { display: none !important; }
 
+/* Keep batch action menus above the poster grid below them. */
+.automatic-batch-row { position: relative; z-index: 20; }
+.automatic-batch-card { position: relative; }
+#itemsGrid { position: relative; z-index: 1; }
+
 /* Selected counter */
 #selectedCount { font-weight: 600; color: var(--primary-color); }
 
