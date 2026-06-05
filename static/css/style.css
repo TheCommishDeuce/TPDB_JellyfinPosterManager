@@ -71,7 +71,7 @@ body {
 
 /* Poster containers */
 .card-img-top-wrapper { position: relative; height: 280px; overflow: hidden; border-radius: calc(var(--border-radius) - 1px) calc(var(--border-radius) - 1px) 0 0; background-color: var(--surface-muted); }
-.jellyfin-poster-large { width: 100%; height: 100%; object-fit: contain; object-position: center; transition: transform 0.3s ease; background-color: var(--surface-muted); }
+.jellyfin-poster-large { width: 100%; height: 100%; object-fit: cover; object-position: center; transition: transform 0.3s ease; background-color: var(--surface-muted); }
 .jellyfin-poster-placeholder-large { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: var(--surface-muted); color: var(--muted-color); font-size: 2rem; border: 2px dashed var(--border-color); }
 .jellyfin-poster-placeholder-large small { font-size: 0.75rem; margin-top: 0.5rem; }
 
