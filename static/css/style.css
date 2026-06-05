@@ -85,6 +85,17 @@ body {
 .item-card:hover { transform: translateY(-5px); box-shadow: var(--box-shadow-hover); border-color: var(--primary-color); }
 .item-card:hover .jellyfin-poster-large { transform: scale(1.02); }
 .item-card.selected { border: 2px solid var(--success-color); box-shadow: 0 0 15px rgba(40, 167, 69, 0.3); }
+.item-card.failed-item { border-color: var(--danger-color); box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.25), var(--box-shadow); }
+.item-card.failed-item:hover { border-color: var(--danger-color); box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.35), var(--box-shadow-hover); }
+.item-card.failed-item .find-posters-btn { border: 1px solid var(--danger-color); color: var(--danger-color); }
+.item-card.failed-item .find-posters-btn:hover { background-color: var(--danger-color); color: #fff; }
+.failed-item-overlay { position: absolute; top: 0.5rem; left: 0.5rem; z-index: 10; }
+.failed-card-focus { animation: failed-card-pulse 1.4s ease-out; }
+
+@keyframes failed-card-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.65), var(--box-shadow-hover); }
+    100% { box-shadow: 0 0 0 12px rgba(220, 53, 69, 0), var(--box-shadow-hover); }
+}
 
 /* Hide/Show by filter */
 .item-card-wrapper.hidden { display: none !important; }

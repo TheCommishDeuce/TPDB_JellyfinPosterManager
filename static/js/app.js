@@ -68,6 +68,8 @@ let selectedPosters = {};
 let loadingModal = null;
 let posterModal = null;
 let resultsModal = null;
+let failedItemsPanelVisible = false;
+let activeFailedItemIds = new Set();
 
 document.addEventListener('DOMContentLoaded', function() {
     // Theme first
@@ -81,7 +83,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const rm = document.getElementById('resultsModal');
     if (lm && bootstrap?.Modal) loadingModal = new bootstrap.Modal(lm);
     if (pm && bootstrap?.Modal) posterModal = new bootstrap.Modal(pm);
-    if (rm && bootstrap?.Modal) resultsModal = new bootstrap.Modal(rm);
+    if (rm && bootstrap?.Modal) {
+        resultsModal = new bootstrap.Modal(rm);
+        rm.addEventListener('hidden.bs.modal', () => loadFailedItems({ autoExpand: true }));
+    }
 
     // Initialize counters/buttons
     updateUploadAllButton();
@@ -128,6 +133,7 @@ function filterContent(type) {
         url.searchParams.set('type', type); // keep 'movies'/'series'
     }
     window.history.pushState({}, '', url);
+    applyFailedItemMarkers(activeFailedItemIds);
 }
 
 function sortContent(sortBy) {
@@ -377,6 +383,7 @@ async function uploadAllSelected() {
         if (progressText) progressText.textContent = '100%';
 
         showBatchResults(data.results);
+        loadFailedItems({ autoExpand: true });
 
         // Refresh after short delay to update any thumbnails
         setTimeout(() => {
@@ -403,8 +410,9 @@ function showBatchResults(results) {
 
     let successCount = results.filter(r => r.success).length;
     let failCount = results.length - successCount;
+    const defaultFilter = failCount > 0 ? 'failed' : 'all';
 
-    let html = `
+    const html = `
         <div class="row mb-3">
             <div class="col-md-6">
                 <div class="card border-success">
@@ -425,7 +433,20 @@ function showBatchResults(results) {
                 </div>
             </div>
         </div>
-        <h6>Detailed Results:</h6>
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <h6 class="mb-0">Detailed Results</h6>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Filter upload results">
+                <button class="btn btn-outline-secondary batch-results-filter" type="button" data-filter="all">
+                    All (${results.length})
+                </button>
+                <button class="btn btn-outline-danger batch-results-filter" type="button" data-filter="failed">
+                    Failed (${failCount})
+                </button>
+                <button class="btn btn-outline-success batch-results-filter" type="button" data-filter="successful">
+                    Successful (${successCount})
+                </button>
+            </div>
+        </div>
         <div class="table-responsive">
             <table class="table table-sm results-table">
                 <thead>
@@ -435,32 +456,58 @@ function showBatchResults(results) {
                         <th>Error</th>
                     </tr>
                 </thead>
-                <tbody>
-    `;
-
-    results.forEach(result => {
-        html += `
-            <tr>
-                <td>${result.item_title || result.item_id}</td>
-                <td>
-                    ${result.success ?
-                        '<span class="badge bg-success">Success</span>' :
-                        '<span class="badge bg-danger">Failed</span>'
-                    }
-                </td>
-                <td>${result.error || '-'}</td>
-            </tr>
-        `;
-    });
-
-    html += `
-                </tbody>
+                <tbody id="batchResultsBody"></tbody>
             </table>
         </div>
     `;
 
     modalBody.innerHTML = html;
+    renderBatchResults(results, defaultFilter);
+
+    document.querySelectorAll('.batch-results-filter').forEach(button => {
+        button.addEventListener('click', () => renderBatchResults(results, button.getAttribute('data-filter')));
+    });
+
     if (resultsModal) resultsModal.show();
+}
+
+function renderBatchResults(results, filter) {
+    const tbody = document.getElementById('batchResultsBody');
+    if (!tbody) return;
+
+    document.querySelectorAll('.batch-results-filter').forEach(button => {
+        const isActive = button.getAttribute('data-filter') === filter;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+
+    const filteredResults = results.filter(result => {
+        if (filter === 'failed') return !result.success;
+        if (filter === 'successful') return result.success;
+        return true;
+    });
+
+    if (filteredResults.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td class="text-muted text-center" colspan="3">No results in this filter.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = filteredResults.map(result => `
+        <tr>
+            <td>${escapeHtml(result.item_title || result.item_id || 'Unknown')}</td>
+            <td>
+                ${result.success ?
+                    '<span class="badge bg-success">Success</span>' :
+                    '<span class="badge bg-danger">Failed</span>'
+                }
+            </td>
+            <td>${escapeHtml(result.error || '-')}</td>
+        </tr>
+    `).join('');
 }
 
 // Button enable state
@@ -509,12 +556,29 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
-async function loadFailedItems() {
+function formatOperationLabel(operation) {
+    const labels = {
+        'auto-poster': 'Auto-Get Posters',
+        'manual-upload': 'Manual Upload',
+        'batch-upload': 'Batch Upload',
+        'direct-upload': 'Direct Upload',
+        'retry-auto-poster': 'Retry',
+        'retry-all-auto-poster': 'Retry All',
+        'poster': 'Poster Lookup'
+    };
+    return labels[operation] || String(operation || 'Poster Lookup')
+        .replace(/-/g, ' ')
+        .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+async function loadFailedItems(options = {}) {
     const failedItemsBody = document.getElementById('failedItemsBody');
     const failedItemsCount = document.getElementById('failedItemsCount');
     const failedItemsPanel = document.getElementById('failedItemsPanel');
     const retryAllBtn = document.getElementById('retryAllFailedBtn');
-    if (!failedItemsBody || !failedItemsCount || !failedItemsPanel || !retryAllBtn) return;
+    const clearBtn = document.getElementById('clearFailedItemsBtn');
+    const failedItemsRow = document.getElementById('failedItemsRow');
+    if (!failedItemsBody || !failedItemsCount || !failedItemsPanel || !retryAllBtn || !clearBtn || !failedItemsRow) return;
 
     try {
         const response = await fetch('/failed-items?limit=100');
@@ -522,24 +586,39 @@ async function loadFailedItems() {
         if (!response.ok) throw new Error(data.error || 'Failed to load failed items');
 
         const items = data.items || [];
+        activeFailedItemIds = new Set(items.map(item => item.item_id).filter(Boolean));
+        applyFailedItemMarkers(activeFailedItemIds);
         failedItemsCount.textContent = items.length;
         retryAllBtn.disabled = items.length === 0;
+        clearBtn.disabled = items.length === 0;
+        failedItemsRow.style.display = items.length === 0 ? 'none' : '';
+        if (options.autoExpand && items.length > 0) {
+            failedItemsPanelVisible = true;
+        }
 
         if (items.length === 0) {
-            failedItemsPanel.style.display = 'none';
+            failedItemsPanelVisible = false;
+            updateFailedItemsPanelVisibility();
             failedItemsBody.innerHTML = '';
             return;
         }
 
-        failedItemsPanel.style.display = 'block';
+        updateFailedItemsPanelVisibility();
         failedItemsBody.innerHTML = items.map(item => {
             const label = item.item_year ? `${item.item_title || 'Unknown'} (${item.item_year})` : (item.item_title || 'Unknown');
             const canRetry = Boolean(item.item_id);
+            const itemLabel = canRetry ? `
+                <button class="btn btn-link btn-sm p-0 failed-item-link"
+                        type="button"
+                        data-item-id="${escapeHtml(item.item_id)}">
+                    ${escapeHtml(label)}
+                </button>
+            ` : escapeHtml(label);
             return `
                 <tr>
-                    <td>${escapeHtml(label)}</td>
+                    <td>${itemLabel}</td>
                     <td>${escapeHtml(item.item_type || '-')}</td>
-                    <td>${escapeHtml(item.operation || 'poster')}</td>
+                    <td>${escapeHtml(formatOperationLabel(item.operation))}</td>
                     <td>${escapeHtml(item.error || '-')}</td>
                     <td class="text-end">
                         <button class="btn btn-outline-warning btn-sm retry-failed-item-btn"
@@ -556,9 +635,121 @@ async function loadFailedItems() {
         document.querySelectorAll('.retry-failed-item-btn').forEach(button => {
             button.addEventListener('click', () => retryFailedItem(button.getAttribute('data-item-id'), button));
         });
+        document.querySelectorAll('.failed-item-link').forEach(button => {
+            button.addEventListener('click', () => scrollToItemCard(button.getAttribute('data-item-id')));
+        });
     } catch (error) {
         console.error('Failed items error:', error);
         showAlert('Failed to load failed items: ' + error.message, 'danger');
+    }
+}
+
+function updateFailedItemsPanelVisibility() {
+    const failedItemsPanel = document.getElementById('failedItemsPanel');
+    const toggleBtn = document.getElementById('toggleFailedItemsBtn');
+    const failedItemsCount = document.getElementById('failedItemsCount');
+    const failedItemsRow = document.getElementById('failedItemsRow');
+    if (!failedItemsPanel || !toggleBtn || !failedItemsCount || !failedItemsRow) return;
+
+    const hasItems = Number(failedItemsCount.textContent) > 0;
+    failedItemsRow.style.display = hasItems ? '' : 'none';
+    toggleBtn.disabled = !hasItems;
+    failedItemsPanel.style.display = hasItems && failedItemsPanelVisible ? 'block' : 'none';
+    toggleBtn.setAttribute('aria-expanded', hasItems && failedItemsPanelVisible ? 'true' : 'false');
+    toggleBtn.innerHTML = hasItems && failedItemsPanelVisible ?
+        '<i class="fas fa-eye-slash me-1"></i>Hide' :
+        '<i class="fas fa-eye me-1"></i>Show';
+}
+
+function toggleFailedItemsPanel() {
+    failedItemsPanelVisible = !failedItemsPanelVisible;
+    updateFailedItemsPanelVisibility();
+}
+
+function applyFailedItemMarkers(itemIds) {
+    document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
+        const itemId = wrapper.getAttribute('data-item-id');
+        const card = wrapper.querySelector('.item-card');
+        const posterWrapper = wrapper.querySelector('.card-img-top-wrapper');
+        if (!card || !posterWrapper) return;
+
+        const isFailed = itemIds.has(itemId);
+        card.classList.toggle('failed-item', isFailed);
+
+        let overlay = wrapper.querySelector('.failed-item-overlay');
+        if (isFailed && !overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'failed-item-overlay';
+            overlay.innerHTML = '<span class="badge bg-danger"><i class="fas fa-triangle-exclamation me-1"></i>Failed</span>';
+            posterWrapper.insertBefore(overlay, posterWrapper.firstChild);
+        } else if (!isFailed && overlay) {
+            overlay.remove();
+        }
+    });
+}
+
+function scrollToItemCard(itemId) {
+    if (!itemId) return;
+
+    const wrapper = Array.from(document.querySelectorAll('.item-card-wrapper'))
+        .find(item => item.getAttribute('data-item-id') === itemId);
+    if (!wrapper) {
+        showAlert('That item is not currently visible in the library grid.', 'warning');
+        return;
+    }
+
+    if (wrapper.classList.contains('hidden')) {
+        wrapper.classList.remove('hidden');
+        showAlert('Showing the failed item even though it is outside the current filter.', 'info');
+    }
+
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const card = wrapper.querySelector('.item-card');
+    if (card) {
+        card.classList.remove('failed-card-focus');
+        void card.offsetWidth;
+        card.classList.add('failed-card-focus');
+    }
+}
+
+async function clearFailedItems() {
+    if (!confirm('Clear all failed item entries from failed.log?')) return;
+
+    const clearBtn = document.getElementById('clearFailedItemsBtn');
+    const retryAllBtn = document.getElementById('retryAllFailedBtn');
+    if (clearBtn) {
+        clearBtn.disabled = true;
+        clearBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Clearing';
+    }
+
+    try {
+        const response = await fetch('/failed-items', { method: 'DELETE' });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to clear failed items');
+
+        const failedItemsBody = document.getElementById('failedItemsBody');
+        const failedItemsCount = document.getElementById('failedItemsCount');
+        const failedItemsPanel = document.getElementById('failedItemsPanel');
+        const failedItemsRow = document.getElementById('failedItemsRow');
+        if (failedItemsBody) failedItemsBody.innerHTML = '';
+        if (failedItemsCount) failedItemsCount.textContent = '0';
+        activeFailedItemIds = new Set();
+        applyFailedItemMarkers(activeFailedItemIds);
+        failedItemsPanelVisible = false;
+        if (failedItemsRow) failedItemsRow.style.display = 'none';
+        if (failedItemsPanel) updateFailedItemsPanelVisibility();
+        if (retryAllBtn) retryAllBtn.disabled = true;
+        showAlert('Failed items cleared', 'success');
+    } catch (error) {
+        console.error('Clear failed items error:', error);
+        showAlert('Failed to clear failed items: ' + error.message, 'danger');
+    } finally {
+        if (clearBtn) {
+            clearBtn.disabled = false;
+            clearBtn.innerHTML = '<i class="fas fa-trash me-1"></i>Clear';
+        }
+        loadFailedItems();
     }
 }
 
@@ -609,7 +800,7 @@ async function retryAllFailedItems() {
         if (!response.ok) throw new Error(data.error || 'Retry all failed');
 
         showBatchResults(data.results || []);
-        loadFailedItems();
+        loadFailedItems({ autoExpand: true });
     } catch (error) {
         console.error('Retry all failed items error:', error);
         showAlert('Retry all failed: ' + error.message, 'danger');
@@ -660,6 +851,7 @@ async function startAutoBatchPoster(filter) {
         }
 
         showBatchResults(data.results);
+        loadFailedItems({ autoExpand: true });
 
     } catch (err) {
         console.error('Auto-batch error:', err);

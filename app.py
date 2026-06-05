@@ -75,13 +75,19 @@ def _get_failed_log_path():
     return FAILED_LOG_FILE
 
 
+def _write_failed_log_entry(entry):
+    os.makedirs(Config.LOG_DIR, exist_ok=True)
+    with open(_get_failed_log_path(), 'a', encoding='utf-8') as failed_log:
+        failed_log.write(json.dumps(entry, ensure_ascii=False) + '\n')
+
+
 def _log_failed_item(item=None, error=None, operation='poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None):
-    """Append one structured failed item entry to failed.log."""
+    """Append one structured active failure entry to failed.log."""
     try:
-        os.makedirs(Config.LOG_DIR, exist_ok=True)
         entry = {
             'id': str(uuid.uuid4()),
             'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'status': 'failed',
             'operation': operation,
             'item_id': item_id or (item or {}).get('id'),
             'item_title': item_title or (item or {}).get('title') or 'Unknown',
@@ -90,10 +96,29 @@ def _log_failed_item(item=None, error=None, operation='poster', poster_url=None,
             'error': str(error or 'Unknown failure'),
             'poster_url': poster_url,
         }
-        with open(_get_failed_log_path(), 'a', encoding='utf-8') as failed_log:
-            failed_log.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        _write_failed_log_entry(entry)
     except Exception as failed_log_error:
         logging.warning(f"Failed to write failed item log: {failed_log_error}")
+
+
+def _log_resolved_item(item=None, operation='retry-auto-poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None):
+    """Append a resolution marker so old failures stay in the log but leave the UI."""
+    try:
+        entry = {
+            'id': str(uuid.uuid4()),
+            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'status': 'resolved',
+            'operation': operation,
+            'item_id': item_id or (item or {}).get('id'),
+            'item_title': item_title or (item or {}).get('title') or 'Unknown',
+            'item_type': item_type or (item or {}).get('type'),
+            'item_year': item_year if item_year is not None else (item or {}).get('year'),
+            'error': None,
+            'poster_url': poster_url,
+        }
+        _write_failed_log_entry(entry)
+    except Exception as failed_log_error:
+        logging.warning(f"Failed to write resolved item log: {failed_log_error}")
 
 
 def _read_failed_items(limit=100):
@@ -113,6 +138,7 @@ def _read_failed_items(limit=100):
                 entries.append({
                     'id': str(uuid.uuid4()),
                     'timestamp': None,
+                    'status': 'failed',
                     'operation': 'poster',
                     'item_id': None,
                     'item_title': 'Unknown',
@@ -122,7 +148,24 @@ def _read_failed_items(limit=100):
                     'poster_url': None,
                 })
 
-    return list(reversed(entries[-limit:]))
+    latest_entries = []
+    seen_item_ids = set()
+    for entry in reversed(entries):
+        item_id = entry.get('item_id')
+        if item_id:
+            if item_id in seen_item_ids:
+                continue
+            seen_item_ids.add(item_id)
+            if entry.get('status', 'failed') != 'failed':
+                continue
+        elif entry.get('status', 'failed') != 'failed':
+            continue
+
+        latest_entries.append(entry)
+        if len(latest_entries) >= limit:
+            break
+
+    return latest_entries
 
 
 def _find_jellyfin_item(item_id):
@@ -138,7 +181,7 @@ def _find_jellyfin_item(item_id):
     return next((current_item for current_item in get_jellyfin_items() if current_item.get('id') == item_id), None)
 
 
-def _auto_fetch_and_upload_item(item):
+def _auto_fetch_and_upload_item(item, operation='retry-auto-poster'):
     item_id = item['id']
     item_title = item['title']
     posters = search_tpdb_for_posters_multiple(
@@ -151,7 +194,7 @@ def _auto_fetch_and_upload_item(item):
 
     if not posters:
         error = 'No posters found'
-        _log_failed_item(item, error, operation='retry-auto-poster')
+        _log_failed_item(item, error, operation=operation)
         return {
             'item_id': item_id,
             'item_title': item_title,
@@ -169,7 +212,7 @@ def _auto_fetch_and_upload_item(item):
     try:
         if not download_image_with_cookies(poster_url, save_path):
             error = 'Failed to download poster'
-            _log_failed_item(item, error, operation='retry-auto-poster', poster_url=poster_url)
+            _log_failed_item(item, error, operation=operation, poster_url=poster_url)
             return {
                 'item_id': item_id,
                 'item_title': item_title,
@@ -189,7 +232,7 @@ def _auto_fetch_and_upload_item(item):
             }
 
         error = 'Failed to upload to Jellyfin'
-        _log_failed_item(item, error, operation='retry-auto-poster', poster_url=poster_url)
+        _log_failed_item(item, error, operation=operation, poster_url=poster_url)
         return {
             'item_id': item_id,
             'item_title': item_title,
@@ -788,6 +831,19 @@ def failed_items():
         return jsonify({'items': [], 'error': str(e)}), 500
 
 
+@app.route('/failed-items', methods=['DELETE'])
+def clear_failed_items():
+    """Clear failed.log after the user has reviewed failures."""
+    try:
+        os.makedirs(Config.LOG_DIR, exist_ok=True)
+        with open(_get_failed_log_path(), 'w', encoding='utf-8'):
+            pass
+        return jsonify({'success': True, 'items': []})
+    except Exception as e:
+        logging.error(f"Error clearing failed items log: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/failed-items/retry', methods=['POST'])
 def retry_failed_item():
     """Retry auto-fetching and uploading a poster for one failed item."""
@@ -806,7 +862,9 @@ def retry_failed_item():
             _log_failed_item(error='Item not found', operation='retry-auto-poster', item_id=item_id)
             return jsonify({'success': False, 'error': 'Item not found', 'item_id': item_id}), 404
 
-        result = _auto_fetch_and_upload_item(item)
+        result = _auto_fetch_and_upload_item(item, operation='retry-auto-poster')
+        if result['success']:
+            _log_resolved_item(item, operation='retry-auto-poster', poster_url=result.get('poster_url'))
         return jsonify(result), 200 if result['success'] else 500
     except TPDBRateLimited as e:
         _log_failed_item(error=e, operation='retry-auto-poster', item_id=item_id)
@@ -846,7 +904,9 @@ def retry_all_failed_items():
                 results.append({'item_id': item_id, 'success': False, 'error': 'Item not found'})
                 continue
 
-            result = _auto_fetch_and_upload_item(item)
+            result = _auto_fetch_and_upload_item(item, operation='retry-all-auto-poster')
+            if result.get('success'):
+                _log_resolved_item(item, operation='retry-all-auto-poster', poster_url=result.get('poster_url'))
             results.append(result)
         except TPDBRateLimited as e:
             _log_failed_item(error=e, operation='retry-all-auto-poster', item_id=item_id)
