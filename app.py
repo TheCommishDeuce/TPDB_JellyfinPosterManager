@@ -731,6 +731,8 @@ if __name__ == '__main__':
 
     try:
         app.run(debug=Config.DEBUG, host='0.0.0.0', port=5001)
+    except KeyboardInterrupt:
+        logging.info("Shutdown requested by CTRL+C")
     except Exception as e:
         logging.error(f"Failed to start Flask application: {e}")
     finally:

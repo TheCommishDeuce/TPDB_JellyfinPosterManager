@@ -236,16 +236,27 @@ def setup_selenium_and_login(force=False):
                 teardown_selenium()
             raise
 
-def teardown_selenium():
-    """Shutdown Selenium driver (only used on app shutdown)."""
+def teardown_selenium(timeout=5):
+    """Shutdown Selenium driver without letting a stuck ChromeDriver block app exit."""
     global selenium_driver
     with selenium_lock:
-        if selenium_driver:
-            try:
-                selenium_driver.quit()
-            except Exception:
-                pass
-            selenium_driver = None
+        driver = selenium_driver
+        selenium_driver = None
+
+    if not driver:
+        return
+
+    def quit_driver():
+        try:
+            driver.quit()
+        except Exception as shutdown_error:
+            logging.warning(f"Failed to shutdown Selenium driver cleanly: {shutdown_error}")
+
+    cleanup_thread = threading.Thread(target=quit_driver, daemon=True)
+    cleanup_thread.start()
+    cleanup_thread.join(timeout)
+    if cleanup_thread.is_alive():
+        logging.warning("Selenium driver shutdown is still running; continuing application exit.")
 
 def get_selenium_cookies_as_dict():
     """Return Selenium cookies as a dict for requests.Session."""
