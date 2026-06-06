@@ -22,8 +22,16 @@ class ConsoleFormatter(logging.Formatter):
         logging.ERROR: "\033[31m",
         logging.CRITICAL: "\033[97;41m",
     }
+    VALUE = "\033[96m"
     RESET = "\033[0m"
     ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
+    VALUE_PREFIXES = (
+        "Successfully uploaded poster for: ",
+        "Searching posters for: ",
+        "Processing item ",
+        "No TPDB search results for ",
+        "Found 0 poster links for ",
+    )
 
     def __init__(self, use_color=True):
         super().__init__(datefmt="%H:%M:%S")
@@ -44,8 +52,15 @@ class ConsoleFormatter(logging.Formatter):
         if self.use_color:
             color = self.COLORS.get(display_level, "")
             level = f"{color}{level}{self.RESET}"
+            message = self.highlight_value(message)
 
         return f"{timestamp} {level} {message}"
+
+    def highlight_value(self, message):
+        for prefix in self.VALUE_PREFIXES:
+            if message.startswith(prefix):
+                return f"{prefix}{self.VALUE}{message[len(prefix):]}{self.RESET}"
+        return message
 
 
 class WerkzeugAccessLogFilter(logging.Filter):
