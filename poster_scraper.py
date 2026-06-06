@@ -431,7 +431,7 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
     elif item_type == "Series":
         search_url += "&section=shows"
 
-    logging.debug(f"TPDB search URL: {search_url}")
+    logging.info(f"TPDB search URL: {search_url}")
 
     try:
         poster_urls = []
