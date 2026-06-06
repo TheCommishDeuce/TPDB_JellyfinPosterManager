@@ -74,13 +74,15 @@ def _sweep_stale_temp_posters(max_age_sec=3600):
         logging.info("Removed %d stale temp poster files.", removed_count)
 
 
-def _create_auto_batch_job(target_filter, skip_processed=False):
+def _create_auto_batch_job(target_filter, skip_processed=False, include_season_posters=False, replace_existing_season_posters=False):
     job_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
     job = {
         'job_id': job_id,
         'filter': target_filter,
         'skip_processed': skip_processed,
+        'include_season_posters': include_season_posters,
+        'replace_existing_season_posters': replace_existing_season_posters,
         'status': 'starting',
         'phase': 'starting',
         'message': 'Starting automatic poster batch...',
@@ -375,6 +377,109 @@ def _find_jellyfin_item(item_id):
     return next((current_item for current_item in get_jellyfin_items() if current_item.get('id') == item_id), None)
 
 
+def _safe_filename_part(value):
+    return "".join(c for c in (value or "item") if c.isalnum() or c in " _-").rstrip() or "item"
+
+
+def _upload_poster_url_to_jellyfin_item(target_id, poster_url, filename_prefix, title):
+    safe_title = _safe_filename_part(title)
+    save_path = os.path.join(Config.TEMP_POSTER_DIR, f"{filename_prefix}_{safe_title}_{target_id}.jpg")
+    if not download_image_with_cookies(poster_url, save_path):
+        return False
+    try:
+        return upload_image_to_jellyfin_improved(target_id, save_path)
+    finally:
+        try:
+            if os.path.exists(save_path):
+                os.remove(save_path)
+        except Exception as cleanup_error:
+            logging.warning(f"Failed to cleanup temp file {save_path}: {cleanup_error}")
+
+
+def _normalize_selection(selection):
+    if isinstance(selection, str):
+        return {
+            'type': 'single',
+            'series_poster_url': selection,
+            'season_posters': {},
+        }
+    if isinstance(selection, dict):
+        return {
+            'type': selection.get('type') or 'series_group',
+            'series_poster_url': selection.get('series_poster_url') or selection.get('poster_url'),
+            'season_posters': selection.get('season_posters') or {},
+        }
+    return {'type': 'single', 'series_poster_url': None, 'season_posters': {}}
+
+
+def _upload_selection_to_jellyfin(item, selection, operation='manual-upload'):
+    normalized = _normalize_selection(selection)
+    item_id = item.get('id')
+    item_title = item.get('title', 'Unknown')
+    primary_url = normalized.get('series_poster_url')
+    season_posters = normalized.get('season_posters') or {}
+    errors = []
+    season_results = []
+    uploaded_any = False
+
+    os.makedirs(Config.TEMP_POSTER_DIR, exist_ok=True)
+    _sweep_stale_temp_posters()
+
+    if primary_url:
+        logging.info(f"Uploading poster to Jellyfin for {item_title}")
+        if _upload_poster_url_to_jellyfin_item(item_id, primary_url, operation, item_title):
+            uploaded_any = True
+            _log_processed_item(item, operation=operation, poster_url=primary_url)
+        else:
+            errors.append('Failed to upload series poster')
+            _log_failed_item(item, 'Failed to upload series poster', operation=operation, poster_url=primary_url)
+
+    for season_id, season_selection in season_posters.items():
+        season_url = season_selection.get('url') if isinstance(season_selection, dict) else season_selection
+        season_title = season_selection.get('title') if isinstance(season_selection, dict) else f"Season {season_id}"
+        if not season_id or not season_url:
+            continue
+        if _upload_poster_url_to_jellyfin_item(season_id, season_url, operation, f"{item_title}_{season_title}"):
+            uploaded_any = True
+            season_results.append({'season_id': season_id, 'season_title': season_title, 'success': True, 'poster_url': season_url})
+        else:
+            error = f"Failed to upload {season_title}"
+            errors.append(error)
+            season_results.append({'season_id': season_id, 'season_title': season_title, 'success': False, 'poster_url': season_url, 'error': error})
+
+    return {
+        'success': uploaded_any and not errors,
+        'uploaded_any': uploaded_any,
+        'error': '; '.join(errors) if errors else None,
+        'poster_url': primary_url,
+        'season_results': season_results,
+    }
+
+
+def _selection_from_poster_group(group, replace_existing_season_posters=False):
+    show_posters = group.get('show_posters') or []
+    selection = {
+        'type': 'series_group',
+        'series_poster_url': show_posters[0].get('url') if show_posters else None,
+        'season_posters': {},
+    }
+
+    for poster in group.get('season_posters') or []:
+        season_id = poster.get('season_id')
+        if not season_id:
+            continue
+        if poster.get('season_has_poster') and not replace_existing_season_posters:
+            continue
+        if season_id in selection['season_posters']:
+            continue
+        selection['season_posters'][season_id] = {
+            'url': poster.get('url'),
+            'title': poster.get('season_title') or 'Season',
+        }
+
+    return selection
+
+
 def _auto_fetch_and_upload_item(item, operation='retry-auto-poster'):
     item_id = item['id']
     item_title = item['title']
@@ -506,20 +611,32 @@ def get_item_posters(item_id):
 
     try:
         logging.info(f"Searching posters for: {item['title']}")
-        posters = search_tpdb_for_posters_multiple(
+        eligible_seasons = get_jellyfin_seasons(item['id']) if item.get('type') == 'Series' else []
+        poster_set_limit = request.args.get('set_limit', default=3, type=int)
+        poster_set_limit = max(1, min(poster_set_limit or 3, Config.MAX_POSTERS_PER_ITEM))
+        search_result = search_tpdb_for_poster_groups(
             item['title'],
-            item.get('year'),
-            item.get('type'),
+            item_year=item.get('year'),
+            item_type=item.get('type'),
             tmdb_id=item.get('ProviderIds', {}).get('Tmdb'),
-            max_posters=Config.MAX_POSTERS_PER_ITEM
+            eligible_seasons=eligible_seasons,
+            max_posters=poster_set_limit if item.get('type') == 'Series' else Config.MAX_POSTERS_PER_ITEM,
         )
-        return jsonify({'item': item, 'posters': posters})
+        return jsonify({
+            'item': item,
+            'posters': search_result.get('posters', []),
+            'poster_groups': search_result.get('groups', []),
+            'eligible_seasons': eligible_seasons,
+            'poster_set_limit': poster_set_limit,
+            'can_browse_more_sets': item.get('type') == 'Series' and poster_set_limit < Config.MAX_POSTERS_PER_ITEM,
+        })
     except TPDBRateLimited as e:
         logging.warning(f"TPDB challenge/rate-limit for {item_id}: {e}")
         return jsonify({'error': str(e), 'error_type': 'tpdb_rate_limited'}), 429
     except Exception as e:
         logging.error(f"Error getting posters for {item_id}: {e}")
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/item/<item_id>/select', methods=['POST'])
 def select_poster(item_id):
@@ -531,11 +648,18 @@ def select_poster(item_id):
 
     data = request.get_json() or {}
     poster_url = data.get('poster_url')
-    if not poster_url:
-        return jsonify({'error': 'No poster URL provided'}), 400
+    selection = data.get('selection')
+    clear_selection = bool(data.get('clear_selection'))
+    if clear_selection:
+        user_sessions[session_id]['selections'].pop(item_id, None)
+        logging.info(f"Poster selection cleared for item {item_id}")
+        return jsonify({'success': True, 'cleared': True})
 
-    user_sessions[session_id]['selections'][item_id] = poster_url
-    logging.info(f"Poster selected for item {item_id}: {poster_url}")
+    if not poster_url and not selection:
+        return jsonify({'error': 'No poster selection provided'}), 400
+
+    user_sessions[session_id]['selections'][item_id] = selection or poster_url
+    logging.info(f"Poster selected for item {item_id}")
 
     return jsonify({'success': True})
 
@@ -555,7 +679,7 @@ def upload_poster(item_id):
     if item_id not in selections:
         return jsonify({'error': 'No poster selected for this item'}), 400
 
-    poster_url = selections[item_id]
+    selection = selections[item_id]
 
     items = user_sessions[session_id]['items']
     item = next((i for i in items if i['id'] == item_id), None)
@@ -563,36 +687,16 @@ def upload_poster(item_id):
         return jsonify({'error': 'Item not found'}), 404
 
     try:
-        os.makedirs(Config.TEMP_POSTER_DIR, exist_ok=True)
-        _sweep_stale_temp_posters()
-        safe_title = "".join(c for c in item['title'] if c.isalnum() or c in " _-").rstrip()
-        save_path = os.path.join(Config.TEMP_POSTER_DIR, f"manual_{safe_title}_{item_id}.jpg")
+        result = _upload_selection_to_jellyfin(item, selection, operation='manual-upload')
+        if result['success']:
+            return jsonify(result)
 
-        logging.info(f"Downloading poster for {item['title']}: {poster_url}")
-
-        if download_image_with_cookies(poster_url, save_path):
-            logging.info(f"Uploading poster to Jellyfin for {item['title']}")
-            success = upload_image_to_jellyfin_improved(item_id, save_path)
-
-            try:
-                if os.path.exists(save_path):
-                    os.remove(save_path)
-            except Exception:
-                pass
-
-            if success:
-                _log_processed_item(item, operation='manual-upload', poster_url=poster_url)
-                return jsonify({'success': True})
-            else:
-                _log_failed_item(item, 'Failed to upload to Jellyfin', operation='manual-upload', poster_url=poster_url)
-                return jsonify({'error': 'Failed to upload to Jellyfin'}), 500
-        else:
-            _log_failed_item(item, 'Failed to download poster', operation='manual-upload', poster_url=poster_url)
-            return jsonify({'error': 'Failed to download poster'}), 500
+        error = result.get('error') or 'Failed to upload to Jellyfin'
+        return jsonify({'error': error, **result}), 500
 
     except Exception as e:
         logging.error(f"Error uploading poster for {item_id}: {e}")
-        _log_failed_item(item, e, operation='manual-upload', poster_url=poster_url, item_id=item_id)
+        _log_failed_item(item, e, operation='manual-upload', item_id=item_id)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/upload-all', methods=['POST'])
@@ -615,48 +719,27 @@ def upload_all_selected():
     os.makedirs(Config.TEMP_POSTER_DIR, exist_ok=True)
     _sweep_stale_temp_posters()
 
-    for item_id, poster_url in selections.items():
+    for item_id, selection in selections.items():
         item = None
         try:
             item = next((i for i in items if i['id'] == item_id), None)
             if not item:
-                _log_failed_item(error='Item not found', operation='batch-upload', poster_url=poster_url, item_id=item_id)
+                _log_failed_item(error='Item not found', operation='batch-upload', item_id=item_id)
                 results.append({'item_id': item_id, 'success': False, 'error': 'Item not found'})
                 continue
 
-            safe_title = "".join(c for c in item['title'] if c.isalnum() or c in " _-").rstrip()
-            save_path = os.path.join(Config.TEMP_POSTER_DIR, f"manual_{safe_title}_{item_id}.jpg")
-
-            if download_image_with_cookies(poster_url, save_path):
-                success = upload_image_to_jellyfin_improved(item_id, save_path)
-                try:
-                    if os.path.exists(save_path):
-                        os.remove(save_path)
-                except Exception:
-                    pass
-
-                result = {
-                    'item_id': item_id,
-                    'item_title': item['title'],
-                    'success': success,
-                    'error': None if success else 'Upload failed'
-                }
-                results.append(result)
-                if success:
-                    _log_processed_item(item, operation='batch-upload', poster_url=poster_url)
-                else:
-                    _log_failed_item(item, result['error'], operation='batch-upload', poster_url=poster_url)
-            else:
-                _log_failed_item(item, 'Download failed', operation='batch-upload', poster_url=poster_url)
-                results.append({
-                    'item_id': item_id,
-                    'item_title': item['title'],
-                    'success': False,
-                    'error': 'Download failed'
-                })
+            upload_result = _upload_selection_to_jellyfin(item, selection, operation='batch-upload')
+            results.append({
+                'item_id': item_id,
+                'item_title': item['title'],
+                'success': upload_result['success'],
+                'error': upload_result.get('error'),
+                'poster_url': upload_result.get('poster_url'),
+                'season_results': upload_result.get('season_results', []),
+            })
 
         except Exception as e:
-            _log_failed_item(item, e, operation='batch-upload', poster_url=poster_url, item_id=item_id)
+            _log_failed_item(item, e, operation='batch-upload', item_id=item_id)
             results.append({
                 'item_id': item_id,
                 'item_title': item.get('title', 'Unknown') if item else 'Unknown',
@@ -831,7 +914,71 @@ def _select_auto_batch_target_items(all_items, target_filter, skip_processed=Fal
     return target_items
 
 
-def _run_auto_batch_job(job_id, target_filter, skip_processed=False):
+def _auto_search_and_upload_item(item, include_season_posters=False, replace_existing_season_posters=False):
+    item_id = item.get('id')
+    item_title = item.get('title', 'Unknown')
+    item_type = item.get('type')
+    old_poster_url = item.get('thumbnail_url')
+
+    if include_season_posters and item_type == 'Series':
+        eligible_seasons = get_jellyfin_seasons(item_id)
+        search_result = search_tpdb_for_poster_groups(
+            item_title,
+            item_year=item.get('year'),
+            item_type=item_type,
+            tmdb_id=item.get('ProviderIds', {}).get('Tmdb'),
+            eligible_seasons=eligible_seasons,
+            max_posters=1,
+            include_base64=False,
+        )
+        group = search_result.get('best_group')
+        if not group:
+            raise ValueError('No posters found')
+
+        selection = _selection_from_poster_group(
+            group,
+            replace_existing_season_posters=replace_existing_season_posters,
+        )
+        if not selection.get('series_poster_url') and not selection.get('season_posters'):
+            raise ValueError('No eligible posters found')
+
+        upload_result = _upload_selection_to_jellyfin(item, selection, operation='auto-poster')
+        return {
+            'item_id': item_id,
+            'item_title': item_title,
+            'success': upload_result['success'],
+            'error': upload_result.get('error'),
+            'old_poster_url': old_poster_url,
+            'poster_url': upload_result.get('poster_url'),
+            'season_results': upload_result.get('season_results', []),
+            'season_posters_uploaded': len([season for season in upload_result.get('season_results', []) if season.get('success')]),
+        }
+
+    posters = search_tpdb_for_posters_multiple(
+        item_title,
+        item.get('year'),
+        item_type,
+        tmdb_id=item.get('ProviderIds', {}).get('Tmdb'),
+        max_posters=1,
+    )
+    if not posters:
+        raise ValueError('No posters found')
+
+    poster_url = posters[0]['url']
+    result = _upload_selection_to_jellyfin(item, poster_url, operation='auto-poster')
+    return {
+        'item_id': item_id,
+        'item_title': item_title,
+        'success': result['success'],
+        'error': result.get('error'),
+        'old_poster_url': old_poster_url,
+        'poster_url': poster_url,
+        'season_results': [],
+        'season_posters_uploaded': 0,
+    }
+
+
+def _run_auto_batch_job(job_id, target_filter, skip_processed=False, include_season_posters=False, replace_existing_season_posters=False):
     results = []
     successful_count = 0
     failed_count = 0
@@ -917,120 +1064,40 @@ def _run_auto_batch_job(job_id, target_filter, skip_processed=False):
                 )
 
                 logging.info(f"Processing item {i+1}/{total_items}: {item_title}")
-                posters = search_tpdb_for_posters_multiple(
-                    item_title,
-                    item_year,
-                    item_type,
-                    tmdb_id=item.get('ProviderIds', {}).get('Tmdb'),
-                    max_posters=1,
+                result = _auto_search_and_upload_item(
+                    item,
+                    include_season_posters=include_season_posters,
+                    replace_existing_season_posters=replace_existing_season_posters,
                 )
 
                 if _is_auto_batch_cancelled(job_id):
                     _finish_auto_batch_cancelled(job_id, results, successful_count, failed_count)
                     return
-
-                if not posters:
-                    result = {
-                        'item_id': item_id,
-                        'item_title': item_title,
-                        'success': False,
-                        'error': 'No posters found',
-                        'old_poster_url': old_poster_url,
-                        'poster_url': None
-                    }
-                    _log_failed_item(item, result['error'], operation='auto-poster')
-                    results.append(result)
-                    failed_count += 1
-                    _update_auto_batch_job(
-                        job_id,
-                        phase='failed',
-                        processed=i + 1,
-                        failed=failed_count,
-                        results=list(results),
-                        message=f'No posters found for {item_title}.',
-                    )
-                    continue
-
-                poster_url = posters[0]['url']
-                safe_title = "".join(c for c in item_title if c.isalnum() or c in " _-").rstrip()
-                save_path = os.path.join(Config.TEMP_POSTER_DIR, f"auto_{safe_title}_{item_id}.jpg")
 
                 _update_auto_batch_job(
                     job_id,
-                    phase='downloading',
-                    new_poster_url=poster_url,
-                    message=f'Downloading poster for {item_title}...'
+                    phase='applying',
+                    new_poster_url=result.get('poster_url'),
+                    message=f'Applying poster to {item_title}...'
                 )
-                if _is_auto_batch_cancelled(job_id):
-                    _finish_auto_batch_cancelled(job_id, results, successful_count, failed_count)
-                    return
 
-                if download_image_with_cookies(poster_url, save_path):
-                    _update_auto_batch_job(job_id, phase='applying', message=f'Applying poster to {item_title}...')
-                    if _is_auto_batch_cancelled(job_id):
-                        _finish_auto_batch_cancelled(job_id, results, successful_count, failed_count)
-                        return
-
-                    upload_success = upload_image_to_jellyfin_improved(item_id, save_path)
-
-                    try:
-                        if os.path.exists(save_path):
-                            os.remove(save_path)
-                    except Exception as cleanup_error:
-                        logging.warning(f"Failed to cleanup temp file {save_path}: {cleanup_error}")
-
-                    if upload_success:
-                        _log_processed_item(item, operation='auto-poster', poster_url=poster_url)
-                        result = {
-                            'item_id': item_id,
-                            'item_title': item_title,
-                            'success': True,
-                            'error': None,
-                            'old_poster_url': old_poster_url,
-                            'poster_url': poster_url
-                        }
-                        results.append(result)
-                        successful_count += 1
-                        logging.info(f"Successfully uploaded poster for: {item_title}")
-                        _update_auto_batch_job(
-                            job_id,
-                            phase='applied',
-                            processed=i + 1,
-                            successful=successful_count,
-                            results=list(results),
-                            message=f'Applied poster to {item_title}.',
-                        )
-                    else:
-                        result = {
-                            'item_id': item_id,
-                            'item_title': item_title,
-                            'success': False,
-                            'error': 'Failed to upload to Jellyfin',
-                            'old_poster_url': old_poster_url,
-                            'poster_url': poster_url
-                        }
-                        _log_failed_item(item, result['error'], operation='auto-poster', poster_url=poster_url)
-                        results.append(result)
-                        failed_count += 1
-                        _update_auto_batch_job(
-                            job_id,
-                            phase='failed',
-                            processed=i + 1,
-                            failed=failed_count,
-                            results=list(results),
-                            message=f'Failed to apply poster to {item_title}.',
-                        )
+                results.append(result)
+                if result.get('success'):
+                    successful_count += 1
+                    season_count = result.get('season_posters_uploaded', 0)
+                    message = f'Applied poster to {item_title}.'
+                    if season_count:
+                        message = f'Applied poster and {season_count} season poster(s) to {item_title}.'
+                    logging.info(f"Successfully uploaded poster for: {item_title}")
+                    _update_auto_batch_job(
+                        job_id,
+                        phase='applied',
+                        processed=i + 1,
+                        successful=successful_count,
+                        results=list(results),
+                        message=message,
+                    )
                 else:
-                    result = {
-                        'item_id': item_id,
-                        'item_title': item_title,
-                        'success': False,
-                        'error': 'Failed to download poster',
-                        'old_poster_url': old_poster_url,
-                        'poster_url': poster_url
-                    }
-                    _log_failed_item(item, result['error'], operation='auto-poster', poster_url=poster_url)
-                    results.append(result)
                     failed_count += 1
                     _update_auto_batch_job(
                         job_id,
@@ -1038,8 +1105,29 @@ def _run_auto_batch_job(job_id, target_filter, skip_processed=False):
                         processed=i + 1,
                         failed=failed_count,
                         results=list(results),
-                        message=f'Failed to download poster for {item_title}.',
+                        message=f'Failed to apply poster to {item_title}.',
                     )
+            except ValueError as e:
+                error_message = str(e)
+                result = {
+                    'item_id': item_id,
+                    'item_title': item_title,
+                    'success': False,
+                    'error': error_message,
+                    'old_poster_url': old_poster_url,
+                    'poster_url': None
+                }
+                _log_failed_item(item, error_message, operation='auto-poster')
+                results.append(result)
+                failed_count += 1
+                _update_auto_batch_job(
+                    job_id,
+                    phase='failed',
+                    processed=i + 1,
+                    failed=failed_count,
+                    results=list(results),
+                    message=f'{error_message} for {item_title}.',
+                )
             except TPDBRateLimited as e:
                 rate_limited_error = str(e)
                 logging.warning(f"TPDB rate-limit detected during batch job; aborting early: {rate_limited_error}")
@@ -1125,8 +1213,19 @@ def start_batch_auto_poster():
     data = request.get_json() or {}
     target_filter = data.get('filter', 'no-poster')
     skip_processed = bool(data.get('skip_processed'))
-    job_id = _create_auto_batch_job(target_filter, skip_processed=skip_processed)
-    worker = threading.Thread(target=_run_auto_batch_job, args=(job_id, target_filter, skip_processed), daemon=True)
+    include_season_posters = bool(data.get('include_season_posters'))
+    replace_existing_season_posters = bool(data.get('replace_existing_season_posters'))
+    job_id = _create_auto_batch_job(
+        target_filter,
+        skip_processed=skip_processed,
+        include_season_posters=include_season_posters,
+        replace_existing_season_posters=replace_existing_season_posters,
+    )
+    worker = threading.Thread(
+        target=_run_auto_batch_job,
+        args=(job_id, target_filter, skip_processed, include_season_posters, replace_existing_season_posters),
+        daemon=True,
+    )
     worker.start()
     return jsonify({'success': True, 'job_id': job_id})
 
@@ -1191,6 +1290,9 @@ def batch_auto_poster():
             target_items = [item for item in all_items if item.get('type') == 'Series']
         else:
             target_items = []
+
+        if library_id:
+            target_items = [item for item in target_items if item.get('library_id') == library_id]
 
         if not target_items:
             return jsonify({

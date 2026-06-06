@@ -101,6 +101,14 @@
                                 <input class="form-check-input me-2" type="checkbox" role="switch" id="skipProcessedAutoBatch">
                                 <label class="form-check-label small text-muted" for="skipProcessedAutoBatch">Skip already processed</label>
                             </div>
+                            <div class="form-check form-switch d-inline-flex align-items-center mb-0">
+                                <input class="form-check-input me-2" type="checkbox" role="switch" id="includeSeasonPostersAutoBatch">
+                                <label class="form-check-label small text-muted" for="includeSeasonPostersAutoBatch">Include season posters</label>
+                            </div>
+                            <div class="form-check form-switch d-inline-flex align-items-center mb-0">
+                                <input class="form-check-input me-2" type="checkbox" role="switch" id="replaceSeasonPostersAutoBatch">
+                                <label class="form-check-label small text-muted" for="replaceSeasonPostersAutoBatch">Replace season posters</label>
+                            </div>
                         <div class="dropdown">
                             <button type="button" class="btn btn-outline-primary dropdown-toggle"
                                     data-bs-toggle="dropdown" aria-expanded="false" id="autoPosterBtn" data-bs-boundary="viewport">
@@ -355,6 +363,13 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" id="posterModalBody"></div>
+            <div class="modal-footer" id="posterModalFooter" style="display:none;">
+                <small class="text-muted me-auto" id="posterSelectionHint">Choose a poster to save it for upload.</small>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="savePosterSelectionBtn" onclick="finishPosterSelection()" disabled>
+                    <i class="fas fa-save me-1"></i>Save Selection
+                </button>
+            </div>
         </div>
     </div>
 </div>
