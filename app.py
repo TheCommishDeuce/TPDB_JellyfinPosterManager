@@ -83,14 +83,19 @@ def index():
     item_type = request.args.get('type', None)
     if item_type not in ('movies', 'series'):
         item_type = None
-    # 'name', 'year', 'date_added'
-    sort_by = request.args.get('sort', 'name')
+    current_library = request.args.get('library', None)
+    # 'library', 'name', 'year', 'date_added'
+    sort_by = request.args.get('sort', 'library')
 
     try:
         server_info = get_jellyfin_server_info()
         logging.info(f"Connected to server: {server_info['name']}")
 
-        jellyfin_items = get_jellyfin_items(sort_by=sort_by)
+        jellyfin_libraries = get_jellyfin_libraries()
+        jellyfin_items = get_jellyfin_items(sort_by=sort_by, libraries=jellyfin_libraries)
+        library_ids = {library['id'] for library in jellyfin_libraries}
+        if current_library not in library_ids:
+            current_library = None
 
         # Store in session
         user_sessions[session_id] = {
@@ -103,17 +108,21 @@ def index():
 
         return render_template('index.html',
                                items=jellyfin_items,
+                               libraries=jellyfin_libraries,
                                server_info=server_info,
                                current_filter=item_type,
+                               current_library=current_library,
                                current_sort=sort_by)
 
     except Exception as e:
         logging.error(f"Error loading main page: {e}")
         return render_template('index.html',
                                items=[],
+                               libraries=[],
                                server_info={'name': 'Jellyfin Server', 'version': '', 'id': ''},
                                error=str(e),
                                current_filter=item_type,
+                               current_library=current_library,
                                current_sort=sort_by)
 
 @app.route('/item/<item_id>/posters')
@@ -437,6 +446,7 @@ def batch_auto_poster():
 
         data = request.get_json() or {}
         target_filter = data.get('filter', 'no-poster')  # 'all', 'no-poster', 'movies', 'series'
+        library_id = data.get('library_id') or ''
 
         logging.info(f"Starting batch auto-poster operation with filter: {target_filter}")
 

@@ -87,6 +87,8 @@ document.addEventListener('DOMContentLoaded', function() {
     updateUploadAllButton();
 
     const urlParams = new URLSearchParams(window.location.search);
+    const libraryFilter = document.getElementById('libraryFilter');
+    if (libraryFilter) libraryFilter.value = urlParams.get('library') || '';
     filterContent(urlParams.get('type') || 'all', false);
 
     console.log('Jellyfin Poster Manager initialized');
@@ -99,16 +101,28 @@ function filterContent(type, updateUrl = true) {
     if (type === 'series') domType = 'series';
 
     const items = document.querySelectorAll('.item-card-wrapper');
+    const selectedLibrary = document.getElementById('libraryFilter')?.value || '';
     let visibleCount = 0;
 
     items.forEach(item => {
         const itemType = item.getAttribute('data-type');
-        if (type === 'all' || itemType === domType) {
+        const itemLibrary = item.getAttribute('data-library-id') || '';
+        const matchesType = type === 'all' || itemType === domType;
+        const matchesLibrary = !selectedLibrary || itemLibrary === selectedLibrary;
+        if (matchesType && matchesLibrary) {
             item.classList.remove('hidden');
             visibleCount++;
         } else {
             item.classList.add('hidden');
         }
+    });
+
+    document.querySelectorAll('.library-group-header').forEach(header => {
+        const headerLibrary = header.getAttribute('data-library-id') || '';
+        const hasVisibleItems = Array.from(items).some(item =>
+            !item.classList.contains('hidden') && (item.getAttribute('data-library-id') || '') === headerLibrary
+        );
+        header.classList.toggle('hidden', !hasVisibleItems);
     });
 
     const visibleItemCount = document.getElementById('visibleItemCount');
@@ -117,7 +131,7 @@ function filterContent(type, updateUrl = true) {
     const itemCountTotalText = document.getElementById('itemCountTotalText');
     const allItemCount = Number(document.getElementById('allItemCount')?.dataset.count || items.length);
     if (itemCountTotalText) {
-        itemCountTotalText.innerHTML = type === 'all' ? '' : ` of <strong>${allItemCount}</strong>`;
+        itemCountTotalText.innerHTML = type === 'all' && !selectedLibrary ? '' : ` of <strong>${allItemCount}</strong>`;
     }
 
     const filterId = type === 'movies' ? 'filterMovies' : type === 'series' ? 'filterSeries' : 'filterAll';
@@ -132,8 +146,19 @@ function filterContent(type, updateUrl = true) {
     } else {
         url.searchParams.set('type', type); // keep 'movies'/'series'
     }
+    if (selectedLibrary) {
+        url.searchParams.set('library', selectedLibrary);
+    } else {
+        url.searchParams.delete('library');
+    }
     url.hash = '';
     window.history.pushState({}, '', url);
+}
+
+function filterLibrary() {
+    const currentType = document.querySelector('input[name="contentFilter"]:checked')?.id;
+    const type = currentType === 'filterMovies' ? 'movies' : currentType === 'filterSeries' ? 'series' : 'all';
+    filterContent(type);
 }
 
 function sortContent(sortBy) {
@@ -516,8 +541,11 @@ async function startAutoBatchPoster(filter) {
             'movies': 'Automatically find and upload posters for all Movies?',
             'series': 'Automatically find and upload posters for all Series?'
         }[filter] || 'Start automatic poster upload?';
+        const librarySelect = document.getElementById('libraryFilter');
+        const libraryId = librarySelect?.value || '';
+        const libraryName = libraryId ? librarySelect.options[librarySelect.selectedIndex]?.text : '';
 
-        if (!confirm(confirmText)) return;
+        if (!confirm(libraryName ? `${confirmText}\n\nLibrary: ${libraryName}` : confirmText)) return;
 
         const autoBtn = document.getElementById('autoPosterBtn');
         if (autoBtn) {
@@ -532,7 +560,7 @@ async function startAutoBatchPoster(filter) {
         const resp = await fetch('/batch-auto-poster', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filter })
+            body: JSON.stringify({ filter, library_id: libraryId })
         });
 
         const data = await resp.json();
