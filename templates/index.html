@@ -97,6 +97,9 @@
                     </div>
                     <div class="col-md-4">
                         <div class="d-flex flex-wrap align-items-center justify-content-md-end gap-2">
+                            <button class="btn btn-outline-danger" type="button" id="cancelAutoBatchBtn" onclick="cancelAutoBatch()" style="display: none;">
+                                <i class="fas fa-stop me-1"></i>Cancel
+                            </button>
                             <div class="dropdown">
                                 <button type="button" class="btn btn-outline-primary dropdown-toggle"
                                         data-bs-toggle="dropdown" aria-expanded="false" id="autoPosterBtn" data-bs-boundary="viewport">
@@ -170,34 +173,29 @@
                         </div>
                         <div class="text-end">
                             <small class="text-muted d-block" id="autoBatchProgressCounts">0 / 0</small>
-                            <button class="btn btn-outline-danger btn-sm mt-1" type="button" id="cancelAutoBatchBtn" onclick="cancelAutoBatch()" style="display: none;">
-                                <i class="fas fa-stop me-1"></i>Cancel
-                            </button>
+                            <small class="text-muted d-block mt-1">Estimated time remaining</small>
+                            <strong id="autoBatchEta">Calculating...</strong>
                         </div>
                     </div>
                     <div class="progress">
                         <div id="autoBatchProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
                     </div>
-                    <div class="row text-center mt-2 g-2">
-                        <div class="col-6 col-md-3">
+                    <div class="row row-cols-2 row-cols-md-4 text-center mt-2 g-2">
+                        <div class="col">
                             <small class="text-muted d-block">Remaining</small>
                             <strong id="autoBatchRemaining">0</strong>
                         </div>
-                        <div class="col-6 col-md-3">
+                        <div class="col">
                             <small class="text-muted d-block">Successful</small>
                             <strong class="text-success" id="autoBatchSuccessful">0</strong>
                         </div>
-                        <div class="col-6 col-md-3">
+                        <div class="col">
                             <small class="text-muted d-block">Failed</small>
                             <strong class="text-danger" id="autoBatchFailed">0</strong>
                         </div>
-                        <div class="col-6 col-md-3">
+                        <div class="col">
                             <small class="text-muted d-block">Status</small>
                             <strong id="autoBatchPhase">Starting</strong>
-                        </div>
-                        <div class="col-12 mt-2">
-                            <small class="text-muted d-block">Estimated time remaining</small>
-                            <strong id="autoBatchEta">Calculating...</strong>
                         </div>
                     </div>
                 </div>
