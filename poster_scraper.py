@@ -188,7 +188,11 @@ def setup_selenium_and_login(force=False):
                 excluded_switches.append("enable-logging")
             chrome_options.add_experimental_option("excludeSwitches", excluded_switches)
             chrome_options.add_experimental_option("useAutomationExtension", False)
-            selenium_driver = webdriver.Chrome(options=chrome_options)
+            chrome_service = None
+            if not getattr(Config, "DEBUG", False):
+                chrome_service = Service(log_output=os.devnull)
+
+            selenium_driver = webdriver.Chrome(options=chrome_options, service=chrome_service)
             selenium_driver.set_page_load_timeout(30)
             try:
                 selenium_driver.execute_cdp_cmd(
