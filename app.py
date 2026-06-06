@@ -824,13 +824,6 @@ def _select_auto_batch_target_items(all_items, target_filter, skip_processed=Fal
     else:
         target_items = []
 
-    # TEMP: constrain auto-poster runs for issue #18 testing.
-    test_titles = {'cowboy bebop', 'crash landing on you', 'claymore'}
-    target_items = [
-        item for item in all_items
-        if (item.get('title') or '').strip().lower() in test_titles
-    ]
-
     if skip_processed:
         processed_item_ids = _read_processed_item_ids()
         target_items = [item for item in target_items if item.get('id') not in processed_item_ids]
