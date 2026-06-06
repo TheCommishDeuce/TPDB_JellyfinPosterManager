@@ -31,6 +31,8 @@ FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR
 RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_DIR, 'results.log'))
 auto_batch_jobs = {}
 auto_batch_jobs_lock = threading.Lock()
+season_count_cache = {}
+season_count_cache_lock = threading.Lock()
 
 
 def _evict_stale_user_sessions(max_age_sec=7200):
@@ -671,8 +673,16 @@ def get_item_season_count(item_id):
         return jsonify({'season_count': None})
 
     try:
+        with season_count_cache_lock:
+            cached_count = season_count_cache.get(item_id)
+        if cached_count is not None:
+            return jsonify({'season_count': cached_count})
+
         seasons = get_jellyfin_seasons(item_id)
-        return jsonify({'season_count': len(seasons)})
+        season_count = len(seasons)
+        with season_count_cache_lock:
+            season_count_cache[item_id] = season_count
+        return jsonify({'season_count': season_count})
     except Exception as e:
         logging.warning(f"Could not get season count for {item.get('title', item_id)}: {e}")
         return jsonify({'error': str(e)}), 500

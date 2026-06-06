@@ -155,6 +155,7 @@ body {
 .dropdown-item:hover, .dropdown-item:focus { background: var(--surface-muted); color: var(--app-text); }
 .auto-batch-settings-menu { min-width: 240px; }
 .auto-batch-settings-menu .form-check-label { color: var(--app-text); }
+.auto-batch-card { position: relative; z-index: 20; }
 
 /* Alerts */
 .alert { border: none; border-radius: var(--border-radius); padding: 1rem 1.5rem; margin-bottom: 1rem; border-left: 4px solid; }

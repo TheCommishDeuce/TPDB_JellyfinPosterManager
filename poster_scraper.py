@@ -713,6 +713,7 @@ def search_tpdb_for_poster_groups(
                         }
                         discovered_set_urls = []
                         discovered_set_lookup = {}
+                        discovered_set_order = {}
 
                         for poster_link in item_soup.select(ITEM_POSTER_SELECTOR)[:Config.MAX_POSTERS_PER_ITEM]:
                             href = poster_link.get('href')
@@ -723,6 +724,7 @@ def search_tpdb_for_poster_groups(
                             metadata = _extract_tpdb_card_metadata(poster_link)
                             set_url = metadata.get('set_url')
                             if set_url and set_url not in discovered_set_lookup:
+                                discovered_set_order[set_url] = len(discovered_set_urls)
                                 discovered_set_urls.append(set_url)
                                 discovered_set_lookup[set_url] = {
                                     'set_id': metadata.get('set_id'),
@@ -732,7 +734,7 @@ def search_tpdb_for_poster_groups(
                                 }
                             if requested_set_urls and set_url not in requested_set_urls:
                                 continue
-                            if not requested_set_urls and set_url and discovered_set_urls.index(set_url) >= max_posters:
+                            if not requested_set_urls and set_url and discovered_set_order.get(set_url, 0) >= max_posters:
                                 continue
                             base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
                             season_key = _extract_tpdb_season_key(poster_link)
