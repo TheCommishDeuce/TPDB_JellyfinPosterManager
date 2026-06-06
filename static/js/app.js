@@ -76,6 +76,7 @@ let autoBatchPollTimer = null;
 let currentAutoBatchJobId = null;
 let autoBatchStartedAt = null;
 let manualSelectionVisible = false;
+let posterSearchProgressTimer = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     // Theme first
@@ -150,11 +151,45 @@ function sortContent(sortBy) {
     window.location.href = url.toString();
 }
 
+function startPosterSearchProgress() {
+    stopPosterSearchProgress();
+
+    const loadingText = document.getElementById('loadingText');
+    const loadingSubtext = document.getElementById('loadingSubtext');
+    const startedAt = Date.now();
+    const steps = [
+        { at: 0, text: 'Searching TPDB for matching entries...' },
+        { at: 5, text: 'Checking matching TPDB entries for available posters...' },
+        { at: 10, text: 'Trying additional matches if the first result has no posters...' },
+        { at: 15, text: 'Converting poster previews for the picker...' },
+        { at: 25, text: 'Still working. TPDB responses can take a little while...' }
+    ];
+
+    const update = () => {
+        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        const currentStep = [...steps].reverse().find(step => elapsed >= step.at) || steps[0];
+        if (loadingText) loadingText.textContent = 'Searching and converting posters...';
+        if (loadingSubtext) loadingSubtext.textContent = currentStep.text;
+    };
+
+    update();
+    posterSearchProgressTimer = setInterval(update, 1000);
+}
+
+function stopPosterSearchProgress() {
+    if (posterSearchProgressTimer) {
+        clearInterval(posterSearchProgressTimer);
+        posterSearchProgressTimer = null;
+    }
+
+    const loadingSubtext = document.getElementById('loadingSubtext');
+    if (loadingSubtext) loadingSubtext.textContent = 'This may take a few moments';
+}
+
 // Load posters for item
 async function loadPosters(itemId) {
     currentItemId = itemId;
-    const lt = document.getElementById('loadingText');
-    if (lt) lt.textContent = 'Searching and converting posters...';
+    startPosterSearchProgress();
     if (loadingModal) loadingModal.show();
 
     try {
@@ -171,6 +206,8 @@ async function loadPosters(itemId) {
         console.error('Error loading posters:', error);
         if (loadingModal) loadingModal.hide();
         showAlert('Failed to load posters: ' + error.message, 'danger');
+    } finally {
+        stopPosterSearchProgress();
     }
 }
 
