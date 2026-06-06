@@ -97,52 +97,62 @@
                     </div>
                     <div class="col-md-4">
                         <div class="d-flex flex-wrap align-items-center justify-content-md-end gap-2">
-                            <div class="form-check form-switch d-inline-flex align-items-center mb-0">
-                                <input class="form-check-input me-2" type="checkbox" role="switch" id="skipProcessedAutoBatch">
-                                <label class="form-check-label small text-muted" for="skipProcessedAutoBatch">Skip already processed</label>
+                            <div class="dropdown">
+                                <button type="button" class="btn btn-outline-primary dropdown-toggle"
+                                        data-bs-toggle="dropdown" aria-expanded="false" id="autoPosterBtn" data-bs-boundary="viewport">
+                                    <i class="fas fa-magic me-1"></i>
+                                    Auto-Get Posters
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('no-poster')">
+                                            <i class="fas fa-exclamation-circle me-2 text-warning"></i>
+                                            Items Without Posters
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('all')">
+                                            <i class="fas fa-th me-2 text-primary"></i>
+                                            All Items
+                                        </a>
+                                    </li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('movies')">
+                                            <i class="fas fa-film me-2 text-info"></i>
+                                            Movies Only
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('series')">
+                                            <i class="fas fa-tv me-2 text-success"></i>
+                                            TV Series Only
+                                        </a>
+                                    </li>
+                                </ul>
                             </div>
-                            <div class="form-check form-switch d-inline-flex align-items-center mb-0">
-                                <input class="form-check-input me-2" type="checkbox" role="switch" id="includeSeasonPostersAutoBatch">
-                                <label class="form-check-label small text-muted" for="includeSeasonPostersAutoBatch">Include season posters</label>
+                            <div class="dropdown">
+                                <button type="button" class="btn btn-outline-secondary"
+                                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                                        data-bs-boundary="viewport" aria-label="Auto-Get settings">
+                                    <i class="fas fa-sliders-h"></i>
+                                </button>
+                                <div class="dropdown-menu dropdown-menu-end auto-batch-settings-menu p-3">
+                                    <div class="fw-semibold mb-2">Auto-Get Settings</div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="skipProcessedAutoBatch">
+                                        <label class="form-check-label small" for="skipProcessedAutoBatch">Skip already processed</label>
+                                    </div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="includeSeasonPostersAutoBatch">
+                                        <label class="form-check-label small" for="includeSeasonPostersAutoBatch">Include season posters</label>
+                                    </div>
+                                    <div class="form-check form-switch mb-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="replaceSeasonPostersAutoBatch">
+                                        <label class="form-check-label small" for="replaceSeasonPostersAutoBatch">Replace season posters</label>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="form-check form-switch d-inline-flex align-items-center mb-0">
-                                <input class="form-check-input me-2" type="checkbox" role="switch" id="replaceSeasonPostersAutoBatch">
-                                <label class="form-check-label small text-muted" for="replaceSeasonPostersAutoBatch">Replace season posters</label>
-                            </div>
-                        <div class="dropdown">
-                            <button type="button" class="btn btn-outline-primary dropdown-toggle"
-                                    data-bs-toggle="dropdown" aria-expanded="false" id="autoPosterBtn" data-bs-boundary="viewport">
-                                <i class="fas fa-magic me-1"></i>
-                                Auto-Get Posters
-                            </button>
-                            <ul class="dropdown-menu">
-                                <li>
-                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('no-poster')">
-                                        <i class="fas fa-exclamation-circle me-2 text-warning"></i>
-                                        Items Without Posters
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('all')">
-                                        <i class="fas fa-th me-2 text-primary"></i>
-                                        All Items
-                                    </a>
-                                </li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li>
-                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('movies')">
-                                        <i class="fas fa-film me-2 text-info"></i>
-                                        Movies Only
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('series')">
-                                        <i class="fas fa-tv me-2 text-success"></i>
-                                        TV Series Only
-                                    </a>
-                                </li>
-                            </ul>
-                        </div>
                         </div>
                     </div>
                 </div>
