@@ -640,6 +640,27 @@ def get_item_posters(item_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/item/<item_id>/season-count')
+def get_item_season_count(item_id):
+    session_id = session.get('session_id')
+    if not session_id or session_id not in user_sessions:
+        return jsonify({'error': 'Session not found'}), 400
+    _touch_session(session_id)
+
+    item = next((i for i in user_sessions[session_id]['items'] if i['id'] == item_id), None)
+    if not item:
+        return jsonify({'error': 'Item not found'}), 404
+    if item.get('type') != 'Series':
+        return jsonify({'season_count': None})
+
+    try:
+        seasons = get_jellyfin_seasons(item_id)
+        return jsonify({'season_count': len(seasons)})
+    except Exception as e:
+        logging.warning(f"Could not get season count for {item.get('title', item_id)}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/item/<item_id>/select', methods=['POST'])
 def select_poster(item_id):
     """User selects a poster for an item (no upload yet)."""

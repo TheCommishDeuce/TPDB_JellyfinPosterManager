@@ -86,6 +86,47 @@ function initAutoBatchSeasonSettings() {
     syncReplaceState();
 }
 
+function initSeriesSeasonCounts() {
+    const badges = document.querySelectorAll('[data-season-count-item-id]');
+    if (!badges.length) return;
+
+    const loadSeasonCount = async (badge) => {
+        if (!badge || badge.dataset.loaded === 'true') return;
+        badge.dataset.loaded = 'true';
+
+        try {
+            const response = await fetch(`/item/${encodeURIComponent(badge.dataset.seasonCountItemId)}/season-count`);
+            const data = await response.json();
+            if (!response.ok || data.error || data.season_count === null || data.season_count === undefined) {
+                badge.style.display = 'none';
+                return;
+            }
+
+            const count = Number(data.season_count);
+            const text = badge.querySelector('.season-count-text');
+            if (text) text.textContent = `${count} season${count === 1 ? '' : 's'}`;
+        } catch (error) {
+            console.warn('Could not load season count:', error);
+            badge.style.display = 'none';
+        }
+    };
+
+    if (!('IntersectionObserver' in window)) {
+        badges.forEach(loadSeasonCount);
+        return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            observer.unobserve(entry.target);
+            loadSeasonCount(entry.target);
+        });
+    }, { rootMargin: '200px' });
+
+    badges.forEach(badge => observer.observe(badge));
+}
+
 // Global Variables
 let currentItemId = null;
 let selectedPosters = {};
@@ -116,6 +157,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const themeBtn = document.getElementById('themeToggle');
     if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
     initAutoBatchSeasonSettings();
+    initSeriesSeasonCounts();
 
     // Modals
     const lm = document.getElementById('loadingModal');

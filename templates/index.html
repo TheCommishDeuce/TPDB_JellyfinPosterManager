@@ -314,12 +314,23 @@
             </div>
 
             <div class="card-body p-2">
-                <h6 class="card-title text-truncate mb-1" title="{{ item.title }}">
+                <h6 class="card-title text-truncate text-center mb-1" title="{{ item.title }}">
                     {{ item.title }}
                 </h6>
-                {% if item.year %}
-                <small class="text-muted d-block mb-2">
+                {% if item.year or item.type == 'Series' %}
+                <small class="text-muted d-block text-center mb-2">
+                    {% if item.year %}
                     <i class="fas fa-calendar me-1"></i>{{ item.year }}
+                    {% endif %}
+                    {% if item.type == 'Series' and item.season_count is defined and item.season_count is not none %}
+                    {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
+                    <i class="fas fa-layer-group me-1"></i>{{ item.season_count }} season{{ '' if item.season_count == 1 else 's' }}
+                    {% elif item.type == 'Series' %}
+                    <span class="series-season-count" data-season-count-item-id="{{ item.id }}">
+                        {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
+                        <i class="fas fa-layer-group me-1"></i><span class="season-count-text">Seasons</span>
+                    </span>
+                    {% endif %}
                 </small>
                 {% endif %}
 

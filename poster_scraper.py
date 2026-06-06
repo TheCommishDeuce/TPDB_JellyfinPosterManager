@@ -1158,7 +1158,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
             all_items_url = (
                 f"{Config.JELLYFIN_URL}/Items"
                 f"?IncludeItemTypes=Movie,Series&Recursive=true"
-                f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,Type"
+                f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,Type,ChildCount"
                 f"&SortBy={sort_by_param}&SortOrder={sort_order}"
             )
             response = requests.get(all_items_url, headers=headers, timeout=15)
@@ -1180,6 +1180,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
                         "type": "Movie" if item.get('Type') == 'Movie' else "Series",
                         "thumbnail_url": thumbnail_url,
                         "date_created": item.get('DateCreated', ''),
+                        "season_count": item.get('ChildCount') if item.get('Type') == 'Series' else None,
                         'ProviderIds': item.get('ProviderIds', {})
                     })
             # Python-side sort for safety
@@ -1199,7 +1200,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
                 movies_url = (
                     f"{Config.JELLYFIN_URL}/Items"
                     f"?IncludeItemTypes=Movie&Recursive=true"
-                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated"
+                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,ChildCount"
                     f"&SortBy={sort_by_param}&SortOrder={sort_order}"
                 )
                 response = requests.get(movies_url, headers=headers, timeout=15)
@@ -1247,6 +1248,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
                         "type": "Series",
                         "thumbnail_url": thumbnail_url,
                         "date_created": item.get('DateCreated', ''),
+                        "season_count": item.get('ChildCount'),
                         'ProviderIds': item.get('ProviderIds', {})
                     })
     except Exception as e:
