@@ -192,17 +192,17 @@ function startPosterSearchProgress() {
     const startedAt = Date.now();
     const steps = [
         { at: 0, text: 'Searching TPDB for matching entries...' },
-        { at: 5, text: 'Opening the best TPDB result and reading poster sets...' },
-        { at: 10, text: 'Checking linked TPDB sets for matching season posters...' },
-        { at: 18, text: 'Checking season-specific poster pages when needed...' },
-        { at: 25, text: 'Downloading poster previews for the picker...' },
+        { at: 5, text: 'Opening the best match and reading posters...' },
+        { at: 10, text: 'Checking linked sets for matching season posters...' },
+        { at: 18, text: 'Checking season-specific poster pages...' },
+        { at: 25, text: 'Downloading poster previews...' },
         { at: 40, text: 'Still working. TPDB is being checked gently to avoid rate limits...' }
     ];
 
     const update = () => {
         const elapsed = Math.floor((Date.now() - startedAt) / 1000);
         const currentStep = [...steps].reverse().find(step => elapsed >= step.at) || steps[0];
-        if (loadingText) loadingText.textContent = 'Searching TPDB and preparing posters...';
+        if (loadingText) loadingText.textContent = 'Searching for posters...';
         if (loadingSubtext) loadingSubtext.textContent = currentStep.text;
     };
 
