@@ -175,6 +175,9 @@ def setup_selenium_and_login(force=False):
             if not getattr(Config, "DEBUG", False):
                 chrome_options.add_argument("--disable-logging")
                 chrome_options.add_argument("--log-level=3")
+                chrome_options.add_argument("--disable-webgpu")
+                chrome_options.add_argument("--disable-vulkan")
+                chrome_options.add_argument("--disable-features=WebGPU,Vulkan,UseSkiaRenderer")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -301,7 +304,7 @@ def download_image_with_cookies(url, save_path):
                     for chunk in response.iter_content(8192):
                         if chunk:
                             f.write(chunk)
-                logging.info(f"Saved image to {save_path}")
+                logging.debug(f"Saved image to {save_path}")
                 return True
             else:
                 logging.warning(f"Failed to download image from {url} (status {response.status_code})")
@@ -415,7 +418,7 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
 
             if tmdb_title:
                 search_query = f'{tmdb_title} ({year})' if year else tmdb_title
-                logging.info(f"Using TMDB title for TPDB search: {search_query}")
+                logging.debug(f"Using TMDB title for TPDB search: {search_query}")
         except Exception as e:
             logging.warning(f"TMDB lookup failed for {item_title} ({item_type}): {e}; falling back to Jellyfin title.")
 
@@ -428,7 +431,7 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
     elif item_type == "Series":
         search_url += "&section=shows"
 
-    logging.info(f"TPDB search URL: {search_url}")
+    logging.debug(f"TPDB search URL: {search_url}")
 
     try:
         poster_urls = []
@@ -516,7 +519,10 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
                     continue
                 raise
 
-        logging.info(f"Found {len(poster_urls)} poster links; converting to base64 for preview")
+        if poster_urls:
+            logging.info(f"Found {len(poster_urls)} poster links; converting to base64 for preview")
+        else:
+            logging.warning("Found 0 poster links for '%s'.", item_title)
         poster_data = []
         for i, poster_url in enumerate(poster_urls):
             base64_image = get_image_as_base64(poster_url)
@@ -591,12 +597,12 @@ def upload_image_to_jellyfin_improved(item_id, image_path):
     """Upload image to Jellyfin with improved logic"""
     try:
         if not os.path.exists(image_path):
-            print(f"Image file not found: {image_path}")
+            logging.warning(f"Image file not found: {image_path}")
             return False
 
         # Check if images are identical
         if are_images_identical(item_id, image_path, 'Primary'):
-            print(f"Image for item {item_id} is identical to existing.")
+            logging.info(f"Image for item {item_id} is identical to existing.")
             return True
 
         # Read and encode the image
@@ -617,14 +623,14 @@ def upload_image_to_jellyfin_improved(item_id, image_path):
         response = requests.post(url, headers=headers, data=encoded_data, timeout=30)
 
         if response.status_code in [200, 204]:
-            print("Artwork uploaded successfully!")
+            logging.info("Artwork uploaded successfully.")
             return True
         else:
-            print(f"Failed to upload artwork: {response.status_code}")
+            logging.warning(f"Failed to upload artwork: {response.status_code}")
             return False
 
     except Exception as e:
-        print(f"Error during image upload: {e}")
+        logging.error(f"Error during image upload: {e}")
         return False
     finally:
         # Clean up memory
@@ -673,7 +679,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
 
     try:
         if sort_by == 'date_added':
-            logging.info("Fetching all items for chronological sorting (mixed types).")
+            logging.debug("Fetching all items for chronological sorting (mixed types).")
             all_items_url = (
                 f"{Config.JELLYFIN_URL}/Items"
                 f"?IncludeItemTypes=Movie,Series&Recursive=true"
@@ -772,5 +778,5 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
         logging.error(f"Error fetching items from Jellyfin: {e}")
         return []
 
-    logging.info(f"Total items fetched: {len(items)}")
+    logging.debug(f"Total items fetched: {len(items)}")
     return items
