@@ -145,6 +145,8 @@ body {
 .poster-card.selected { border: 3px solid var(--success-color); box-shadow: 0 0 20px rgba(40, 167, 69, 0.3); }
 .poster-group { border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 1rem; background: var(--surface-muted); }
 .poster-group-header { border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; }
+.poster-set-browser-list { display: grid; gap: 0.5rem; }
+.poster-set-browser-row { border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem; background: var(--surface); }
 .poster-target-label { padding: 0.35rem 0.5rem; font-size: 0.8rem; color: var(--muted-color); text-align: center; border-top: 1px solid var(--border-color); }
 
 /* Dropdown menu */

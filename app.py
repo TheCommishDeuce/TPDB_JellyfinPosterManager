@@ -614,6 +614,7 @@ def get_item_posters(item_id):
         eligible_seasons = get_jellyfin_seasons(item['id']) if item.get('type') == 'Series' else []
         poster_set_limit = request.args.get('set_limit', default=3, type=int)
         poster_set_limit = max(1, min(poster_set_limit or 3, Config.MAX_POSTERS_PER_ITEM))
+        requested_set_url = request.args.get('set_url')
         search_result = search_tpdb_for_poster_groups(
             item['title'],
             item_year=item.get('year'),
@@ -621,6 +622,7 @@ def get_item_posters(item_id):
             tmdb_id=item.get('ProviderIds', {}).get('Tmdb'),
             eligible_seasons=eligible_seasons,
             max_posters=poster_set_limit if item.get('type') == 'Series' else Config.MAX_POSTERS_PER_ITEM,
+            requested_set_urls=[requested_set_url] if requested_set_url else None,
         )
         return jsonify({
             'item': item,

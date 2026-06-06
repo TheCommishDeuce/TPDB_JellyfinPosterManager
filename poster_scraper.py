@@ -455,7 +455,12 @@ def _extract_tpdb_card_metadata(poster_link):
     set_link = card.select_one('a[href*="/set/"]') if card else None
     uploader_link = card.select_one('.uploaded-by a') if card else None
     overlay = card.select_one('.overlay[data-poster-id]') if card else None
+    preview_source = card.select_one('source[srcset], img.tpdb-poster[src]') if card else None
     set_url = _tpdb_absolute_url(set_link.get('href')) if set_link else None
+    preview_href = preview_source.get('srcset') or preview_source.get('src') if preview_source else None
+    if preview_href:
+        preview_href = preview_href.split(',')[0].strip().split(' ')[0]
+    preview_url = _tpdb_absolute_url(preview_href)
     set_id = None
     if set_url:
         match = re.search(r"/set/(\d+)", set_url)
@@ -469,6 +474,7 @@ def _extract_tpdb_card_metadata(poster_link):
         'uploader': uploader_link.get_text(strip=True) if uploader_link else 'Unknown',
         'tpdb_poster_id': overlay.get('data-poster-id') if overlay else None,
         'tpdb_poster_type': overlay.get('data-poster-type') if overlay else None,
+        'preview_url': preview_url,
     }
 
 
@@ -545,11 +551,13 @@ def _tpdb_url_with_query_params(url, **params):
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
-def _get_tpdb_preview_image(image_url, include_base64):
+def _get_tpdb_preview_image(image_url, include_base64, preview_url=None):
     if not include_base64:
         return None
-    time.sleep(TPDB_IMAGE_PREVIEW_DELAY_SEC)
-    return get_image_as_base64(image_url)
+    image_source = preview_url or image_url
+    if image_source == image_url:
+        time.sleep(TPDB_IMAGE_PREVIEW_DELAY_SEC)
+    return get_image_as_base64(image_source)
 
 
 def _open_tpdb_page_with_delay(url):
@@ -566,10 +574,12 @@ def search_tpdb_for_poster_groups(
     max_posters=18,
     max_groups=6,
     include_base64=True,
+    requested_set_urls=None,
 ):
     """Return grouped TPDB poster candidates plus a flat show-poster list."""
     global selenium_driver
     eligible_seasons = eligible_seasons or []
+    requested_set_urls = set(requested_set_urls or [])
     season_by_key = {
         _season_key_from_jellyfin(season): season
         for season in eligible_seasons
@@ -604,14 +614,21 @@ def search_tpdb_for_poster_groups(
                         return {'posters': [], 'groups': [], 'best_group': None, 'search_query': search_query}
 
                     expected_year = extract_title_year(search_query) or (str(item_year) if item_year else None)
+                    expected_title = strip_title_year(search_query)
+                    expected_title_norm = normalize_title_for_comparison(expected_title)
                     candidate_links = []
+                    year_mismatch_count = 0
                     for index, link in enumerate(search_result_links):
                         try:
                             title_element = link.find(class_="text-truncate") or link.find("span") or link
                             result_title = title_element.get_text(strip=True) if title_element else link.get_text(strip=True)
+                            display_title = format_title_year_spacing(result_title)
                             result_year = extract_title_year(result_title)
+                            result_title_norm = normalize_title_for_comparison(strip_title_year(result_title))
+                            exact_title_match = bool(expected_title_norm and expected_title_norm == result_title_norm)
                             if expected_year and result_year and result_year != expected_year:
-                                logging.info("Skipping TPDB result for '%s' due to year mismatch: %s", search_query, result_title)
+                                year_mismatch_count += 1
+                                logging.debug("Skipping TPDB result for '%s' due to year mismatch: %s", search_query, display_title)
                                 continue
                             item_page_path = link.get('href')
                             target_item_page_url = item_page_path if item_page_path and item_page_path.startswith('http') else (
@@ -620,23 +637,53 @@ def search_tpdb_for_poster_groups(
                             if not target_item_page_url:
                                 continue
                             candidate_links.append({
-                                'title': result_title,
+                                'title': display_title,
                                 'year': result_year,
                                 'score': calculate_title_match_score(search_query, result_title),
+                                'exact_title_match': exact_title_match,
+                                'exact_year_match': exact_title_match and (not expected_year or result_year == expected_year),
                                 'url': target_item_page_url,
                                 'index': index,
                             })
                         except Exception:
                             continue
 
+                    if year_mismatch_count:
+                        logging.debug("Skipped %d TPDB result(s) for '%s' due to year mismatch.", year_mismatch_count, search_query)
+
+                    exact_matches = sorted(
+                        [candidate for candidate in candidate_links if candidate['exact_year_match']],
+                        key=lambda candidate: candidate['index'],
+                    )
                     strong_matches = [candidate for candidate in candidate_links if candidate['score'] >= 0.8]
-                    candidates_to_check = sorted(
+                    fallback_matches = sorted(
                         strong_matches or candidate_links,
                         key=lambda candidate: (-candidate['score'], candidate['index'])
-                    )[:max_groups]
+                    )
+                    if exact_matches:
+                        logging.info(
+                            "Found %d exact TPDB result(s) for '%s'; checking exact matches first.",
+                            len(exact_matches),
+                            search_query,
+                        )
+
+                    queued_candidate_indexes = set()
+                    candidates_to_check = []
+                    for candidate in exact_matches + fallback_matches:
+                        if candidate['index'] in queued_candidate_indexes:
+                            continue
+                        candidates_to_check.append(candidate)
+                        queued_candidate_indexes.add(candidate['index'])
+                        if len(candidates_to_check) >= max_groups:
+                            break
 
                     for candidate in candidates_to_check:
-                        logging.info("Checking TPDB result for '%s': %s (score %.2f)", search_query, candidate['title'], candidate['score'])
+                        logging.info(
+                            "Checking TPDB result for '%s': %s (%d%% match)",
+                            search_query,
+                            candidate['title'],
+                            round(candidate['score'] * 100),
+                        )
                         _open_tpdb_page_with_delay(candidate['url'])
                         current_url = selenium_driver.current_url
                         if _is_login_url(current_url):
@@ -662,19 +709,32 @@ def search_tpdb_for_poster_groups(
                             'eligible_season_count': len(season_by_key),
                             'covered_season_count': 0,
                             'covered_season_keys': [],
+                            'available_sets': [],
                         }
                         discovered_set_urls = []
+                        discovered_set_lookup = {}
 
-                        for poster_link in item_soup.select(ITEM_POSTER_SELECTOR)[:max_posters]:
+                        for poster_link in item_soup.select(ITEM_POSTER_SELECTOR)[:Config.MAX_POSTERS_PER_ITEM]:
                             href = poster_link.get('href')
                             poster_url = _tpdb_absolute_url(href)
                             if not poster_url:
                                 continue
 
                             metadata = _extract_tpdb_card_metadata(poster_link)
-                            if metadata.get('set_url') and metadata['set_url'] not in discovered_set_urls:
-                                discovered_set_urls.append(metadata['set_url'])
-                            base64_image = _get_tpdb_preview_image(poster_url, include_base64)
+                            set_url = metadata.get('set_url')
+                            if set_url and set_url not in discovered_set_lookup:
+                                discovered_set_urls.append(set_url)
+                                discovered_set_lookup[set_url] = {
+                                    'set_id': metadata.get('set_id'),
+                                    'set_url': set_url,
+                                    'set_poster_count': metadata.get('set_poster_count'),
+                                    'uploader': metadata.get('uploader') or 'Unknown',
+                                }
+                            if requested_set_urls and set_url not in requested_set_urls:
+                                continue
+                            if not requested_set_urls and set_url and discovered_set_urls.index(set_url) >= max_posters:
+                                continue
+                            base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
                             season_key = _extract_tpdb_season_key(poster_link)
                             if season_key and season_key in season_by_key:
                                 season = season_by_key[season_key]
@@ -699,12 +759,17 @@ def search_tpdb_for_poster_groups(
                                 ))
                                 poster_id += 1
 
+                        group['available_sets'] = list(discovered_set_lookup.values())
                         if discovered_set_urls and season_by_key:
+                            set_urls_to_load = [
+                                set_url for set_url in discovered_set_urls
+                                if not requested_set_urls or set_url in requested_set_urls
+                            ][:max_posters]
                             seen_poster_urls = {
                                 poster.get('url')
                                 for poster in group['show_posters'] + group['season_posters']
                             }
-                            for set_url in discovered_set_urls[:max_posters]:
+                            for set_url in set_urls_to_load:
                                 logging.info("Checking TPDB poster set for '%s': %s", search_query, set_url)
                                 _open_tpdb_page_with_delay(set_url)
                                 current_url = selenium_driver.current_url
@@ -729,7 +794,7 @@ def search_tpdb_for_poster_groups(
                                     poster_type = (metadata.get('tpdb_poster_type') or '').lower()
                                     if season_key and season_key in season_by_key:
                                         season = season_by_key[season_key]
-                                        base64_image = _get_tpdb_preview_image(poster_url, include_base64)
+                                        base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
                                         group['season_posters'].append(_poster_dict(
                                             poster_id,
                                             poster_url,
@@ -742,7 +807,7 @@ def search_tpdb_for_poster_groups(
                                         poster_id += 1
                                         seen_poster_urls.add(poster_url)
                                     elif poster_type == 'show':
-                                        base64_image = _get_tpdb_preview_image(poster_url, include_base64)
+                                        base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
                                         group['show_posters'].append(_poster_dict(
                                             poster_id,
                                             poster_url,
@@ -804,7 +869,7 @@ def search_tpdb_for_poster_groups(
                                     continue
 
                                 metadata = _extract_tpdb_card_metadata(poster_link)
-                                base64_image = _get_tpdb_preview_image(poster_url, include_base64)
+                                base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
                                 group['season_posters'].append(_poster_dict(
                                     poster_id,
                                     poster_url,
@@ -826,6 +891,7 @@ def search_tpdb_for_poster_groups(
                         group['covered_season_count'] = len(covered_keys)
                         if (group['show_posters'] or group['season_posters']) and group not in groups:
                             groups.append(group)
+                            break
 
                     break
             except TPDBSessionExpired:
@@ -847,7 +913,7 @@ def search_tpdb_for_poster_groups(
         posters = []
         if best_group:
             posters = best_group['show_posters'][:max_posters]
-        logging.info(f"Found {len(posters)} poster links; converting to base64 for preview")
+        logging.info(f"Found {len(posters)} poster links.")
         return {
             'posters': posters,
             'groups': groups,
@@ -912,6 +978,16 @@ def extract_title_year(title):
         return None
     year_match = re.search(r'\((\d{4})\)', title)
     return year_match.group(1) if year_match else None
+
+def strip_title_year(title):
+    if not title:
+        return ""
+    return re.sub(r'\s*\(\d{4}\)\s*', ' ', title).strip()
+
+def format_title_year_spacing(title):
+    if not title:
+        return ""
+    return re.sub(r'\s*\((\d{4})\)', r' (\1)', title).strip()
 
 def normalize_title_for_comparison(title):
     if not title:
