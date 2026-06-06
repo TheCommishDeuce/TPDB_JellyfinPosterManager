@@ -778,5 +778,5 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
         logging.error(f"Error fetching items from Jellyfin: {e}")
         return []
 
-    logging.debug(f"Total items fetched: {len(items)}")
+    logging.info(f"Total items fetched: {len(items)}")
     return items

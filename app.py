@@ -170,7 +170,7 @@ def index():
 
     try:
         server_info = get_jellyfin_server_info()
-        logging.debug(f"Connected to server: {server_info['name']}")
+        logging.info(f"Connected to server: {server_info['name']}")
 
         jellyfin_items = get_jellyfin_items(item_type=item_type, sort_by=sort_by)
 
