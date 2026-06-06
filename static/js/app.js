@@ -1430,6 +1430,29 @@ async function loadProcessedItems() {
     }
 }
 
+function formatProcessedItemTooltip(detail) {
+    const timestamp = formatLogTimestamp(detail.timestamp);
+    const targets = detail.poster_targets || {};
+    const parts = [];
+
+    if (targets.series_poster) {
+        parts.push('Series poster');
+    } else if (detail.item_type === 'Movie' || detail.poster_url) {
+        parts.push(detail.item_type === 'Movie' ? 'Movie poster' : 'Primary poster');
+    }
+
+    const seasonTitles = Array.isArray(targets.season_titles) ? targets.season_titles.filter(Boolean) : [];
+    if (seasonTitles.length) {
+        parts.push(`Season posters: ${seasonTitles.join(', ')}`);
+    } else if (Number(targets.season_count || 0) > 0) {
+        const seasonCount = Number(targets.season_count);
+        parts.push(`${seasonCount} season poster${seasonCount === 1 ? '' : 's'}`);
+    }
+
+    const targetSummary = parts.length ? parts.join('\n') : 'Poster processed';
+    return `${targetSummary}\nProcessed ${timestamp}`;
+}
+
 function applyProcessedItemMarkers(itemDetails) {
     document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
         const itemId = wrapper.getAttribute('data-item-id');
@@ -1449,7 +1472,7 @@ function applyProcessedItemMarkers(itemDetails) {
         }
 
         if (isProcessed && overlay) {
-            overlay.title = `Processed ${formatLogTimestamp(detail.timestamp)}`;
+            overlay.title = formatProcessedItemTooltip(detail);
             overlay.innerHTML = '<span class="badge bg-success"><i class="fas fa-check me-1"></i>Processed</span>';
         } else if (!isProcessed && overlay) {
             overlay.remove();

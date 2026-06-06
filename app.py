@@ -191,7 +191,7 @@ def _write_results_log_entry(entry):
         results_log.write(json.dumps(entry, ensure_ascii=False) + '\n')
 
 
-def _log_processed_item(item=None, operation='auto-poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None):
+def _log_processed_item(item=None, operation='auto-poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None, poster_targets=None, season_results=None):
     """Append one structured successful poster application entry to results.log."""
     try:
         resolved_item = item
@@ -209,6 +209,8 @@ def _log_processed_item(item=None, operation='auto-poster', poster_url=None, ite
             'item_type': resolved_item_type,
             'item_year': resolved_item_year,
             'poster_url': poster_url,
+            'poster_targets': poster_targets or {},
+            'season_results': season_results or [],
         }
         _write_results_log_entry(entry)
         _log_resolved_item(
@@ -421,6 +423,7 @@ def _upload_selection_to_jellyfin(item, selection, operation='manual-upload'):
     errors = []
     season_results = []
     uploaded_any = False
+    series_poster_uploaded = False
 
     os.makedirs(Config.TEMP_POSTER_DIR, exist_ok=True)
     _sweep_stale_temp_posters()
@@ -429,7 +432,7 @@ def _upload_selection_to_jellyfin(item, selection, operation='manual-upload'):
         logging.info(f"Uploading poster to Jellyfin for {item_title}")
         if _upload_poster_url_to_jellyfin_item(item_id, primary_url, operation, item_title):
             uploaded_any = True
-            _log_processed_item(item, operation=operation, poster_url=primary_url)
+            series_poster_uploaded = True
         else:
             errors.append('Failed to upload series poster')
             _log_failed_item(item, 'Failed to upload series poster', operation=operation, poster_url=primary_url)
@@ -446,6 +449,20 @@ def _upload_selection_to_jellyfin(item, selection, operation='manual-upload'):
             error = f"Failed to upload {season_title}"
             errors.append(error)
             season_results.append({'season_id': season_id, 'season_title': season_title, 'success': False, 'poster_url': season_url, 'error': error})
+
+    if uploaded_any:
+        successful_seasons = [season for season in season_results if season.get('success')]
+        _log_processed_item(
+            item,
+            operation=operation,
+            poster_url=primary_url,
+            poster_targets={
+                'series_poster': series_poster_uploaded,
+                'season_count': len(successful_seasons),
+                'season_titles': [season.get('season_title') for season in successful_seasons if season.get('season_title')],
+            },
+            season_results=season_results,
+        )
 
     return {
         'success': uploaded_any and not errors,
