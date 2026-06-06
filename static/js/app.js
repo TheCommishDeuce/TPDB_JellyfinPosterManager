@@ -86,19 +86,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize counters/buttons
     updateUploadAllButton();
 
-    // If URL has filter param, apply it on load
     const urlParams = new URLSearchParams(window.location.search);
-    const currentFilter = urlParams.get('type') || 'all';
-    if (currentFilter !== 'all') {
-        filterContent(currentFilter);
-    }
+    filterContent(urlParams.get('type') || 'all', false);
 
     console.log('Jellyfin Poster Manager initialized');
 });
 
 // Filter and Sort Functions
-function filterContent(type) {
-    // Normalize to DOM data-type values
+function filterContent(type, updateUrl = true) {
     let domType = type;
     if (type === 'movies') domType = 'movie';
     if (type === 'series') domType = 'series';
@@ -116,16 +111,28 @@ function filterContent(type) {
         }
     });
 
-    const totalCount = document.getElementById('totalItemCount');
-    if (totalCount) totalCount.textContent = visibleCount;
+    const visibleItemCount = document.getElementById('visibleItemCount');
+    if (visibleItemCount) visibleItemCount.textContent = visibleCount;
 
-    // Update URL without reload to persist filter
+    const itemCountTotalText = document.getElementById('itemCountTotalText');
+    const allItemCount = Number(document.getElementById('allItemCount')?.dataset.count || items.length);
+    if (itemCountTotalText) {
+        itemCountTotalText.innerHTML = type === 'all' ? '' : ` of <strong>${allItemCount}</strong>`;
+    }
+
+    const filterId = type === 'movies' ? 'filterMovies' : type === 'series' ? 'filterSeries' : 'filterAll';
+    const filterInput = document.getElementById(filterId);
+    if (filterInput) filterInput.checked = true;
+
+    if (!updateUrl) return;
+
     const url = new URL(window.location);
     if (type === 'all') {
         url.searchParams.delete('type');
     } else {
         url.searchParams.set('type', type); // keep 'movies'/'series'
     }
+    url.hash = '';
     window.history.pushState({}, '', url);
 }
 

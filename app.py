@@ -79,8 +79,10 @@ def index():
         session_id = str(uuid.uuid4())
         session['session_id'] = session_id
 
-    # Accept 'movies' or 'series' or None
+    # Accept 'movies' or 'series' for the client-side visual filter.
     item_type = request.args.get('type', None)
+    if item_type not in ('movies', 'series'):
+        item_type = None
     # 'name', 'year', 'date_added'
     sort_by = request.args.get('sort', 'name')
 
@@ -88,7 +90,7 @@ def index():
         server_info = get_jellyfin_server_info()
         logging.info(f"Connected to server: {server_info['name']}")
 
-        jellyfin_items = get_jellyfin_items(item_type=item_type, sort_by=sort_by)
+        jellyfin_items = get_jellyfin_items(sort_by=sort_by)
 
         # Store in session
         user_sessions[session_id] = {
