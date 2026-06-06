@@ -67,18 +67,18 @@ function initAutoBatchSeasonSettings() {
     const replaceInput = document.getElementById('replaceSeasonPostersAutoBatch');
     if (!includeInput || !replaceInput) return;
 
-    includeInput.checked = localStorage.getItem('jpm_include_season_posters') === 'true';
-    replaceInput.checked = localStorage.getItem('jpm_replace_season_posters') === 'true';
+    const savedIncludeSeasonPosters = localStorage.getItem('jpm_include_season_posters');
+    const savedReplaceSeasonPosters = localStorage.getItem('jpm_replace_season_posters');
+    includeInput.checked = savedIncludeSeasonPosters === 'true';
+    replaceInput.checked = savedReplaceSeasonPosters === null ? true : savedReplaceSeasonPosters === 'true';
 
     const syncReplaceState = () => {
         replaceInput.disabled = !includeInput.checked;
-        if (!includeInput.checked) replaceInput.checked = false;
     };
 
     includeInput.addEventListener('change', () => {
         syncReplaceState();
         localStorage.setItem('jpm_include_season_posters', includeInput.checked ? 'true' : 'false');
-        localStorage.setItem('jpm_replace_season_posters', replaceInput.checked ? 'true' : 'false');
     });
     replaceInput.addEventListener('change', () => {
         localStorage.setItem('jpm_replace_season_posters', replaceInput.checked ? 'true' : 'false');
