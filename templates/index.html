@@ -58,41 +58,6 @@
     </div>
 </div>
 
-<!-- Sort Dropdown Row -->
-<div class="row mb-4">
-    <div class="col-12 d-flex justify-content-end">
-        <div class="dropdown">
-            <button class="btn btn-outline-secondary dropdown-toggle" type="button"
-                    id="sortDropdownBtn" data-bs-toggle="dropdown" aria-expanded="false" data-bs-boundary="viewport">
-                <i class="fas fa-sort me-1"></i>
-                Sort by
-            </button>
-            <ul class="dropdown-menu" aria-labelledby="sortDropdownBtn">
-                <li>
-                    <a class="dropdown-item {{ 'active' if current_sort == 'library' else '' }}" href="#" onclick="sortContent('library')">
-                        <i class="fas fa-folder me-2"></i>Library
-                    </a>
-                </li>
-                <li>
-                    <a class="dropdown-item {{ 'active' if current_sort == 'name' else '' }}" href="#" onclick="sortContent('name')">
-                        <i class="fas fa-sort-alpha-down me-2"></i>Name (A-Z)
-                    </a>
-                </li>
-                <li>
-                    <a class="dropdown-item {{ 'active' if current_sort == 'year' else '' }}" href="#" onclick="sortContent('year')">
-                        <i class="fas fa-calendar me-2"></i>Year
-                    </a>
-                </li>
-                <li>
-                    <a class="dropdown-item {{ 'active' if current_sort == 'date_added' else '' }}" href="#" onclick="sortContent('date_added')">
-                        <i class="fas fa-clock me-2"></i>Recently Added
-                    </a>
-                </li>
-            </ul>
-        </div>
-    </div>
-</div>
-
 <!-- Manual Selection -->
 <div class="row mb-3">
     <div class="col-12">
@@ -181,6 +146,41 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Grid Tools -->
+<div class="row mb-4">
+    <div class="col-12 d-flex flex-wrap justify-content-end gap-2">
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
+                    id="sortDropdownBtn" data-bs-toggle="dropdown" aria-expanded="false" data-bs-boundary="viewport">
+                <i class="fas fa-sort me-1"></i>
+                Sort by
+            </button>
+            <ul class="dropdown-menu" aria-labelledby="sortDropdownBtn">
+                <li>
+                    <a class="dropdown-item {{ 'active' if current_sort == 'library' else '' }}" href="#" onclick="sortContent('library')">
+                        <i class="fas fa-folder me-2"></i>Library
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item {{ 'active' if current_sort == 'name' else '' }}" href="#" onclick="sortContent('name')">
+                        <i class="fas fa-sort-alpha-down me-2"></i>Name (A-Z)
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item {{ 'active' if current_sort == 'year' else '' }}" href="#" onclick="sortContent('year')">
+                        <i class="fas fa-calendar me-2"></i>Year
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item {{ 'active' if current_sort == 'date_added' else '' }}" href="#" onclick="sortContent('date_added')">
+                        <i class="fas fa-clock me-2"></i>Recently Added
+                    </a>
+                </li>
+            </ul>
         </div>
     </div>
 </div>
