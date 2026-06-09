@@ -110,51 +110,72 @@
                     </div>
                     <div class="col-md-4">
                         <div class="d-flex flex-wrap align-items-center justify-content-md-end gap-2">
-                            <div class="form-check form-switch d-inline-flex align-items-center mb-0">
-                                <input class="form-check-input me-2" type="checkbox" role="switch" id="skipProcessedAutoBatch">
-                                <label class="form-check-label small text-muted" for="skipProcessedAutoBatch">Skip already processed</label>
-                            </div>
-                        <div class="dropdown">
-                            <button type="button" class="btn btn-outline-primary dropdown-toggle"
-                                    data-bs-toggle="dropdown" aria-expanded="false" id="autoPosterBtn" data-bs-boundary="viewport">
-                                <i class="fas fa-magic me-1"></i>
-                                Auto-Get Posters
+                            <button class="btn btn-outline-danger" type="button" id="cancelAutoBatchBtn" onclick="cancelAutoBatch()" style="display: none;">
+                                <i class="fas fa-stop me-1"></i>Cancel
                             </button>
-                            <ul class="dropdown-menu">
-                                <li>
-                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('no-poster')">
-                                        <i class="fas fa-exclamation-circle me-2 text-warning"></i>
-                                        Items Without Posters
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('all')">
-                                        <i class="fas fa-th me-2 text-primary"></i>
-                                        All Items
-                                    </a>
-                                </li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li>
-                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('movies')">
-                                        <i class="fas fa-film me-2 text-info"></i>
-                                        Movies Only
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('series')">
-                                        <i class="fas fa-tv me-2 text-success"></i>
-                                        TV Series Only
-                                    </a>
-                                </li>
-                            </ul>
-                        </div>
+                            <div class="dropdown">
+                                <button type="button" class="btn btn-outline-primary dropdown-toggle"
+                                        data-bs-toggle="dropdown" aria-expanded="false" id="autoPosterBtn" data-bs-boundary="viewport">
+                                    <i class="fas fa-magic me-1"></i>
+                                    Auto-Get Posters
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('no-poster')">
+                                            <i class="fas fa-exclamation-circle me-2 text-warning"></i>
+                                            Items Without Posters
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('all')">
+                                            <i class="fas fa-th me-2 text-primary"></i>
+                                            All Items
+                                        </a>
+                                    </li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('movies')">
+                                            <i class="fas fa-film me-2 text-info"></i>
+                                            Movies Only
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('series')">
+                                            <i class="fas fa-tv me-2 text-success"></i>
+                                            TV Series Only
+                                        </a>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="dropdown">
+                                <button type="button" class="btn btn-outline-secondary"
+                                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                                        data-bs-boundary="viewport" aria-label="Auto-Get settings">
+                                    <i class="fas fa-sliders-h"></i>
+                                </button>
+                                <div class="dropdown-menu dropdown-menu-end automatic-batch-settings-menu p-3">
+                                    <div class="fw-semibold mb-2">Auto-Get Settings</div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="skipProcessedAutoBatch">
+                                        <label class="form-check-label small" for="skipProcessedAutoBatch">Skip already processed</label>
+                                    </div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="includeSeasonPostersAutoBatch">
+                                        <label class="form-check-label small" for="includeSeasonPostersAutoBatch">Include season posters</label>
+                                    </div>
+                                    <div class="form-check form-switch mb-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="replaceSeasonPostersAutoBatch">
+                                        <label class="form-check-label small" for="replaceSeasonPostersAutoBatch">Replace season posters</label>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div id="autoBatchProgressPanel" class="auto-batch-progress mt-3" style="display: none;">
+                <div id="autoBatchProgressPanel" class="automatic-batch-progress mt-3" style="display: none;">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <div class="d-flex align-items-center gap-2">
-                            <div class="auto-batch-current-preview">
+                            <div class="automatic-batch-current-preview">
                                 <img id="autoBatchCurrentPoster" alt="Current poster preview" style="display: none;">
                                 <i id="autoBatchCurrentPosterEmpty" class="fas fa-image text-muted"></i>
                             </div>
@@ -165,34 +186,29 @@
                         </div>
                         <div class="text-end">
                             <small class="text-muted d-block" id="autoBatchProgressCounts">0 / 0</small>
-                            <button class="btn btn-outline-danger btn-sm mt-1" type="button" id="cancelAutoBatchBtn" onclick="cancelAutoBatch()" style="display: none;">
-                                <i class="fas fa-stop me-1"></i>Cancel
-                            </button>
+                            <small class="text-muted d-block mt-1">Estimated time remaining</small>
+                            <strong id="autoBatchEta">Calculating...</strong>
                         </div>
                     </div>
                     <div class="progress">
                         <div id="autoBatchProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
                     </div>
-                    <div class="row text-center mt-2 g-2">
-                        <div class="col-6 col-md-3">
+                    <div class="row row-cols-2 row-cols-md-4 text-center mt-2 g-2">
+                        <div class="col">
                             <small class="text-muted d-block">Remaining</small>
                             <strong id="autoBatchRemaining">0</strong>
                         </div>
-                        <div class="col-6 col-md-3">
+                        <div class="col">
                             <small class="text-muted d-block">Successful</small>
                             <strong class="text-success" id="autoBatchSuccessful">0</strong>
                         </div>
-                        <div class="col-6 col-md-3">
+                        <div class="col">
                             <small class="text-muted d-block">Failed</small>
                             <strong class="text-danger" id="autoBatchFailed">0</strong>
                         </div>
-                        <div class="col-6 col-md-3">
+                        <div class="col">
                             <small class="text-muted d-block">Status</small>
                             <strong id="autoBatchPhase">Starting</strong>
-                        </div>
-                        <div class="col-12 mt-2">
-                            <small class="text-muted d-block">Estimated time remaining</small>
-                            <strong id="autoBatchEta">Calculating...</strong>
                         </div>
                     </div>
                 </div>
@@ -335,12 +351,23 @@
             </div>
 
             <div class="card-body p-2">
-                <h6 class="card-title text-truncate mb-1" title="{{ item.title }}">
+                <h6 class="card-title text-truncate text-center mb-1" title="{{ item.title }}">
                     {{ item.title }}
                 </h6>
-                {% if item.year %}
-                <small class="text-muted d-block mb-2">
+                {% if item.year or item.type == 'Series' %}
+                <small class="text-muted d-block text-center mb-2">
+                    {% if item.year %}
                     <i class="fas fa-calendar me-1"></i>{{ item.year }}
+                    {% endif %}
+                    {% if item.type == 'Series' and item.season_count is defined and item.season_count is not none %}
+                    {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
+                    <i class="fas fa-layer-group me-1"></i>{{ item.season_count }} season{{ '' if item.season_count == 1 else 's' }}
+                    {% elif item.type == 'Series' %}
+                    <span class="series-season-count" data-season-count-item-id="{{ item.id }}">
+                        {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
+                        <i class="fas fa-layer-group me-1"></i><span class="season-count-text">Seasons</span>
+                    </span>
+                    {% endif %}
                 </small>
                 {% endif %}
 
@@ -384,6 +411,13 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" id="posterModalBody"></div>
+            <div class="modal-footer" id="posterModalFooter" style="display:none;">
+                <small class="text-muted me-auto" id="posterSelectionHint">Choose a poster to save it for upload.</small>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="savePosterSelectionBtn" onclick="finishPosterSelection()" disabled>
+                    <i class="fas fa-save me-1"></i>Save Selection
+                </button>
+            </div>
         </div>
     </div>
 </div>

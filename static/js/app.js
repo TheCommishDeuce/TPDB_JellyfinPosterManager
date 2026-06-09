@@ -62,6 +62,71 @@ function initTheme() {
     }
 }
 
+function initAutoBatchSeasonSettings() {
+    const includeInput = document.getElementById('includeSeasonPostersAutoBatch');
+    const replaceInput = document.getElementById('replaceSeasonPostersAutoBatch');
+    if (!includeInput || !replaceInput) return;
+
+    const savedIncludeSeasonPosters = localStorage.getItem('jpm_include_season_posters');
+    const savedReplaceSeasonPosters = localStorage.getItem('jpm_replace_season_posters');
+    includeInput.checked = savedIncludeSeasonPosters === 'true';
+    replaceInput.checked = savedReplaceSeasonPosters === null ? true : savedReplaceSeasonPosters === 'true';
+
+    const syncReplaceState = () => {
+        replaceInput.disabled = !includeInput.checked;
+    };
+
+    includeInput.addEventListener('change', () => {
+        syncReplaceState();
+        localStorage.setItem('jpm_include_season_posters', includeInput.checked ? 'true' : 'false');
+    });
+    replaceInput.addEventListener('change', () => {
+        localStorage.setItem('jpm_replace_season_posters', replaceInput.checked ? 'true' : 'false');
+    });
+    syncReplaceState();
+}
+
+function initSeriesSeasonCounts() {
+    const badges = document.querySelectorAll('[data-season-count-item-id]');
+    if (!badges.length) return;
+
+    const loadSeasonCount = async (badge) => {
+        if (!badge || badge.dataset.loaded === 'true') return;
+        badge.dataset.loaded = 'true';
+
+        try {
+            const response = await fetch(`/item/${encodeURIComponent(badge.dataset.seasonCountItemId)}/season-count`);
+            const data = await response.json();
+            if (!response.ok || data.error || data.season_count === null || data.season_count === undefined) {
+                badge.style.display = 'none';
+                return;
+            }
+
+            const count = Number(data.season_count);
+            const text = badge.querySelector('.season-count-text');
+            if (text) text.textContent = `${count} season${count === 1 ? '' : 's'}`;
+        } catch (error) {
+            console.warn('Could not load season count:', error);
+            badge.style.display = 'none';
+        }
+    };
+
+    if (!('IntersectionObserver' in window)) {
+        badges.forEach(loadSeasonCount);
+        return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            observer.unobserve(entry.target);
+            loadSeasonCount(entry.target);
+        });
+    }, { rootMargin: '200px' });
+
+    badges.forEach(badge => observer.observe(badge));
+}
+
 // Global Variables
 let currentItemId = null;
 let selectedPosters = {};
@@ -77,12 +142,22 @@ let currentAutoBatchJobId = null;
 let autoBatchStartedAt = null;
 let manualSelectionVisible = false;
 let posterSearchProgressTimer = null;
+let posterSearchGroups = [];
+let currentPosterSelection = null;
+let currentPosterSearchItem = null;
+let currentPosterEligibleSeasons = [];
+let posterGroupDisplayMode = 'group';
+let currentPosterSetLimit = 3;
+let canBrowseMorePosterSets = false;
+let loadingPosterSetUrls = new Set();
 
 document.addEventListener('DOMContentLoaded', function() {
     // Theme first
     initTheme();
     const themeBtn = document.getElementById('themeToggle');
     if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
+    initAutoBatchSeasonSettings();
+    initSeriesSeasonCounts();
 
     // Modals
     const lm = document.getElementById('loadingModal');
@@ -191,16 +266,17 @@ function startPosterSearchProgress() {
     const startedAt = Date.now();
     const steps = [
         { at: 0, text: 'Searching TPDB for matching entries...' },
-        { at: 5, text: 'Checking matching TPDB entries for available posters...' },
-        { at: 10, text: 'Trying additional matches if the first result has no posters...' },
-        { at: 15, text: 'Converting poster previews for the picker...' },
-        { at: 25, text: 'Still working. TPDB responses can take a little while...' }
+        { at: 5, text: 'Opening the best match and reading posters...' },
+        { at: 10, text: 'Checking linked sets for matching season posters...' },
+        { at: 18, text: 'Checking season-specific poster pages...' },
+        { at: 25, text: 'Downloading poster previews...' },
+        { at: 40, text: 'Still working. TPDB is being checked gently to avoid rate limits...' }
     ];
 
     const update = () => {
         const elapsed = Math.floor((Date.now() - startedAt) / 1000);
         const currentStep = [...steps].reverse().find(step => elapsed >= step.at) || steps[0];
-        if (loadingText) loadingText.textContent = 'Searching and converting posters...';
+        if (loadingText) loadingText.textContent = 'Searching for posters...';
         if (loadingSubtext) loadingSubtext.textContent = currentStep.text;
     };
 
@@ -219,13 +295,19 @@ function stopPosterSearchProgress() {
 }
 
 // Load posters for item
-async function loadPosters(itemId) {
+async function loadPosters(itemId, setLimit = 3) {
+    if (currentPosterSearchItem?.id !== itemId) {
+        currentPosterSelection = null;
+        posterGroupDisplayMode = 'group';
+        loadingPosterSetUrls = new Set();
+    }
     currentItemId = itemId;
+    currentPosterSetLimit = setLimit;
     startPosterSearchProgress();
     if (loadingModal) loadingModal.show();
 
     try {
-        const response = await fetch(`/item/${itemId}/posters`);
+        const response = await fetch(`/item/${itemId}/posters?set_limit=${encodeURIComponent(setLimit)}`);
         const data = await response.json();
 
         if (data.error) {
@@ -233,7 +315,9 @@ async function loadPosters(itemId) {
         }
 
         if (loadingModal) loadingModal.hide();
-        displayPosters(data.item, data.posters);
+        currentPosterSetLimit = data.poster_set_limit || setLimit;
+        canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
+        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || []);
     } catch (error) {
         console.error('Error loading posters:', error);
         if (loadingModal) loadingModal.hide();
@@ -244,10 +328,26 @@ async function loadPosters(itemId) {
 }
 
 // Display posters in modal (image-only, no author/download box)
-function displayPosters(item, posters) {
+function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) {
     const modalBody = document.getElementById('posterModalBody');
     const modalTitle = document.querySelector('#posterModal .modal-title');
+    const modalFooter = document.getElementById('posterModalFooter');
+    const previousItemId = currentPosterSearchItem?.id;
     if (modalTitle) modalTitle.innerHTML = `<i class="fas fa-images me-2"></i>Choose Poster for ${item.title}`;
+    if (modalFooter) modalFooter.style.display = 'none';
+    posterSearchGroups = Array.isArray(posterGroups) ? posterGroups : [];
+    if (previousItemId !== item.id) {
+        currentPosterSelection = null;
+        posterGroupDisplayMode = 'group';
+        loadingPosterSetUrls = new Set();
+    }
+    currentPosterSearchItem = item;
+    currentPosterEligibleSeasons = Array.isArray(eligibleSeasons) ? eligibleSeasons : [];
+
+    if (item.type === 'Series' && posterSearchGroups.length > 0) {
+        displayPosterGroups(item, posterSearchGroups, currentPosterEligibleSeasons);
+        return;
+    }
 
     if (!posters || posters.length === 0) {
         modalBody.innerHTML = `
@@ -301,6 +401,566 @@ function displayPosters(item, posters) {
     }
 
     if (posterModal) posterModal.show();
+}
+
+function displayPosterGroups(item, groups, eligibleSeasons) {
+    const modalBody = document.getElementById('posterModalBody');
+    const modalFooter = document.getElementById('posterModalFooter');
+    const saveBtn = document.getElementById('savePosterSelectionBtn');
+    const selectionHint = document.getElementById('posterSelectionHint');
+    if (modalFooter) modalFooter.style.display = '';
+    if (saveBtn) saveBtn.disabled = !currentPosterSelection;
+    if (selectionHint) {
+        selectionHint.textContent = currentPosterSelection
+            ? 'Selection saved. Upload it from the item card when you are ready.'
+            : 'Choose posters individually, or use Select Set to pick a whole set.';
+    }
+    let html = `
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+            <div>
+                <h6><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                <small class="text-muted">${escapeHtml(item.year || 'Unknown Year')} &bull; ${escapeHtml(item.type)}</small>
+                <small class="text-muted ms-3">
+                    <i class="fas fa-layer-group me-1"></i>
+                    Found ${groups.length} TPDB result${groups.length !== 1 ? 's' : ''}
+                </small>
+            </div>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Poster display mode">
+                <button type="button" class="btn btn-outline-secondary poster-group-view-btn ${posterGroupDisplayMode === 'target' ? 'active' : ''}" data-mode="target">
+                    By Target
+                </button>
+                <button type="button" class="btn btn-outline-secondary poster-group-view-btn ${posterGroupDisplayMode === 'group' ? 'active' : ''}" data-mode="group">
+                    By Set
+                </button>
+            </div>
+        </div>
+    `;
+
+    html += posterGroupDisplayMode === 'group'
+        ? renderPosterGroupsByGroup(groups, eligibleSeasons)
+        : renderPosterGroupsByTarget(groups, eligibleSeasons);
+
+    modalBody.innerHTML = html;
+    modalBody.querySelectorAll('.poster-group-view-btn').forEach(button => {
+        button.addEventListener('click', () => setPosterGroupDisplayMode(button.dataset.mode));
+    });
+    modalBody.querySelectorAll('.load-poster-set-btn').forEach(button => {
+        button.addEventListener('click', () => loadPosterSet(button.dataset.setUrl));
+    });
+    modalBody.querySelectorAll('.select-poster-group-btn').forEach(button => {
+        button.addEventListener('click', () => selectPosterGroup(button.dataset.groupId));
+    });
+    modalBody.querySelectorAll('.select-poster-set-btn').forEach(button => {
+        button.addEventListener('click', () => selectPosterSet(button.dataset.groupId, Number(button.dataset.setIndex || 0), button.dataset.setId || null));
+    });
+    modalBody.querySelectorAll('.grouped-poster-option').forEach(card => {
+        card.addEventListener('click', () => {
+            if (card.dataset.targetType === 'season') {
+                selectGroupedSeasonPoster(card.dataset.groupId, card.dataset.seasonId, card.dataset.posterId);
+            } else {
+                selectGroupedShowPoster(card.dataset.groupId, card.dataset.posterId);
+            }
+        });
+    });
+
+    if (posterModal) posterModal.show();
+}
+
+function renderPosterGroupsByGroup(groups, eligibleSeasons) {
+    let groupNumber = 1;
+    return groups.map((group) => {
+        const showPosters = group.show_posters || [];
+        const seasonLists = (eligibleSeasons || []).map(season => ({
+            season,
+            posters: (group.season_posters || []).filter(poster => poster.season_id === season.id)
+        }));
+        const allPosters = [
+            ...showPosters,
+            ...seasonLists.flatMap(entry => entry.posters)
+        ];
+        const setIds = [...new Set(allPosters.map(poster => poster.set_id).filter(Boolean))];
+        let html = '';
+        if (setIds.length) {
+            html += setIds.map(setId => {
+                const displayGroupNumber = groupNumber++;
+                const setPosters = [];
+                const showPoster = showPosters.find(poster => poster.set_id === setId);
+                if (showPoster) {
+                    setPosters.push({ poster: showPoster, targetType: 'show' });
+                }
+                seasonLists.forEach(entry => {
+                    const poster = entry.posters.find(currentPoster => currentPoster.set_id === setId);
+                    if (poster) {
+                        setPosters.push({ poster, targetType: 'season' });
+                    }
+                });
+
+                return renderPosterSetSection(group, setPosters, displayGroupNumber, null, setId);
+            }).join('');
+            html += renderUnloadedPosterSets(group, setIds);
+            return html;
+        }
+
+        const setCount = Math.max(
+            showPosters.length,
+            ...seasonLists.map(entry => entry.posters.length),
+            0
+        );
+
+        if (!setCount) return renderUnloadedPosterSets(group, setIds);
+
+        html += Array.from({ length: setCount }, (_, setIndex) => {
+            const displayGroupNumber = groupNumber++;
+            const setPosters = [];
+            if (showPosters[setIndex]) {
+                setPosters.push({ poster: showPosters[setIndex], targetType: 'show' });
+            }
+            seasonLists.forEach(entry => {
+                if (entry.posters[setIndex]) {
+                    setPosters.push({ poster: entry.posters[setIndex], targetType: 'season' });
+                }
+            });
+
+            return renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex, null);
+        }).join('');
+        html += renderUnloadedPosterSets(group, setIds);
+        return html;
+    }).join('');
+}
+
+function renderUnloadedPosterSets(group, loadedSetIds = []) {
+    const availableSets = group.available_sets || [];
+    const loadedIds = new Set((loadedSetIds || []).map(String));
+    const unloadedSets = availableSets.filter(setInfo => {
+        if (!setInfo?.set_url) return false;
+        return !loadedIds.has(String(setInfo.set_id || ''));
+    });
+    if (!unloadedSets.length) return '';
+
+    return `
+        <section class="poster-group poster-set-browser mb-4">
+            <div class="poster-group-header mb-3">
+                <h6 class="mb-1">More TPDB Sets</h6>
+                <small class="text-muted">Load individual sets when you want to preview them.</small>
+            </div>
+            <div class="poster-set-browser-list">
+                ${unloadedSets.map(setInfo => {
+                    const isLoading = loadingPosterSetUrls.has(setInfo.set_url);
+                    return `
+                        <div class="poster-set-browser-row d-flex flex-wrap justify-content-between align-items-center gap-2">
+                            <div>
+                                <div class="fw-semibold">${escapeHtml(setInfo.uploader || 'Unknown uploader')}</div>
+                                <small class="text-muted">
+                                    ${escapeHtml(setInfo.set_poster_count || '?')} poster${String(setInfo.set_poster_count || '') === '1' ? '' : 's'}
+                                    &bull;
+                                    <a href="${escapeHtml(setInfo.set_url)}" target="_blank" rel="noopener">TPDB Set</a>
+                                </small>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-primary load-poster-set-btn"
+                                data-set-url="${escapeHtml(setInfo.set_url)}"
+                                ${isLoading ? 'disabled' : ''}>
+                                <i class="fas ${isLoading ? 'fa-spinner fa-spin' : 'fa-plus'} me-1"></i>${isLoading ? 'Loading' : 'Load set'}
+                            </button>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </section>
+    `;
+}
+
+function renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex = null, setId = null) {
+    const posters = setPosters.map(entry => entry.poster);
+    const uploader = getPosterSetUploader(posters);
+    const setUrl = posters.find(poster => poster.set_url)?.set_url;
+    let html = `
+        <section class="poster-group poster-set-group mb-4">
+            <div class="poster-group-header d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <div>
+                    <h6 class="mb-1">Set ${displayGroupNumber}${uploader ? ` <span class="text-muted">(uploader: ${escapeHtml(uploader)})</span>` : ''}</h6>
+                    <small class="text-muted">${setUrl ? `<a href="${escapeHtml(setUrl)}" target="_blank" rel="noopener">TPDB Set</a>` : escapeHtml(group.title || 'TPDB result')}</small>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-success select-poster-set-btn"
+                    data-group-id="${escapeHtml(group.id)}"
+                    data-set-index="${setIndex ?? ''}"
+                    data-set-id="${escapeHtml(setId || '')}">
+                    <i class="fas fa-check-double me-1"></i>Select Set
+                </button>
+            </div>
+            <div class="row">
+    `;
+
+    setPosters.forEach((entry, posterIndex) => {
+        html += renderGroupedPosterCard(entry.poster, posterIndex, entry.targetType, group.id);
+    });
+
+    return `${html}</div></section>`;
+}
+
+function renderPosterGroupsByTarget(groups, eligibleSeasons) {
+    let html = renderPosterTargetSection(
+        'Series poster',
+        groups.flatMap(group => group.show_posters || []),
+        'show'
+    );
+
+    (eligibleSeasons || []).forEach(season => {
+        const posters = groups.flatMap(group => (group.season_posters || []).filter(poster => poster.season_id === season.id));
+        if (posters.length) {
+            html += renderPosterTargetSection(season.title || 'Season', posters, 'season');
+        }
+    });
+
+    if (!groups.some(group => (group.season_posters || []).length > 0)) {
+        html += `
+            <div class="alert alert-info">
+                No season posters were detected for the eligible seasons.
+            </div>
+        `;
+    }
+
+    return html;
+}
+
+function renderPosterTargetSection(title, posters, targetType) {
+    if (!posters.length) return '';
+    let html = `
+        <section class="poster-group poster-target-section mb-4">
+            <div class="poster-group-header mb-3">
+                <h6 class="mb-0">${escapeHtml(title)}</h6>
+            </div>
+            <div class="row">
+    `;
+    posters.forEach((poster, index) => {
+        html += renderGroupedPosterCard(poster, index, targetType, poster.group_id);
+    });
+    return `${html}</div></section>`;
+}
+
+function getPosterSetUploader(posters) {
+    const posterWithUploader = posters.find(poster => poster.uploader && poster.uploader !== 'Unknown');
+    return posterWithUploader?.uploader || '';
+}
+
+function setPosterGroupDisplayMode(mode) {
+    posterGroupDisplayMode = mode === 'group' ? 'group' : 'target';
+    displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
+    applyGroupedSelectionHighlight();
+}
+
+async function loadPosterSet(setUrl) {
+    if (!currentItemId || !setUrl || loadingPosterSetUrls.has(setUrl)) return;
+    loadingPosterSetUrls.add(setUrl);
+    displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
+
+    try {
+        const response = await fetch(`/item/${currentItemId}/posters?set_limit=${encodeURIComponent(currentPosterSetLimit)}&set_url=${encodeURIComponent(setUrl)}`);
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+        mergePosterGroups(data.poster_groups || []);
+        canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
+        displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
+        applyGroupedSelectionHighlight();
+    } catch (error) {
+        console.error('Error loading TPDB set:', error);
+        showAlert('Failed to load TPDB set: ' + error.message, 'danger');
+        displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
+    } finally {
+        loadingPosterSetUrls.delete(setUrl);
+        displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
+        applyGroupedSelectionHighlight();
+    }
+}
+
+function mergePosterGroups(newGroups) {
+    (newGroups || []).forEach(newGroup => {
+        const existingGroup = findPosterGroup(newGroup.id);
+        if (!existingGroup) {
+            posterSearchGroups.push(newGroup);
+            return;
+        }
+
+        existingGroup.show_posters = mergePostersByUrl(existingGroup.show_posters || [], newGroup.show_posters || []);
+        existingGroup.season_posters = mergePostersByUrl(existingGroup.season_posters || [], newGroup.season_posters || []);
+        existingGroup.available_sets = mergeSetsByUrl(existingGroup.available_sets || [], newGroup.available_sets || []);
+        existingGroup.covered_season_count = Math.max(existingGroup.covered_season_count || 0, newGroup.covered_season_count || 0);
+        existingGroup.covered_season_keys = [...new Set([...(existingGroup.covered_season_keys || []), ...(newGroup.covered_season_keys || [])])];
+    });
+}
+
+function mergePostersByUrl(existingPosters, newPosters) {
+    const seenUrls = new Set(existingPosters.map(poster => poster.url));
+    return [
+        ...existingPosters,
+        ...newPosters.filter(poster => {
+            if (!poster?.url || seenUrls.has(poster.url)) return false;
+            seenUrls.add(poster.url);
+            return true;
+        })
+    ];
+}
+
+function mergeSetsByUrl(existingSets, newSets) {
+    const seenUrls = new Set(existingSets.map(setInfo => setInfo.set_url));
+    return [
+        ...existingSets,
+        ...newSets.filter(setInfo => {
+            if (!setInfo?.set_url || seenUrls.has(setInfo.set_url)) return false;
+            seenUrls.add(setInfo.set_url);
+            return true;
+        })
+    ];
+}
+
+function renderGroupedPosterCard(poster, index, targetType, groupId) {
+    const imageSource = poster.base64 || '';
+    const label = targetType === 'season' ? (poster.season_title || 'Season') : 'Series';
+    return `
+        <div class="col-lg-2 col-md-3 col-sm-4 col-6 mb-3">
+            <div class="card poster-card grouped-poster-option h-100"
+                data-poster-id="${escapeHtml(poster.id)}"
+                data-group-id="${escapeHtml(groupId)}"
+                data-target-type="${escapeHtml(targetType)}"
+                data-season-id="${escapeHtml(poster.season_id || '')}">
+                <div class="poster-container">
+                    ${!poster.base64 ? `
+                        <div class="poster-loading d-flex align-items-center justify-content-center">
+                            <div class="text-center">
+                                <i class="fas fa-exclamation-triangle text-warning mb-2"></i>
+                                <br>
+                                <small class="text-muted">Image failed to load</small>
+                            </div>
+                        </div>
+                    ` : ''}
+                    <img src="${imageSource}"
+                        class="card-img-top poster-image"
+                        alt="${escapeHtml(label)} poster ${index + 1}"
+                        loading="lazy"
+                        style="${!poster.base64 ? 'display: none;' : ''}">
+                </div>
+                <div class="poster-target-label">${escapeHtml(label)}</div>
+            </div>
+        </div>
+    `;
+}
+
+function findPosterGroup(groupId) {
+    return posterSearchGroups.find(group => String(group.id) === String(groupId));
+}
+
+function findPosterInGroup(group, posterId, targetType) {
+    const posters = targetType === 'season' ? group.season_posters || [] : group.show_posters || [];
+    return posters.find(poster => String(poster.id) === String(posterId));
+}
+
+function createEmptySeriesPosterSelection() {
+    return {
+        type: 'series_group',
+        series_poster_url: null,
+        season_posters: {}
+    };
+}
+
+function hasCurrentPosterSelection() {
+    return Boolean(
+        currentPosterSelection?.series_poster_url ||
+        Object.keys(currentPosterSelection?.season_posters || {}).length > 0
+    );
+}
+
+function buildSelectionFromGroup(group) {
+    const showPosters = group.show_posters || [];
+    const selection = {
+        type: 'series_group',
+        series_poster_url: showPosters[0]?.url || null,
+        season_posters: {}
+    };
+
+    (group.season_posters || []).forEach(poster => {
+        if (!poster.season_id || selection.season_posters[poster.season_id]) return;
+        selection.season_posters[poster.season_id] = {
+            url: poster.url,
+            title: poster.season_title || 'Season'
+        };
+    });
+
+    return selection;
+}
+
+function buildSelectionFromPosterSet(group, setIndex, setId = null) {
+    const showPosters = group.show_posters || [];
+    if (setId) {
+        const showPoster = showPosters.find(poster => poster.set_id === setId);
+        const selection = {
+            type: 'series_group',
+            series_poster_url: showPoster?.url || null,
+            season_posters: {}
+        };
+
+        (currentPosterEligibleSeasons || []).forEach(season => {
+            const poster = (group.season_posters || []).find(currentPoster => (
+                currentPoster.season_id === season.id && currentPoster.set_id === setId
+            ));
+            if (!poster?.season_id) return;
+            selection.season_posters[poster.season_id] = {
+                url: poster.url,
+                title: poster.season_title || season.title || 'Season'
+            };
+        });
+
+        return selection;
+    }
+
+    const selection = {
+        type: 'series_group',
+        series_poster_url: showPosters[setIndex]?.url || null,
+        season_posters: {}
+    };
+
+    (currentPosterEligibleSeasons || []).forEach(season => {
+        const seasonPosters = (group.season_posters || []).filter(poster => poster.season_id === season.id);
+        const poster = seasonPosters[setIndex];
+        if (!poster?.season_id) return;
+        selection.season_posters[poster.season_id] = {
+            url: poster.url,
+            title: poster.season_title || season.title || 'Season'
+        };
+    });
+
+    return selection;
+}
+
+async function saveCurrentPosterSelection() {
+    if (!hasCurrentPosterSelection()) {
+        await clearCurrentPosterSelection();
+        return;
+    }
+
+    const response = await fetch(`/item/${currentItemId}/select`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selection: currentPosterSelection })
+    });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error || 'Failed to select poster');
+
+    selectedPosters[currentItemId] = currentPosterSelection;
+    updateItemStatus(currentItemId, 'selected');
+    updateUploadAllButton();
+    document.getElementById('savePosterSelectionBtn')?.removeAttribute('disabled');
+    const selectionHint = document.getElementById('posterSelectionHint');
+    if (selectionHint) selectionHint.textContent = 'Selection saved. Upload it from the item card when you are ready.';
+}
+
+async function clearCurrentPosterSelection() {
+    const response = await fetch(`/item/${currentItemId}/select`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear_selection: true })
+    });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error || 'Failed to clear poster selection');
+
+    currentPosterSelection = null;
+    delete selectedPosters[currentItemId];
+    const statusElement = document.getElementById(`status-${currentItemId}`);
+    const itemCard = document.querySelector(`[data-item-id="${currentItemId}"]`);
+    if (statusElement) statusElement.innerHTML = '';
+    if (itemCard) itemCard.classList.remove('selected');
+    updateUploadAllButton();
+    document.getElementById('savePosterSelectionBtn')?.setAttribute('disabled', 'disabled');
+    const selectionHint = document.getElementById('posterSelectionHint');
+    if (selectionHint) selectionHint.textContent = 'Choose posters individually, or use Select Set to pick a whole set.';
+}
+
+async function selectPosterGroup(groupId) {
+    const group = findPosterGroup(groupId);
+    if (!group) return;
+
+    try {
+        currentPosterSelection = buildSelectionFromGroup(group);
+        await saveCurrentPosterSelection();
+        applyGroupedSelectionHighlight();
+    } catch (error) {
+        console.error('Error selecting poster set:', error);
+        showAlert('Failed to select poster set: ' + error.message, 'danger');
+    }
+}
+
+async function selectPosterSet(groupId, setIndex, setId = null) {
+    const group = findPosterGroup(groupId);
+    if (!group) return;
+
+    try {
+        currentPosterSelection = buildSelectionFromPosterSet(group, setIndex, setId);
+        await saveCurrentPosterSelection();
+        applyGroupedSelectionHighlight();
+    } catch (error) {
+        console.error('Error selecting poster set:', error);
+        showAlert('Failed to select poster set: ' + error.message, 'danger');
+    }
+}
+
+async function selectGroupedShowPoster(groupId, posterId) {
+    const group = findPosterGroup(groupId);
+    const poster = group ? findPosterInGroup(group, posterId, 'show') : null;
+    if (!group || !poster) return;
+
+    try {
+        currentPosterSelection = currentPosterSelection || createEmptySeriesPosterSelection();
+        currentPosterSelection.series_poster_url =
+            currentPosterSelection.series_poster_url === poster.url ? null : poster.url;
+        await saveCurrentPosterSelection();
+        applyGroupedSelectionHighlight();
+    } catch (error) {
+        console.error('Error selecting series poster:', error);
+        showAlert('Failed to select series poster: ' + error.message, 'danger');
+    }
+}
+
+async function selectGroupedSeasonPoster(groupId, seasonId, posterId) {
+    const group = findPosterGroup(groupId);
+    const poster = group ? findPosterInGroup(group, posterId, 'season') : null;
+    if (!group || !poster || !seasonId) return;
+
+    try {
+        currentPosterSelection = currentPosterSelection || createEmptySeriesPosterSelection();
+        if (currentPosterSelection.season_posters[seasonId]?.url === poster.url) {
+            delete currentPosterSelection.season_posters[seasonId];
+        } else {
+            currentPosterSelection.season_posters[seasonId] = {
+                url: poster.url,
+                title: poster.season_title || 'Season'
+            };
+        }
+        await saveCurrentPosterSelection();
+        applyGroupedSelectionHighlight();
+    } catch (error) {
+        console.error('Error selecting season poster:', error);
+        showAlert('Failed to select season poster: ' + error.message, 'danger');
+    }
+}
+
+function applyGroupedSelectionHighlight() {
+    document.querySelectorAll('.grouped-poster-option').forEach(card => {
+        const group = findPosterGroup(card.dataset.groupId);
+        const poster = group ? findPosterInGroup(group, card.dataset.posterId, card.dataset.targetType) : null;
+        let selected = false;
+        if (poster && card.dataset.targetType === 'show') {
+            selected = currentPosterSelection?.series_poster_url === poster.url;
+        } else if (poster && card.dataset.targetType === 'season') {
+            selected = currentPosterSelection?.season_posters?.[poster.season_id]?.url === poster.url;
+        }
+        card.classList.toggle('selected', selected);
+    });
+}
+
+function finishPosterSelection() {
+    if (!currentPosterSelection) {
+        showAlert('Choose a poster before saving.', 'warning');
+        return;
+    }
+    if (posterModal) posterModal.hide();
 }
 
 // Select a poster (store selection server-side; no immediate upload)
@@ -656,6 +1316,11 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function cssEscapeValue(value) {
+    if (window.CSS && typeof CSS.escape === 'function') return CSS.escape(String(value));
+    return String(value).replace(/["\\]/g, '\\$&');
+}
+
 function formatOperationLabel(operation) {
     const labels = {
         'auto-poster': 'Auto-Get Posters',
@@ -797,6 +1462,29 @@ async function loadProcessedItems() {
     }
 }
 
+function formatProcessedItemTooltip(detail) {
+    const timestamp = formatLogTimestamp(detail.timestamp);
+    const targets = detail.poster_targets || {};
+    const parts = [];
+
+    if (targets.series_poster) {
+        parts.push('Series poster');
+    } else if (detail.item_type === 'Movie' || detail.poster_url) {
+        parts.push(detail.item_type === 'Movie' ? 'Movie poster' : 'Primary poster');
+    }
+
+    const seasonTitles = Array.isArray(targets.season_titles) ? targets.season_titles.filter(Boolean) : [];
+    if (seasonTitles.length) {
+        parts.push(`Season posters: ${seasonTitles.join(', ')}`);
+    } else if (Number(targets.season_count || 0) > 0) {
+        const seasonCount = Number(targets.season_count);
+        parts.push(`${seasonCount} season poster${seasonCount === 1 ? '' : 's'}`);
+    }
+
+    const targetSummary = parts.length ? parts.join('\n') : 'Poster processed';
+    return `${targetSummary}\nProcessed ${timestamp}`;
+}
+
 function applyProcessedItemMarkers(itemDetails) {
     document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
         const itemId = wrapper.getAttribute('data-item-id');
@@ -816,7 +1504,7 @@ function applyProcessedItemMarkers(itemDetails) {
         }
 
         if (isProcessed && overlay) {
-            overlay.title = `Processed ${formatLogTimestamp(detail.timestamp)}`;
+            overlay.title = formatProcessedItemTooltip(detail);
             overlay.innerHTML = '<span class="badge bg-success"><i class="fas fa-check me-1"></i>Processed</span>';
         } else if (!isProcessed && overlay) {
             overlay.remove();
@@ -1159,10 +1847,17 @@ async function startAutoBatchPoster(filter) {
         const libraryName = libraryId ? librarySelect.options[librarySelect.selectedIndex]?.text : '';
 
         const skipProcessed = Boolean(document.getElementById('skipProcessedAutoBatch')?.checked);
-        let fullConfirmText = skipProcessed ?
-            `${confirmText}\n\nAlready processed items in results.log will be skipped.` :
-            confirmText;
-        if (libraryName) fullConfirmText += `\n\nLibrary: ${libraryName}`;
+        const includeSeasonPosters = Boolean(document.getElementById('includeSeasonPostersAutoBatch')?.checked);
+        const replaceSeasonPosters = Boolean(document.getElementById('replaceSeasonPostersAutoBatch')?.checked);
+        const confirmNotes = [];
+        if (skipProcessed) confirmNotes.push('Already processed items in results.log will be skipped.');
+        if (includeSeasonPosters) {
+            confirmNotes.push(replaceSeasonPosters ?
+                'Season posters will be included and existing season posters may be replaced.' :
+                'Season posters will be included only when a season is missing a poster.');
+        }
+        if (libraryName) confirmNotes.push(`Library: ${libraryName}`);
+        const fullConfirmText = confirmNotes.length ? `${confirmText}\n\n${confirmNotes.join('\n')}` : confirmText;
 
         if (!confirm(fullConfirmText)) return;
 
@@ -1187,7 +1882,13 @@ async function startAutoBatchPoster(filter) {
         const resp = await fetch('/batch-auto-poster/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filter, library_id: libraryId, skip_processed: skipProcessed })
+            body: JSON.stringify({
+                filter,
+                library_id: libraryId,
+                skip_processed: skipProcessed,
+                include_season_posters: includeSeasonPosters,
+                replace_existing_season_posters: replaceSeasonPosters
+            })
         });
 
         const data = await resp.json();
