@@ -45,38 +45,8 @@
     </div>
 </div>
 
-<!-- Sort Dropdown Row -->
-<div class="row mb-4">
-    <div class="col-12 d-flex justify-content-end">
-        <div class="dropdown">
-            <button class="btn btn-outline-secondary dropdown-toggle" type="button"
-                    id="sortDropdownBtn" data-bs-toggle="dropdown" aria-expanded="false" data-bs-boundary="viewport">
-                <i class="fas fa-sort me-1"></i>
-                Sort by
-            </button>
-            <ul class="dropdown-menu" aria-labelledby="sortDropdownBtn">
-                <li>
-                    <a class="dropdown-item {{ 'active' if current_sort == 'name' else '' }}" href="#" onclick="sortContent('name')">
-                        <i class="fas fa-sort-alpha-down me-2"></i>Name (A-Z)
-                    </a>
-                </li>
-                <li>
-                    <a class="dropdown-item {{ 'active' if current_sort == 'year' else '' }}" href="#" onclick="sortContent('year')">
-                        <i class="fas fa-calendar me-2"></i>Year
-                    </a>
-                </li>
-                <li>
-                    <a class="dropdown-item {{ 'active' if current_sort == 'date_added' else '' }}" href="#" onclick="sortContent('date_added')">
-                        <i class="fas fa-clock me-2"></i>Recently Added
-                    </a>
-                </li>
-            </ul>
-        </div>
-    </div>
-</div>
-
 <!-- Manual Selection -->
-<div class="row mb-3">
+<div class="row mb-3" id="manualSelectionRow" style="display: none;">
     <div class="col-12">
         <div class="card">
             <div class="card-body py-3">
@@ -125,7 +95,12 @@
                             Automatically find and upload the first available poster for items
                         </small>
                     </div>
-                    <div class="col-md-4 text-md-end">
+                    <div class="col-md-4">
+                        <div class="d-flex flex-wrap align-items-center justify-content-md-end gap-2">
+                            <div class="form-check form-switch d-inline-flex align-items-center mb-0">
+                                <input class="form-check-input me-2" type="checkbox" role="switch" id="skipProcessedAutoBatch">
+                                <label class="form-check-label small text-muted" for="skipProcessedAutoBatch">Skip already processed</label>
+                            </div>
                         <div class="dropdown">
                             <button type="button" class="btn btn-outline-primary dropdown-toggle"
                                     data-bs-toggle="dropdown" aria-expanded="false" id="autoPosterBtn" data-bs-boundary="viewport">
@@ -160,9 +135,140 @@
                                 </li>
                             </ul>
                         </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="autoBatchProgressPanel" class="auto-batch-progress mt-3" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="auto-batch-current-preview">
+                                <img id="autoBatchCurrentPoster" alt="Current poster preview" style="display: none;">
+                                <i id="autoBatchCurrentPosterEmpty" class="fas fa-image text-muted"></i>
+                            </div>
+                            <div>
+                                <strong id="autoBatchProgressStatus">Starting...</strong>
+                                <small class="text-muted d-block" id="autoBatchCurrentItem">Preparing batch</small>
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <small class="text-muted d-block" id="autoBatchProgressCounts">0 / 0</small>
+                            <button class="btn btn-outline-danger btn-sm mt-1" type="button" id="cancelAutoBatchBtn" onclick="cancelAutoBatch()" style="display: none;">
+                                <i class="fas fa-stop me-1"></i>Cancel
+                            </button>
+                        </div>
+                    </div>
+                    <div class="progress">
+                        <div id="autoBatchProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                    </div>
+                    <div class="row text-center mt-2 g-2">
+                        <div class="col-6 col-md-3">
+                            <small class="text-muted d-block">Remaining</small>
+                            <strong id="autoBatchRemaining">0</strong>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <small class="text-muted d-block">Successful</small>
+                            <strong class="text-success" id="autoBatchSuccessful">0</strong>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <small class="text-muted d-block">Failed</small>
+                            <strong class="text-danger" id="autoBatchFailed">0</strong>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <small class="text-muted d-block">Status</small>
+                            <strong id="autoBatchPhase">Starting</strong>
+                        </div>
+                        <div class="col-12 mt-2">
+                            <small class="text-muted d-block">Estimated time remaining</small>
+                            <strong id="autoBatchEta">Calculating...</strong>
+                        </div>
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Failed Items -->
+<div class="row mb-4" id="failedItemsRow" style="display: none;">
+    <div class="col-12">
+        <div class="card failed-items-card">
+            <div class="card-body py-3">
+                <div class="row align-items-center g-3">
+                    <div class="col-md-6">
+                        <h5 class="mb-0">
+                            <i class="fas fa-triangle-exclamation me-2"></i>Failed Items
+                            <span class="badge bg-danger ms-2" id="failedItemsCount">0</span>
+                        </h5>
+                        <small class="text-muted">Recent poster fetch or upload failures</small>
+                    </div>
+                    <div class="col-md-6 text-md-end">
+                        <button class="btn btn-outline-danger btn-sm me-2" type="button" id="clearFailedItemsBtn" onclick="clearFailedItems()" disabled>
+                            <i class="fas fa-trash me-1"></i>Clear list
+                        </button>
+                        <button class="btn btn-outline-warning btn-sm me-2" type="button" id="retryAllFailedBtn" onclick="retryAllFailedItems()" disabled>
+                            <i class="fas fa-rotate-right me-1"></i>Retry all
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" type="button" onclick="loadFailedItems()">
+                            <i class="fas fa-rotate me-1"></i>Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <div class="table-responsive mt-3" id="failedItemsPanel" style="display: none;">
+                    <table class="table table-sm align-middle results-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Type</th>
+                                <th>Operation</th>
+                                <th>Error</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="failedItemsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Grid Tools -->
+<div class="row mb-3">
+    <div class="col-12 d-flex flex-wrap justify-content-end gap-2">
+        <button class="btn btn-outline-secondary btn-sm" type="button" id="manualSelectionToolbarBtn" onclick="toggleManualSelectionPanel()" aria-expanded="false">
+            <i class="fas fa-tasks me-1"></i>
+            Manual
+            <span class="badge bg-secondary ms-1" id="manualSelectionToolbarCount">0</span>
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" type="button" id="failedItemsToolbarBtn" onclick="toggleFailedItemsFromToolbar()" aria-expanded="false">
+            <i class="fas fa-triangle-exclamation me-1"></i>
+            Failed
+            <span class="badge bg-danger ms-1" id="failedItemsToolbarCount">0</span>
+        </button>
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
+                    id="sortDropdownBtn" data-bs-toggle="dropdown" aria-expanded="false" data-bs-boundary="viewport">
+                <i class="fas fa-sort me-1"></i>
+                Sort by
+            </button>
+            <ul class="dropdown-menu" aria-labelledby="sortDropdownBtn">
+                <li>
+                    <a class="dropdown-item {{ 'active' if current_sort == 'name' else '' }}" href="#" onclick="sortContent('name')">
+                        <i class="fas fa-sort-alpha-down me-2"></i>Name (A-Z)
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item {{ 'active' if current_sort == 'year' else '' }}" href="#" onclick="sortContent('year')">
+                        <i class="fas fa-calendar me-2"></i>Year
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item {{ 'active' if current_sort == 'date_added' else '' }}" href="#" onclick="sortContent('date_added')">
+                        <i class="fas fa-clock me-2"></i>Recently Added
+                    </a>
+                </li>
+            </ul>
         </div>
     </div>
 </div>
@@ -210,7 +316,7 @@
                 {% endif %}
 
                 <div class="d-grid">
-                    <button class="btn btn-outline-primary btn-sm" onclick="loadPosters('{{ item.id }}')">
+                    <button class="btn btn-outline-primary btn-sm find-posters-btn" onclick="loadPosters('{{ item.id }}')">
                         <i class="fas fa-search me-1"></i>
                         Find Posters
                     </button>
