@@ -31,6 +31,14 @@ FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR
 RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_DIR, 'results.log'))
 auto_batch_jobs = {}
 auto_batch_jobs_lock = threading.Lock()
+MAX_FINISHED_AUTO_BATCH_JOBS = 20
+
+
+def _prune_auto_batch_jobs():
+    # Caller must hold auto_batch_jobs_lock.
+    finished = [job_id for job_id, job in auto_batch_jobs.items() if job.get('done')]
+    for job_id in finished[:-MAX_FINISHED_AUTO_BATCH_JOBS]:
+        del auto_batch_jobs[job_id]
 
 
 def _evict_stale_user_sessions(max_age_sec=7200):
@@ -104,6 +112,7 @@ def _create_auto_batch_job(target_filter, skip_processed=False):
         'updated_at': now,
     }
     with auto_batch_jobs_lock:
+        _prune_auto_batch_jobs()
         auto_batch_jobs[job_id] = job
     return job_id
 
@@ -823,13 +832,6 @@ def _select_auto_batch_target_items(all_items, target_filter, skip_processed=Fal
         target_items = [item for item in all_items if item.get('type') == 'Series']
     else:
         target_items = []
-
-    # TEMP: constrain auto-poster runs for issue #18 testing.
-    test_titles = {'cowboy bebop', 'crash landing on you', 'claymore'}
-    target_items = [
-        item for item in all_items
-        if (item.get('title') or '').strip().lower() in test_titles
-    ]
 
     if skip_processed:
         processed_item_ids = _read_processed_item_ids()
