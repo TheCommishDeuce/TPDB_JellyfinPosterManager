@@ -62,6 +62,9 @@ body {
 /* Buttons */
 .btn { border-radius: var(--border-radius-sm); font-weight: 500; padding: 0.5rem 1rem; transition: var(--transition); border: none; cursor: pointer; }
 .btn:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.btn-group .btn:hover {
+    transform: none;
+}
 .btn-primary { background: linear-gradient(135deg, var(--primary-color) 0%, #0056b3 100%); color: #fff; }
 .btn-success { background: linear-gradient(135deg, var(--success-color) 0%, #1e7e34 100%); color: #fff; }
 .btn-warning { background: linear-gradient(135deg, var(--warning-color) 0%, #e0a800 100%); color: #212529; }
@@ -102,6 +105,7 @@ body {
 
 /* Hide/Show by filter */
 .item-card-wrapper.hidden { display: none !important; }
+.library-group-header.hidden { display: none !important; }
 
 /* Keep batch action menus above the poster grid below them. */
 .automatic-batch-row { position: relative; z-index: 20; }
@@ -153,6 +157,21 @@ body {
 .dropdown-menu { z-index: 1060; background: var(--surface); color: var(--app-text); border: 1px solid var(--border-color); }
 .dropdown-item { color: var(--app-text); }
 .dropdown-item:hover, .dropdown-item:focus { background: var(--surface-muted); color: var(--app-text); }
+.form-select {
+    background-color: var(--surface);
+    color: var(--app-text);
+    border-color: var(--border-color);
+}
+.form-select:focus {
+    background-color: var(--surface);
+    color: var(--app-text);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.18);
+}
+.form-select option {
+    background-color: var(--surface);
+    color: var(--app-text);
+}
 
 /* Alerts */
 .alert { border: none; border-radius: var(--border-radius); padding: 1rem 1.5rem; margin-bottom: 1rem; border-left: 4px solid; }
