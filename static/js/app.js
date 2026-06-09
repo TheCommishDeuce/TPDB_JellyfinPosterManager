@@ -68,6 +68,15 @@ let selectedPosters = {};
 let loadingModal = null;
 let posterModal = null;
 let resultsModal = null;
+let failedItemsPanelVisible = false;
+let activeFailedItemIds = new Set();
+let activeFailedItemDetails = new Map();
+let activeProcessedItemDetails = new Map();
+let autoBatchPollTimer = null;
+let currentAutoBatchJobId = null;
+let autoBatchStartedAt = null;
+let manualSelectionVisible = false;
+let posterSearchProgressTimer = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     // Theme first
@@ -81,10 +90,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const rm = document.getElementById('resultsModal');
     if (lm && bootstrap?.Modal) loadingModal = new bootstrap.Modal(lm);
     if (pm && bootstrap?.Modal) posterModal = new bootstrap.Modal(pm);
-    if (rm && bootstrap?.Modal) resultsModal = new bootstrap.Modal(rm);
+    if (rm && bootstrap?.Modal) {
+        resultsModal = new bootstrap.Modal(rm);
+        rm.addEventListener('hidden.bs.modal', () => loadFailedItems({ autoExpand: true }));
+    }
 
     // Initialize counters/buttons
     updateUploadAllButton();
+    loadFailedItems();
+    loadProcessedItems();
 
     const urlParams = new URLSearchParams(window.location.search);
     const libraryFilter = document.getElementById('libraryFilter');
@@ -153,6 +167,8 @@ function filterContent(type, updateUrl = true) {
     }
     url.hash = '';
     window.history.pushState({}, '', url);
+    applyProcessedItemMarkers(activeProcessedItemDetails);
+    applyFailedItemMarkers(activeFailedItemIds);
 }
 
 function filterLibrary() {
@@ -167,11 +183,45 @@ function sortContent(sortBy) {
     window.location.href = url.toString();
 }
 
+function startPosterSearchProgress() {
+    stopPosterSearchProgress();
+
+    const loadingText = document.getElementById('loadingText');
+    const loadingSubtext = document.getElementById('loadingSubtext');
+    const startedAt = Date.now();
+    const steps = [
+        { at: 0, text: 'Searching TPDB for matching entries...' },
+        { at: 5, text: 'Checking matching TPDB entries for available posters...' },
+        { at: 10, text: 'Trying additional matches if the first result has no posters...' },
+        { at: 15, text: 'Converting poster previews for the picker...' },
+        { at: 25, text: 'Still working. TPDB responses can take a little while...' }
+    ];
+
+    const update = () => {
+        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        const currentStep = [...steps].reverse().find(step => elapsed >= step.at) || steps[0];
+        if (loadingText) loadingText.textContent = 'Searching and converting posters...';
+        if (loadingSubtext) loadingSubtext.textContent = currentStep.text;
+    };
+
+    update();
+    posterSearchProgressTimer = setInterval(update, 1000);
+}
+
+function stopPosterSearchProgress() {
+    if (posterSearchProgressTimer) {
+        clearInterval(posterSearchProgressTimer);
+        posterSearchProgressTimer = null;
+    }
+
+    const loadingSubtext = document.getElementById('loadingSubtext');
+    if (loadingSubtext) loadingSubtext.textContent = 'This may take a few moments';
+}
+
 // Load posters for item
 async function loadPosters(itemId) {
     currentItemId = itemId;
-    const lt = document.getElementById('loadingText');
-    if (lt) lt.textContent = 'Searching and converting posters...';
+    startPosterSearchProgress();
     if (loadingModal) loadingModal.show();
 
     try {
@@ -188,6 +238,8 @@ async function loadPosters(itemId) {
         console.error('Error loading posters:', error);
         if (loadingModal) loadingModal.hide();
         showAlert('Failed to load posters: ' + error.message, 'danger');
+    } finally {
+        stopPosterSearchProgress();
     }
 }
 
@@ -408,6 +460,8 @@ async function uploadAllSelected() {
         if (progressText) progressText.textContent = '100%';
 
         showBatchResults(data.results);
+        loadFailedItems({ autoExpand: true });
+        loadProcessedItems();
 
         // Refresh after short delay to update any thumbnails
         setTimeout(() => {
@@ -434,8 +488,9 @@ function showBatchResults(results) {
 
     let successCount = results.filter(r => r.success).length;
     let failCount = results.length - successCount;
+    const defaultFilter = failCount > 0 ? 'failed' : 'all';
 
-    let html = `
+    const html = `
         <div class="row mb-3">
             <div class="col-md-6">
                 <div class="card border-success">
@@ -456,7 +511,20 @@ function showBatchResults(results) {
                 </div>
             </div>
         </div>
-        <h6>Detailed Results:</h6>
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <h6 class="mb-0">Detailed Results</h6>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Filter upload results">
+                <button class="btn btn-outline-secondary batch-results-filter" type="button" data-filter="all">
+                    All (${results.length})
+                </button>
+                <button class="btn btn-outline-danger batch-results-filter" type="button" data-filter="failed">
+                    Failed (${failCount})
+                </button>
+                <button class="btn btn-outline-success batch-results-filter" type="button" data-filter="successful">
+                    Successful (${successCount})
+                </button>
+            </div>
+        </div>
         <div class="table-responsive">
             <table class="table table-sm results-table">
                 <thead>
@@ -466,41 +534,69 @@ function showBatchResults(results) {
                         <th>Error</th>
                     </tr>
                 </thead>
-                <tbody>
-    `;
-
-    results.forEach(result => {
-        html += `
-            <tr>
-                <td>${result.item_title || result.item_id}</td>
-                <td>
-                    ${result.success ?
-                        '<span class="badge bg-success">Success</span>' :
-                        '<span class="badge bg-danger">Failed</span>'
-                    }
-                </td>
-                <td>${result.error || '-'}</td>
-            </tr>
-        `;
-    });
-
-    html += `
-                </tbody>
+                <tbody id="batchResultsBody"></tbody>
             </table>
         </div>
     `;
 
     modalBody.innerHTML = html;
+    renderBatchResults(results, defaultFilter);
+
+    document.querySelectorAll('.batch-results-filter').forEach(button => {
+        button.addEventListener('click', () => renderBatchResults(results, button.getAttribute('data-filter')));
+    });
+
     if (resultsModal) resultsModal.show();
+}
+
+function renderBatchResults(results, filter) {
+    const tbody = document.getElementById('batchResultsBody');
+    if (!tbody) return;
+
+    document.querySelectorAll('.batch-results-filter').forEach(button => {
+        const isActive = button.getAttribute('data-filter') === filter;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+
+    const filteredResults = results.filter(result => {
+        if (filter === 'failed') return !result.success;
+        if (filter === 'successful') return result.success;
+        return true;
+    });
+
+    if (filteredResults.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td class="text-muted text-center" colspan="3">No results in this filter.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = filteredResults.map(result => `
+        <tr>
+            <td>${escapeHtml(result.item_title || result.item_id || 'Unknown')}</td>
+            <td>
+                ${result.success ?
+                    '<span class="badge bg-success">Success</span>' :
+                    '<span class="badge bg-danger">Failed</span>'
+                }
+            </td>
+            <td>${escapeHtml(result.error || '-')}</td>
+        </tr>
+    `).join('');
 }
 
 // Button enable state
 function updateUploadAllButton() {
     const uploadBtn = document.getElementById('uploadAllBtn');
     const selectedCountSpan = document.getElementById('selectedCount');
+    const toolbarCount = document.getElementById('manualSelectionToolbarCount');
     const selectedCount = Object.keys(selectedPosters).length;
 
     if (selectedCountSpan) selectedCountSpan.textContent = selectedCount;
+    if (toolbarCount) toolbarCount.textContent = selectedCount;
 
     if (uploadBtn) {
         if (selectedCount > 0) {
@@ -511,14 +607,35 @@ function updateUploadAllButton() {
             uploadBtn.innerHTML = '<i class="fas fa-cloud-upload-alt me-2"></i>Upload All Selected';
         }
     }
+
+    updateManualSelectionVisibility();
+}
+
+function updateManualSelectionVisibility() {
+    const manualRow = document.getElementById('manualSelectionRow');
+    const toolbarBtn = document.getElementById('manualSelectionToolbarBtn');
+    const selectedCount = Object.keys(selectedPosters).length;
+    const shouldShow = selectedCount > 0 || manualSelectionVisible;
+
+    if (manualRow) manualRow.style.display = shouldShow ? '' : 'none';
+    if (toolbarBtn) {
+        toolbarBtn.classList.toggle('active', shouldShow);
+        toolbarBtn.setAttribute('aria-expanded', shouldShow ? 'true' : 'false');
+    }
+}
+
+function toggleManualSelectionPanel() {
+    manualSelectionVisible = !manualSelectionVisible;
+    updateManualSelectionVisibility();
 }
 
 // Notifications
 function showAlert(message, type = 'info') {
+    const safeMessage = escapeHtml(message);
     const alertHtml = `
         <div class="alert alert-${type} alert-dismissible fade show" role="alert">
             <i class="fas fa-info-circle me-2"></i>
-            ${message}
+            ${safeMessage}
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
     `;
@@ -528,6 +645,502 @@ function showAlert(message, type = 'info') {
         const alert = container.querySelector('.alert');
         if (alert) alert.remove();
     }, 5000);
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatOperationLabel(operation) {
+    const labels = {
+        'auto-poster': 'Auto-Get Posters',
+        'manual-upload': 'Manual Upload',
+        'batch-upload': 'Batch Upload',
+        'direct-upload': 'Direct Upload',
+        'retry-auto-poster': 'Retry',
+        'retry-all-auto-poster': 'Retry All',
+        'poster': 'Poster Lookup'
+    };
+    return labels[operation] || String(operation || 'Poster Lookup')
+        .replace(/-/g, ' ')
+        .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function formatLogTimestamp(timestamp) {
+    if (!timestamp) return 'Unknown time';
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return timestamp;
+    return date.toLocaleString();
+}
+
+async function loadFailedItems(options = {}) {
+    const failedItemsBody = document.getElementById('failedItemsBody');
+    const failedItemsCount = document.getElementById('failedItemsCount');
+    const failedItemsPanel = document.getElementById('failedItemsPanel');
+    const retryAllBtn = document.getElementById('retryAllFailedBtn');
+    const clearBtn = document.getElementById('clearFailedItemsBtn');
+    const failedItemsRow = document.getElementById('failedItemsRow');
+    if (!failedItemsBody || !failedItemsCount || !failedItemsPanel || !retryAllBtn || !clearBtn || !failedItemsRow) return;
+
+    try {
+        const response = await fetch('/failed-items?limit=100');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to load failed items');
+
+        const items = data.items || [];
+        activeFailedItemIds = new Set(items.map(item => item.item_id).filter(Boolean));
+        activeFailedItemDetails = new Map(items.filter(item => item.item_id).map(item => [item.item_id, item]));
+        applyProcessedItemMarkers(activeProcessedItemDetails);
+        applyFailedItemMarkers(activeFailedItemIds);
+        failedItemsCount.textContent = items.length;
+        const toolbarCount = document.getElementById('failedItemsToolbarCount');
+        if (toolbarCount) toolbarCount.textContent = items.length;
+        retryAllBtn.disabled = items.length === 0;
+        clearBtn.disabled = items.length === 0;
+        failedItemsRow.style.display = items.length === 0 ? 'none' : '';
+        if (options.autoExpand && items.length > 0) {
+            failedItemsPanelVisible = true;
+        }
+
+        if (items.length === 0) {
+            failedItemsPanelVisible = false;
+            updateFailedItemsPanelVisibility();
+            failedItemsBody.innerHTML = '';
+            return;
+        }
+
+        updateFailedItemsPanelVisibility();
+        failedItemsBody.innerHTML = items.map(item => {
+            const label = item.item_year ? `${item.item_title || 'Unknown'} (${item.item_year})` : (item.item_title || 'Unknown');
+            const canRetry = Boolean(item.item_id);
+            const itemLabel = canRetry ? `
+                <button class="btn btn-link btn-sm p-0 failed-item-link"
+                        type="button"
+                        data-item-id="${escapeHtml(item.item_id)}">
+                    ${escapeHtml(label)}
+                </button>
+            ` : escapeHtml(label);
+            return `
+                <tr>
+                    <td>${itemLabel}</td>
+                    <td>${escapeHtml(item.item_type || '-')}</td>
+                    <td>${escapeHtml(formatOperationLabel(item.operation))}</td>
+                    <td>${escapeHtml(item.error || '-')}</td>
+                    <td class="text-end">
+                        <button class="btn btn-outline-warning btn-sm retry-failed-item-btn"
+                                type="button"
+                                data-item-id="${escapeHtml(item.item_id || '')}"
+                                ${canRetry ? '' : 'disabled'}>
+                            <i class="fas fa-rotate-right me-1"></i>Retry
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        document.querySelectorAll('.retry-failed-item-btn').forEach(button => {
+            button.addEventListener('click', () => retryFailedItem(button.getAttribute('data-item-id'), button));
+        });
+        document.querySelectorAll('.failed-item-link').forEach(button => {
+            button.addEventListener('click', () => scrollToItemCard(button.getAttribute('data-item-id')));
+        });
+    } catch (error) {
+        console.error('Failed items error:', error);
+        showAlert('Failed to load failed items: ' + error.message, 'danger');
+    }
+}
+
+function updateFailedItemsPanelVisibility() {
+    const failedItemsPanel = document.getElementById('failedItemsPanel');
+    const failedItemsCount = document.getElementById('failedItemsCount');
+    const failedItemsRow = document.getElementById('failedItemsRow');
+    const toolbarBtn = document.getElementById('failedItemsToolbarBtn');
+    if (!failedItemsPanel || !failedItemsCount || !failedItemsRow) return;
+
+    const hasItems = Number(failedItemsCount.textContent) > 0;
+    failedItemsRow.style.display = hasItems && failedItemsPanelVisible ? '' : 'none';
+    failedItemsPanel.style.display = hasItems && failedItemsPanelVisible ? 'block' : 'none';
+    if (toolbarBtn) {
+        toolbarBtn.disabled = !hasItems;
+        toolbarBtn.classList.toggle('active', hasItems && failedItemsPanelVisible);
+        toolbarBtn.setAttribute('aria-expanded', hasItems && failedItemsPanelVisible ? 'true' : 'false');
+    }
+}
+
+async function toggleFailedItemsFromToolbar() {
+    if (!failedItemsPanelVisible) {
+        await loadFailedItems();
+    }
+    const failedItemsCount = document.getElementById('failedItemsCount');
+    if (!failedItemsCount || Number(failedItemsCount.textContent) === 0) return;
+    failedItemsPanelVisible = !failedItemsPanelVisible;
+    updateFailedItemsPanelVisibility();
+}
+
+async function loadProcessedItems() {
+    try {
+        const response = await fetch('/processed-items?limit=1000');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to load processed items');
+
+        const items = data.items || [];
+        activeProcessedItemDetails = new Map(items.filter(item => item.item_id).map(item => [item.item_id, item]));
+        applyProcessedItemMarkers(activeProcessedItemDetails);
+        applyFailedItemMarkers(activeFailedItemIds);
+    } catch (error) {
+        console.error('Processed items error:', error);
+    }
+}
+
+function applyProcessedItemMarkers(itemDetails) {
+    document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
+        const itemId = wrapper.getAttribute('data-item-id');
+        const card = wrapper.querySelector('.item-card');
+        const posterWrapper = wrapper.querySelector('.card-img-top-wrapper');
+        if (!card || !posterWrapper) return;
+
+        const detail = itemDetails.get(itemId);
+        const isProcessed = Boolean(detail) && !activeFailedItemIds.has(itemId);
+        card.classList.toggle('processed-item', isProcessed);
+
+        let overlay = wrapper.querySelector('.processed-item-overlay');
+        if (isProcessed && !overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'processed-item-overlay';
+            posterWrapper.insertBefore(overlay, posterWrapper.firstChild);
+        }
+
+        if (isProcessed && overlay) {
+            overlay.title = `Processed ${formatLogTimestamp(detail.timestamp)}`;
+            overlay.innerHTML = '<span class="badge bg-success"><i class="fas fa-check me-1"></i>Processed</span>';
+        } else if (!isProcessed && overlay) {
+            overlay.remove();
+        }
+    });
+}
+
+function applyFailedItemMarkers(itemIds) {
+    document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
+        const itemId = wrapper.getAttribute('data-item-id');
+        const card = wrapper.querySelector('.item-card');
+        const posterWrapper = wrapper.querySelector('.card-img-top-wrapper');
+        if (!card || !posterWrapper) return;
+
+        const isFailed = itemIds.has(itemId);
+        const detail = activeFailedItemDetails.get(itemId);
+        card.classList.toggle('failed-item', isFailed);
+
+        const processedOverlay = wrapper.querySelector('.processed-item-overlay');
+        if (isFailed && processedOverlay) {
+            processedOverlay.remove();
+            card.classList.remove('processed-item');
+        }
+
+        let overlay = wrapper.querySelector('.failed-item-overlay');
+        if (isFailed && !overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'failed-item-overlay';
+            posterWrapper.insertBefore(overlay, posterWrapper.firstChild);
+        }
+
+        if (isFailed && overlay) {
+            const reason = detail?.error || 'Unknown failure';
+            const timestamp = formatLogTimestamp(detail?.timestamp);
+            overlay.title = `Failed ${timestamp}\n${reason}`;
+            overlay.innerHTML = '<span class="badge bg-danger"><i class="fas fa-triangle-exclamation me-1"></i>Failed</span>';
+        } else if (!isFailed && overlay) {
+            overlay.remove();
+        }
+    });
+}
+
+function scrollToItemCard(itemId) {
+    if (!itemId) return;
+
+    const wrapper = Array.from(document.querySelectorAll('.item-card-wrapper'))
+        .find(item => item.getAttribute('data-item-id') === itemId);
+    if (!wrapper) {
+        showAlert('That item is not currently visible in the library grid.', 'warning');
+        return;
+    }
+
+    if (wrapper.classList.contains('hidden')) {
+        wrapper.classList.remove('hidden');
+        showAlert('Showing the failed item even though it is outside the current filter.', 'info');
+    }
+
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const card = wrapper.querySelector('.item-card');
+    if (card) {
+        card.classList.remove('failed-card-focus');
+        void card.offsetWidth;
+        card.classList.add('failed-card-focus');
+    }
+}
+
+async function clearFailedItems() {
+    if (!confirm('Clear all failed item entries from failed.log?')) return;
+
+    const clearBtn = document.getElementById('clearFailedItemsBtn');
+    const retryAllBtn = document.getElementById('retryAllFailedBtn');
+    if (clearBtn) {
+        clearBtn.disabled = true;
+        clearBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Clearing';
+    }
+
+    try {
+        const response = await fetch('/failed-items', { method: 'DELETE' });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to clear failed items');
+
+        const failedItemsBody = document.getElementById('failedItemsBody');
+        const failedItemsCount = document.getElementById('failedItemsCount');
+        const failedItemsPanel = document.getElementById('failedItemsPanel');
+        const failedItemsRow = document.getElementById('failedItemsRow');
+        const failedToolbarCount = document.getElementById('failedItemsToolbarCount');
+        if (failedItemsBody) failedItemsBody.innerHTML = '';
+        if (failedItemsCount) failedItemsCount.textContent = '0';
+        if (failedToolbarCount) failedToolbarCount.textContent = '0';
+        activeFailedItemIds = new Set();
+        activeFailedItemDetails = new Map();
+        applyFailedItemMarkers(activeFailedItemIds);
+        applyProcessedItemMarkers(activeProcessedItemDetails);
+        failedItemsPanelVisible = false;
+        if (failedItemsRow) failedItemsRow.style.display = 'none';
+        if (failedItemsPanel) updateFailedItemsPanelVisibility();
+        if (retryAllBtn) retryAllBtn.disabled = true;
+        showAlert('Failed items cleared', 'success');
+    } catch (error) {
+        console.error('Clear failed items error:', error);
+        showAlert('Failed to clear failed items: ' + error.message, 'danger');
+    } finally {
+        if (clearBtn) {
+            clearBtn.disabled = false;
+            clearBtn.innerHTML = '<i class="fas fa-trash me-1"></i>Clear';
+        }
+        loadFailedItems();
+    }
+}
+
+async function retryFailedItem(itemId, button) {
+    if (!itemId) return;
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Retrying';
+    }
+
+    try {
+        const response = await fetch('/failed-items/retry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ item_id: itemId })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Retry failed');
+
+        showAlert(`Poster retry succeeded for ${data.item_title || itemId}`, 'success');
+        loadFailedItems();
+        loadProcessedItems();
+    } catch (error) {
+        console.error('Retry failed item error:', error);
+        showAlert('Retry failed: ' + error.message, 'danger');
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-rotate-right me-1"></i>Retry';
+        }
+    }
+}
+
+async function retryAllFailedItems() {
+    const retryAllBtn = document.getElementById('retryAllFailedBtn');
+    if (!confirm('Retry poster fetch and upload for all recent failed items?')) return;
+
+    if (retryAllBtn) {
+        retryAllBtn.disabled = true;
+        retryAllBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Retrying...';
+    }
+
+    try {
+        const response = await fetch('/failed-items/retry-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit: 100 })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Retry all failed');
+
+        showBatchResults(data.results || []);
+        loadFailedItems({ autoExpand: true });
+        loadProcessedItems();
+    } catch (error) {
+        console.error('Retry all failed items error:', error);
+        showAlert('Retry all failed: ' + error.message, 'danger');
+    } finally {
+        if (retryAllBtn) {
+            retryAllBtn.disabled = false;
+            retryAllBtn.innerHTML = '<i class="fas fa-rotate-right me-1"></i>Retry All';
+        }
+    }
+}
+
+function formatPhaseLabel(phase) {
+    const labels = {
+        starting: 'Starting',
+        preparing: 'Preparing',
+        loading: 'Loading',
+        searching: 'Searching',
+        downloading: 'Downloading',
+        applying: 'Applying',
+        applied: 'Applied',
+        failed: 'Failed',
+        rate_limited: 'Rate Limited',
+        completed: 'Completed'
+    };
+    return labels[phase] || formatOperationLabel(phase || 'starting');
+}
+
+function setAutoBatchRunning(isRunning) {
+    const autoBtn = document.getElementById('autoPosterBtn');
+    const cancelBtn = document.getElementById('cancelAutoBatchBtn');
+
+    if (autoBtn) {
+        autoBtn.disabled = isRunning;
+        autoBtn.innerHTML = isRunning ?
+            '<i class="fas fa-spinner fa-spin me-1"></i> Running...' :
+            '<i class="fas fa-magic me-1"></i> Auto-Get Posters';
+    }
+    if (cancelBtn) {
+        cancelBtn.style.display = isRunning ? 'inline-block' : 'none';
+        cancelBtn.disabled = !isRunning;
+        cancelBtn.innerHTML = '<i class="fas fa-stop me-1"></i>Cancel';
+    }
+}
+
+function formatDuration(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return 'Calculating...';
+    const rounded = Math.round(seconds);
+    const minutes = Math.floor(rounded / 60);
+    const remainingSeconds = rounded % 60;
+    if (minutes <= 0) return `${remainingSeconds}s`;
+    return `${minutes}m ${remainingSeconds}s`;
+}
+
+function updateAutoBatchCurrentPoster(url) {
+    const img = document.getElementById('autoBatchCurrentPoster');
+    const empty = document.getElementById('autoBatchCurrentPosterEmpty');
+    if (!img || !empty) return;
+
+    if (!url) {
+        img.removeAttribute('src');
+        img.style.display = 'none';
+        empty.style.display = 'inline-block';
+        return;
+    }
+
+    img.src = '/jellyfin-image?url=' + encodeURIComponent(url);
+    img.style.display = 'block';
+    empty.style.display = 'none';
+}
+
+function calculateAutoBatchEta(job, processed, remaining) {
+    if (!autoBatchStartedAt || processed <= 0 || remaining <= 0 || job.done) {
+        return job.done ? 'Done' : 'Calculating...';
+    }
+    const elapsedSeconds = (Date.now() - autoBatchStartedAt) / 1000;
+    return formatDuration((elapsedSeconds / processed) * remaining);
+}
+
+function updateAutoBatchProgress(job) {
+    const panel = document.getElementById('autoBatchProgressPanel');
+    if (!panel || !job) return;
+
+    const total = Number(job.total_items || 0);
+    const processed = Number(job.processed || 0);
+    const remaining = Number(job.remaining ?? Math.max(total - processed, 0));
+    const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+    panel.style.display = 'block';
+    document.getElementById('autoBatchProgressStatus').textContent = job.message || 'Running automatic poster batch...';
+    document.getElementById('autoBatchCurrentItem').textContent = job.current_item ? `Current item: ${job.current_item}` : 'No item currently processing';
+    document.getElementById('autoBatchProgressCounts').textContent = `${processed} / ${total}`;
+    document.getElementById('autoBatchProgressBar').style.width = `${percent}%`;
+    document.getElementById('autoBatchProgressBar').setAttribute('aria-valuenow', String(percent));
+    document.getElementById('autoBatchRemaining').textContent = remaining;
+    document.getElementById('autoBatchSuccessful').textContent = job.successful || 0;
+    document.getElementById('autoBatchFailed').textContent = job.failed || 0;
+    document.getElementById('autoBatchPhase').textContent = formatPhaseLabel(job.phase);
+    document.getElementById('autoBatchEta').textContent = calculateAutoBatchEta(job, processed, remaining);
+    updateAutoBatchCurrentPoster(job.old_poster_url);
+}
+
+function stopAutoBatchPolling() {
+    if (autoBatchPollTimer) {
+        clearInterval(autoBatchPollTimer);
+        autoBatchPollTimer = null;
+    }
+}
+
+async function pollAutoBatchProgress(jobId) {
+    try {
+        const response = await fetch(`/batch-auto-poster/progress/${jobId}`);
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load batch progress');
+
+        const job = data.job;
+        updateAutoBatchProgress(job);
+
+        if (job.done) {
+            stopAutoBatchPolling();
+            setAutoBatchRunning(false);
+            currentAutoBatchJobId = null;
+            loadFailedItems({ autoExpand: true });
+            loadProcessedItems();
+
+            if (job.results && job.results.length > 0) {
+                showBatchResults(job.results);
+            }
+            if (!job.success && job.error) {
+                showAlert(job.error, 'danger');
+            }
+        }
+    } catch (error) {
+        stopAutoBatchPolling();
+        setAutoBatchRunning(false);
+        currentAutoBatchJobId = null;
+        console.error('Auto-batch progress error:', error);
+        showAlert('Failed to update auto-batch progress: ' + error.message, 'danger');
+    }
+}
+
+async function cancelAutoBatch() {
+    if (!currentAutoBatchJobId) return;
+    if (!confirm('Cancel the running Auto-Get Posters job?')) return;
+
+    const cancelBtn = document.getElementById('cancelAutoBatchBtn');
+    if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Cancelling';
+    }
+
+    try {
+        const response = await fetch(`/batch-auto-poster/cancel/${currentAutoBatchJobId}`, { method: 'POST' });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to cancel batch');
+        updateAutoBatchProgress(data.job);
+    } catch (error) {
+        console.error('Auto-batch cancel error:', error);
+        showAlert('Failed to cancel auto-batch: ' + error.message, 'danger');
+        if (cancelBtn) {
+            cancelBtn.disabled = false;
+            cancelBtn.innerHTML = '<i class="fas fa-stop me-1"></i>Cancel';
+        }
+    }
 }
 
 // Start automatic batch poster job
@@ -545,43 +1158,50 @@ async function startAutoBatchPoster(filter) {
         const libraryId = librarySelect?.value || '';
         const libraryName = libraryId ? librarySelect.options[librarySelect.selectedIndex]?.text : '';
 
-        if (!confirm(libraryName ? `${confirmText}\n\nLibrary: ${libraryName}` : confirmText)) return;
+        const skipProcessed = Boolean(document.getElementById('skipProcessedAutoBatch')?.checked);
+        let fullConfirmText = skipProcessed ?
+            `${confirmText}\n\nAlready processed items in results.log will be skipped.` :
+            confirmText;
+        if (libraryName) fullConfirmText += `\n\nLibrary: ${libraryName}`;
 
-        const autoBtn = document.getElementById('autoPosterBtn');
-        if (autoBtn) {
-            autoBtn.disabled = true;
-            autoBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Running...';
-        }
+        if (!confirm(fullConfirmText)) return;
 
-        const lt = document.getElementById('loadingText');
-        if (lt) lt.textContent = 'Running automatic poster batch...';
-        if (loadingModal) loadingModal.show();
+        stopAutoBatchPolling();
+        setAutoBatchRunning(true);
+        currentAutoBatchJobId = null;
+        autoBatchStartedAt = Date.now();
 
-        const resp = await fetch('/batch-auto-poster', {
+        updateAutoBatchProgress({
+            total_items: 0,
+            processed: 0,
+            remaining: 0,
+            successful: 0,
+            failed: 0,
+            phase: 'starting',
+            message: 'Starting automatic poster batch...',
+            current_item: null,
+            old_poster_url: null,
+            new_poster_url: null
+        });
+
+        const resp = await fetch('/batch-auto-poster/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filter, library_id: libraryId })
+            body: JSON.stringify({ filter, library_id: libraryId, skip_processed: skipProcessed })
         });
 
         const data = await resp.json();
-        if (loadingModal) loadingModal.hide();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Automatic batch failed');
 
-        if (!data.success) {
-            showAlert(data.error || 'Automatic batch failed', 'danger');
-            return;
-        }
-
-        showBatchResults(data.results);
+        currentAutoBatchJobId = data.job_id;
+        await pollAutoBatchProgress(data.job_id);
+        autoBatchPollTimer = setInterval(() => pollAutoBatchProgress(data.job_id), 1000);
 
     } catch (err) {
         console.error('Auto-batch error:', err);
-        if (loadingModal) loadingModal.hide();
+        stopAutoBatchPolling();
+        setAutoBatchRunning(false);
+        currentAutoBatchJobId = null;
         showAlert('Automatic batch failed: ' + err.message, 'danger');
-    } finally {
-        const autoBtn = document.getElementById('autoPosterBtn');
-        if (autoBtn) {
-            autoBtn.disabled = false;
-            autoBtn.innerHTML = '<i class="fas fa-magic me-1"></i> Auto-Get Posters';
-        }
     }
 }

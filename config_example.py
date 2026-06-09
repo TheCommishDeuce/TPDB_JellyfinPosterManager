@@ -24,3 +24,5 @@ class Config:
     TPDB_DEBUG_SNAPSHOTS = True
     TEMP_POSTER_DIR = "temp_posters"
     LOG_DIR = "logs"
+    FAILED_LOG_FILE = os.path.join(LOG_DIR, "failed.log")
+    RESULTS_LOG_FILE = os.path.join(LOG_DIR, "results.log")
