@@ -456,53 +456,103 @@ def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None,
                         logging.info(f"No TPDB search results for '{search_query}'.")
                         return []
 
-                    best_match = None
-                    best_match_score = 0
-                    for link in search_result_links:
+                    expected_year = extract_title_year(search_query) or (str(item_year) if item_year else None)
+                    candidate_links = []
+                    for index, link in enumerate(search_result_links):
                         try:
                             title_element = link.find(class_="text-truncate") or link.find("span") or link
                             result_title = title_element.get_text(strip=True) if title_element else link.get_text(strip=True)
+                            result_year = extract_title_year(result_title)
+                            if expected_year and result_year and result_year != expected_year:
+                                logging.info(
+                                    "Skipping TPDB result for '%s' due to year mismatch: %s",
+                                    search_query,
+                                    result_title,
+                                )
+                                continue
                             score = calculate_title_match_score(search_query, result_title)
-                            if score > best_match_score:
-                                best_match_score = score
-                                best_match = link
+                            item_page_path = link.get('href')
+                            if not item_page_path:
+                                continue
+                            target_item_page_url = item_page_path if item_page_path.startswith('http') else (
+                                Config.TPDB_BASE_URL + item_page_path if item_page_path.startswith('/') else None
+                            )
+                            if not target_item_page_url:
+                                continue
+                            candidate_links.append({
+                                'title': result_title,
+                                'year': result_year,
+                                'score': score,
+                                'url': target_item_page_url,
+                                'index': index,
+                            })
                         except Exception:
                             continue
 
-                    selected_link = best_match if best_match and best_match_score >= 0.8 else search_result_links[0]
-
-                    item_page_path = selected_link.get('href')
-                    if not item_page_path:
+                    if not candidate_links:
                         return []
-                    target_item_page_url = item_page_path if item_page_path.startswith('http') else (
-                        Config.TPDB_BASE_URL + item_page_path if item_page_path.startswith('/') else None
+
+                    strong_matches = [candidate for candidate in candidate_links if candidate['score'] >= 0.8]
+                    candidates_to_check = strong_matches or candidate_links
+                    candidates_to_check = sorted(
+                        candidates_to_check,
+                        key=lambda candidate: (-candidate['score'], candidate['index'])
                     )
-                    if not target_item_page_url:
-                        return []
 
-                    selenium_driver.get(target_item_page_url)
-                    current_url = selenium_driver.current_url
-                    if _is_login_url(current_url):
-                        logging.warning("TPDB session expired on item page for '%s' (%s).", item_title, current_url)
-                        raise TPDBSessionExpired("TPDB session expired while loading item page.")
-
-                    _raise_if_rate_limited(selenium_driver.page_source, current_url, "item_page")
-                    _wait_for_item_posters_ready(selenium_driver, timeout=15)
-                    item_soup = BeautifulSoup(selenium_driver.page_source, 'html.parser')
-
-                    poster_links = item_soup.select(ITEM_POSTER_SELECTOR)[:max_posters]
                     poster_urls = []
-                    for poster_link in poster_links:
-                        href = poster_link.get('href')
-                        if not href:
+                    for candidate in candidates_to_check:
+                        logging.info(
+                            "Checking TPDB result for '%s': %s (score %.2f)",
+                            search_query,
+                            candidate['title'],
+                            candidate['score'],
+                        )
+                        selenium_driver.get(candidate['url'])
+                        current_url = selenium_driver.current_url
+                        if _is_login_url(current_url):
+                            logging.warning("TPDB session expired on item page for '%s' (%s).", item_title, current_url)
+                            raise TPDBSessionExpired("TPDB session expired while loading item page.")
+
+                        _raise_if_rate_limited(selenium_driver.page_source, current_url, "item_page")
+
+                        try:
+                            _wait_for_item_posters_ready(selenium_driver, timeout=15)
+                        except TimeoutError:
+                            logging.warning(
+                                "Timed out checking TPDB result '%s' for '%s'; trying next result.",
+                                candidate['title'],
+                                search_query,
+                            )
                             continue
-                        if href.startswith('http'):
-                            poster_url = href
-                        elif href.startswith('/'):
-                            poster_url = Config.TPDB_BASE_URL + href
-                        else:
-                            continue
-                        poster_urls.append(poster_url)
+
+                        item_soup = BeautifulSoup(selenium_driver.page_source, 'html.parser')
+                        poster_links = item_soup.select(ITEM_POSTER_SELECTOR)[:max_posters]
+                        for poster_link in poster_links:
+                            href = poster_link.get('href')
+                            if not href:
+                                continue
+                            if href.startswith('http'):
+                                poster_url = href
+                            elif href.startswith('/'):
+                                poster_url = Config.TPDB_BASE_URL + href
+                            else:
+                                continue
+                            poster_urls.append(poster_url)
+
+                        if poster_urls:
+                            logging.info(
+                                "Using TPDB result '%s' for '%s' with %d poster(s).",
+                                candidate['title'],
+                                search_query,
+                                len(poster_urls),
+                            )
+                            break
+
+                        logging.info(
+                            "TPDB result '%s' for '%s' had no posters; trying next result.",
+                            candidate['title'],
+                            search_query,
+                        )
                 break
             except TPDBSessionExpired:
                 if attempt == 0:
@@ -575,6 +625,12 @@ def calculate_title_match_score(expected_title, result_title):
 
     common = expected_words.intersection(result_words)
     return len(common) / max(len(expected_words), len(result_words))
+
+def extract_title_year(title):
+    if not title:
+        return None
+    year_match = re.search(r'\((\d{4})\)', title)
+    return year_match.group(1) if year_match else None
 
 def normalize_title_for_comparison(title):
     if not title:
