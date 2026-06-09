@@ -175,6 +175,12 @@ def setup_selenium_and_login(force=False):
             chrome_options.add_argument("--headless=new")
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--disable-gpu")
+            if not getattr(Config, "DEBUG", False):
+                chrome_options.add_argument("--disable-logging")
+                chrome_options.add_argument("--log-level=3")
+                chrome_options.add_argument("--disable-webgpu")
+                chrome_options.add_argument("--disable-vulkan")
+                chrome_options.add_argument("--disable-features=WebGPU,Vulkan,UseSkiaRenderer")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -183,9 +189,16 @@ def setup_selenium_and_login(force=False):
                 "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
             )
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            excluded_switches = ["enable-automation"]
+            if not getattr(Config, "DEBUG", False):
+                excluded_switches.append("enable-logging")
+            chrome_options.add_experimental_option("excludeSwitches", excluded_switches)
             chrome_options.add_experimental_option("useAutomationExtension", False)
-            selenium_driver = webdriver.Chrome(options=chrome_options)
+            chrome_service = None
+            if not getattr(Config, "DEBUG", False):
+                chrome_service = Service(log_output=os.devnull)
+
+            selenium_driver = webdriver.Chrome(options=chrome_options, service=chrome_service)
             selenium_driver.set_page_load_timeout(30)
             try:
                 selenium_driver.execute_cdp_cmd(
@@ -239,16 +252,27 @@ def setup_selenium_and_login(force=False):
                 teardown_selenium()
             raise
 
-def teardown_selenium():
-    """Shutdown Selenium driver (only used on app shutdown)."""
+def teardown_selenium(timeout=5):
+    """Shutdown Selenium driver without letting a stuck ChromeDriver block app exit."""
     global selenium_driver
     with selenium_lock:
-        if selenium_driver:
-            try:
-                selenium_driver.quit()
-            except Exception:
-                pass
-            selenium_driver = None
+        driver = selenium_driver
+        selenium_driver = None
+
+    if not driver:
+        return
+
+    def quit_driver():
+        try:
+            driver.quit()
+        except Exception as shutdown_error:
+            logging.warning(f"Failed to shutdown Selenium driver cleanly: {shutdown_error}")
+
+    cleanup_thread = threading.Thread(target=quit_driver, daemon=True)
+    cleanup_thread.start()
+    cleanup_thread.join(timeout)
+    if cleanup_thread.is_alive():
+        logging.warning("Selenium driver shutdown is still running; continuing application exit.")
 
 def get_selenium_cookies_as_dict():
     """Return Selenium cookies as a dict for requests.Session."""
@@ -283,7 +307,7 @@ def download_image_with_cookies(url, save_path):
                     for chunk in response.iter_content(8192):
                         if chunk:
                             f.write(chunk)
-                logging.info(f"Saved image to {save_path}")
+                logging.debug(f"Saved image to {save_path}")
                 return True
             else:
                 logging.warning(f"Failed to download image from {url} (status {response.status_code})")
@@ -529,7 +553,7 @@ def _resolve_tpdb_search_query(item_title, item_type=None, tmdb_id=None):
                 year = (tmdb_data.get("release_date") or "")[:4]
             if tmdb_title:
                 search_query = f'{tmdb_title} ({year})' if year else tmdb_title
-                logging.info(f"Using TMDB title for TPDB search: {search_query}")
+                logging.debug(f"Using TMDB title for TPDB search: {search_query}")
         except Exception as e:
             logging.warning(f"TMDB lookup failed for {item_title} ({item_type}): {e}; falling back to Jellyfin title.")
     return search_query
@@ -915,7 +939,10 @@ def search_tpdb_for_poster_groups(
         posters = []
         if best_group:
             posters = best_group['show_posters'][:max_posters]
-        logging.info(f"Found {len(posters)} poster links.")
+        if posters:
+            logging.info(f"Found {len(posters)} poster links.")
+        else:
+            logging.warning("Found 0 poster links for '%s'.", item_title)
         return {
             'posters': posters,
             'groups': groups,
@@ -1012,12 +1039,12 @@ def upload_image_to_jellyfin_improved(item_id, image_path):
     """Upload image to Jellyfin with improved logic"""
     try:
         if not os.path.exists(image_path):
-            print(f"Image file not found: {image_path}")
+            logging.warning(f"Image file not found: {image_path}")
             return False
 
         # Check if images are identical
         if are_images_identical(item_id, image_path, 'Primary'):
-            print(f"Image for item {item_id} is identical to existing.")
+            logging.info(f"Image for item {item_id} is identical to existing.")
             return True
 
         # Read and encode the image
@@ -1038,14 +1065,14 @@ def upload_image_to_jellyfin_improved(item_id, image_path):
         response = requests.post(url, headers=headers, data=encoded_data, timeout=30)
 
         if response.status_code in [200, 204]:
-            print("Artwork uploaded successfully!")
+            logging.info("Artwork uploaded successfully.")
             return True
         else:
-            print(f"Failed to upload artwork: {response.status_code}")
+            logging.warning(f"Failed to upload artwork: {response.status_code}")
             return False
 
     except Exception as e:
-        print(f"Error during image upload: {e}")
+        logging.error(f"Error during image upload: {e}")
         return False
     finally:
         # Clean up memory
@@ -1130,7 +1157,35 @@ def get_jellyfin_server_info():
         logging.error(f"Error fetching server info: {e}")
         return {'name': 'Jellyfin Server', 'version': '', 'id': ''}
 
-def get_jellyfin_items(item_type=None, sort_by='name'):
+
+def get_jellyfin_libraries():
+    if not Config.JELLYFIN_URL or not Config.JELLYFIN_API_KEY:
+        return []
+
+    headers = {"X-Emby-Token": Config.JELLYFIN_API_KEY}
+    try:
+        response = requests.get(f"{Config.JELLYFIN_URL}/Library/VirtualFolders", headers=headers, timeout=10)
+        response.raise_for_status()
+        libraries = []
+        for library in response.json():
+            library_id = library.get('ItemId')
+            library_name = library.get('Name')
+            library_type = library.get('CollectionType', '')
+            if library_type == 'boxsets' or (library_name or '').strip().lower() == 'collections':
+                continue
+            if library_id and library_name:
+                libraries.append({
+                    'id': library_id,
+                    'name': library_name,
+                    'type': library_type
+                })
+        return libraries
+    except Exception as e:
+        logging.warning(f"Could not fetch Jellyfin libraries: {e}")
+        return []
+
+
+def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
     """
     Fetch a list of movies and TV shows from Jellyfin with thumbnail URLs.
     item_type: 'movies', 'series', or None for both
@@ -1145,6 +1200,34 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
         "X-Emby-Token": Config.JELLYFIN_API_KEY,
         "Accept": "application/json",
     }
+    libraries = libraries if libraries is not None else get_jellyfin_libraries()
+    library_names = {library['id']: library['name'] for library in libraries}
+
+    def build_item(item, item_type_label, fallback_library=None):
+        ancestor_ids = item.get('AncestorIds') or []
+        library_id = item.get('ParentId', '')
+        if library_id not in library_names:
+            library_id = next((ancestor_id for ancestor_id in ancestor_ids if ancestor_id in library_names), '')
+        if not library_id and fallback_library:
+            library_id = fallback_library.get('id', '')
+        thumbnail_url = None
+        if item.get('ImageTags', {}).get('Primary'):
+            thumbnail_url = (
+                f"{Config.JELLYFIN_URL}/Items/{item.get('Id')}/Images/Primary"
+                f"?maxWidth=300&quality=85&tag={item['ImageTags']['Primary']}"
+            )
+        return {
+            "id": item.get('Id'),
+            "title": item.get('Name'),
+            "year": item.get('ProductionYear'),
+            "type": item_type_label,
+            "thumbnail_url": thumbnail_url,
+            "date_created": item.get('DateCreated', ''),
+            "season_count": item.get('ChildCount') if item_type_label == 'Series' else None,
+            "library_id": library_id,
+            "library_name": library_names.get(library_id, fallback_library.get('name', '') if fallback_library else ''),
+            'ProviderIds': item.get('ProviderIds', {})
+        }
 
     sort_params = {
         'name': 'SortName',
@@ -1155,12 +1238,52 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
     sort_order = 'Descending' if sort_by == 'date_added' else 'Ascending'
 
     try:
+        if libraries:
+            include_types = "Movie,Series"
+            if item_type == 'movies':
+                include_types = "Movie"
+            elif item_type == 'series':
+                include_types = "Series"
+
+            for library in libraries:
+                library_items_url = (
+                    f"{Config.JELLYFIN_URL}/Items"
+                    f"?ParentId={library['id']}"
+                    f"&IncludeItemTypes={include_types}&Recursive=true"
+                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,Type,ParentId,AncestorIds,ChildCount"
+                )
+                response = requests.get(library_items_url, headers=headers, timeout=15)
+                response.raise_for_status()
+                library_data = response.json()
+                for item in library_data.get('Items', []):
+                    item_type_label = "Movie" if item.get('Type') == 'Movie' else "Series"
+                    items.append(build_item(item, item_type_label, fallback_library=library))
+
+            if sort_by == 'library':
+                items.sort(key=lambda x: ((x.get('library_name') or '').lower(), (x.get('title') or '').lower()))
+            elif sort_by == 'year':
+                items.sort(key=lambda x: ((x.get('year') or 0), (x.get('title') or '').lower()))
+            elif sort_by == 'date_added':
+                def parse_date(date_str):
+                    if not date_str:
+                        return datetime.min
+                    try:
+                        return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    except Exception:
+                        return datetime.min
+                items.sort(key=lambda x: parse_date(x['date_created']), reverse=True)
+            else:
+                items.sort(key=lambda x: (x.get('title') or '').lower())
+
+            logging.info(f"Total items fetched: {len(items)}")
+            return items
+
         if sort_by == 'date_added':
-            logging.info("Fetching all items for chronological sorting (mixed types).")
+            logging.debug("Fetching all items for chronological sorting (mixed types).")
             all_items_url = (
                 f"{Config.JELLYFIN_URL}/Items"
                 f"?IncludeItemTypes=Movie,Series&Recursive=true"
-                f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,Type,ChildCount"
+                f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,Type,ParentId,AncestorIds,ChildCount"
                 f"&SortBy={sort_by_param}&SortOrder={sort_order}"
             )
             response = requests.get(all_items_url, headers=headers, timeout=15)
@@ -1169,22 +1292,7 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
 
             if 'Items' in all_data:
                 for item in all_data['Items']:
-                    thumbnail_url = None
-                    if item.get('ImageTags', {}).get('Primary'):
-                        thumbnail_url = (
-                            f"{Config.JELLYFIN_URL}/Items/{item.get('Id')}/Images/Primary"
-                            f"?maxWidth=300&quality=85&tag={item['ImageTags']['Primary']}"
-                        )
-                    items.append({
-                        "id": item.get('Id'),
-                        "title": item.get('Name'),
-                        "year": item.get('ProductionYear'),
-                        "type": "Movie" if item.get('Type') == 'Movie' else "Series",
-                        "thumbnail_url": thumbnail_url,
-                        "date_created": item.get('DateCreated', ''),
-                        "season_count": item.get('ChildCount') if item.get('Type') == 'Series' else None,
-                        'ProviderIds': item.get('ProviderIds', {})
-                    })
+                    items.append(build_item(item, "Movie" if item.get('Type') == 'Movie' else "Series"))
             # Python-side sort for safety
             from datetime import datetime
             def parse_date(date_str):
@@ -1202,57 +1310,28 @@ def get_jellyfin_items(item_type=None, sort_by='name'):
                 movies_url = (
                     f"{Config.JELLYFIN_URL}/Items"
                     f"?IncludeItemTypes=Movie&Recursive=true"
-                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,ChildCount"
+                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,ParentId,AncestorIds"
                     f"&SortBy={sort_by_param}&SortOrder={sort_order}"
                 )
                 response = requests.get(movies_url, headers=headers, timeout=15)
                 response.raise_for_status()
                 movies_data = response.json()
                 for item in movies_data.get('Items', []):
-                    thumbnail_url = None
-                    if item.get('ImageTags', {}).get('Primary'):
-                        thumbnail_url = (
-                            f"{Config.JELLYFIN_URL}/Items/{item.get('Id')}/Images/Primary"
-                            f"?maxWidth=300&quality=85&tag={item['ImageTags']['Primary']}"
-                        )
-                    items.append({
-                        "id": item.get('Id'),
-                        "title": item.get('Name'),
-                        "year": item.get('ProductionYear'),
-                        "type": "Movie",
-                        "thumbnail_url": thumbnail_url,
-                        "date_created": item.get('DateCreated', ''),
-                        'ProviderIds': item.get('ProviderIds', {})
-                    })
+                    items.append(build_item(item, "Movie"))
 
             # Series
             if item_type == 'series' or item_type is None:
                 shows_url = (
                     f"{Config.JELLYFIN_URL}/Items"
                     f"?IncludeItemTypes=Series&Recursive=true"
-                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated"
+                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,ParentId,AncestorIds,ChildCount"
                     f"&SortBy={sort_by_param}&SortOrder={sort_order}"
                 )
                 response = requests.get(shows_url, headers=headers, timeout=15)
                 response.raise_for_status()
                 shows_data = response.json()
                 for item in shows_data.get('Items', []):
-                    thumbnail_url = None
-                    if item.get('ImageTags', {}).get('Primary'):
-                        thumbnail_url = (
-                            f"{Config.JELLYFIN_URL}/Items/{item.get('Id')}/Images/Primary"
-                            f"?maxWidth=300&quality=85&tag={item['ImageTags']['Primary']}"
-                        )
-                    items.append({
-                        "id": item.get('Id'),
-                        "title": item.get('Name'),
-                        "year": item.get('ProductionYear'),
-                        "type": "Series",
-                        "thumbnail_url": thumbnail_url,
-                        "date_created": item.get('DateCreated', ''),
-                        "season_count": item.get('ChildCount'),
-                        'ProviderIds': item.get('ProviderIds', {})
-                    })
+                    items.append(build_item(item, "Series"))
     except Exception as e:
         logging.error(f"Error fetching items from Jellyfin: {e}")
         return []

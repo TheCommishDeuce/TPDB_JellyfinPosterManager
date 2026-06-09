@@ -12,7 +12,10 @@
                             {{ server_info.name }} Library
                         </h1>
                         <p class="text-muted mb-0">
-                            Found <strong><span id="totalItemCount">{{ items|length }}</span></strong> items.
+                            <span id="itemCountSummary">
+                                Showing <strong><span id="visibleItemCount">{{ items|length }}</span></strong><span id="itemCountTotalText"></span> items.
+                            </span>
+                            <span id="allItemCount" data-count="{{ items|length }}" class="d-none"></span>
                             {% if server_info.version %}
                             <small class="ms-2">
                                 <i class="fas fa-server me-1"></i>
@@ -38,6 +41,16 @@
                                 <i class="fas fa-tv me-1"></i>Series
                             </label>
                         </div>
+                        {% if libraries %}
+                        <select class="form-select form-select-sm mt-2" id="libraryFilter" onchange="filterLibrary()" aria-label="Filter Jellyfin library">
+                            <option value="">All Libraries</option>
+                            {% for library in libraries %}
+                            <option value="{{ library.id }}" {{ 'selected' if current_library == library.id else '' }}>
+                                {{ library.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -270,6 +283,11 @@
             </button>
             <ul class="dropdown-menu" aria-labelledby="sortDropdownBtn">
                 <li>
+                    <a class="dropdown-item {{ 'active' if current_sort == 'library' else '' }}" href="#" onclick="sortContent('library')">
+                        <i class="fas fa-folder me-2"></i>Library
+                    </a>
+                </li>
+                <li>
                     <a class="dropdown-item {{ 'active' if current_sort == 'name' else '' }}" href="#" onclick="sortContent('name')">
                         <i class="fas fa-sort-alpha-down me-2"></i>Name (A-Z)
                     </a>
@@ -291,10 +309,21 @@
 
 <!-- Items Grid -->
 <div class="row" id="itemsGrid">
+    {% set library_group = namespace(current='') %}
     {% for item in items %}
+    {% if current_sort == 'library' and item.library_id != library_group.current %}
+    {% set library_group.current = item.library_id %}
+    <div class="col-12 library-group-header" data-library-id="{{ item.library_id or '' }}">
+        <h6 class="mb-3 mt-2 text-muted">
+            <i class="fas fa-folder me-2"></i>{{ item.library_name or 'Unknown Library' }}
+        </h6>
+    </div>
+    {% endif %}
     <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6 mb-4 item-card-wrapper"
-         data-item-id="{{ item.id }}"
-         data-type="{{ item.type.lower() }}">
+          data-item-id="{{ item.id }}"
+          data-type="{{ item.type.lower() }}"
+          data-library-id="{{ item.library_id or '' }}"
+          data-library-name="{{ item.library_name or '' }}">
         <div class="card h-100 item-card">
             <div class="card-img-top-wrapper">
                 {% if item.thumbnail_url %}

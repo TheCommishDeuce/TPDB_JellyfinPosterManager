@@ -3,6 +3,8 @@ import uuid
 import json
 import os
 import logging
+import re
+import sys
 import time
 from datetime import datetime
 from poster_scraper import *
@@ -12,16 +14,98 @@ import threading
 app = Flask(__name__)
 app.config.from_object(Config)
 
-# Setup logging
-os.makedirs(Config.LOG_DIR, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO if not Config.DEBUG else logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f'{Config.LOG_DIR}/app.log'),
-        logging.StreamHandler()
-    ]
-)
+class ConsoleFormatter(logging.Formatter):
+    COLORS = {
+        logging.DEBUG: "\033[90m",
+        logging.INFO: "\033[36m",
+        logging.WARNING: "\033[33m",
+        logging.ERROR: "\033[31m",
+        logging.CRITICAL: "\033[97;41m",
+    }
+    VALUE = "\033[96m"
+    RESET = "\033[0m"
+    ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
+    VALUE_PREFIXES = (
+        "Successfully uploaded poster for: ",
+        "Searching posters for: ",
+        "Processing item ",
+        "No TPDB search results for ",
+        "Found 0 poster links for ",
+    )
+
+    def __init__(self, use_color=True):
+        super().__init__(datefmt="%H:%M:%S")
+        self.use_color = use_color
+
+    def format(self, record):
+        timestamp = self.formatTime(record, self.datefmt)
+        display_level = record.levelno
+        message = record.getMessage()
+        plain_message = self.ANSI_PATTERN.sub("", message).strip()
+
+        if plain_message.startswith("WARNING:"):
+            display_level = logging.WARNING
+            message = plain_message.removeprefix("WARNING:").strip()
+
+        level = logging.getLevelName(display_level).ljust(7)
+
+        if self.use_color:
+            color = self.COLORS.get(display_level, "")
+            level = f"{color}{level}{self.RESET}"
+            message = self.highlight_value(message)
+
+        return f"{timestamp} {level} {message}"
+
+    def highlight_value(self, message):
+        for prefix in self.VALUE_PREFIXES:
+            if message.startswith(prefix):
+                return f"{prefix}{self.VALUE}{message[len(prefix):]}{self.RESET}"
+        return message
+
+
+class WerkzeugAccessLogFilter(logging.Filter):
+    METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
+
+    def filter(self, record):
+        if getattr(Config, "DEBUG", False):
+            return True
+
+        message = record.getMessage()
+        is_access_log = " HTTP/" in message and any(f'"{method} ' in message for method in self.METHODS)
+        return not is_access_log
+
+
+def setup_logging():
+    os.makedirs(Config.LOG_DIR, exist_ok=True)
+
+    log_level = logging.DEBUG if Config.DEBUG else logging.INFO
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    root_logger.handlers.clear()
+
+    file_handler = logging.FileHandler(f'{Config.LOG_DIR}/app.log', encoding='utf-8')
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+    ))
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(ConsoleFormatter(
+        use_color=sys.stderr.isatty() and os.environ.get("NO_COLOR") is None
+    ))
+
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+    werkzeug_logger = logging.getLogger("werkzeug")
+    werkzeug_logger.handlers.clear()
+    werkzeug_logger.setLevel(log_level)
+    werkzeug_logger.addFilter(WerkzeugAccessLogFilter())
+    werkzeug_logger.propagate = True
+
+
+setup_logging()
 
 # Global storage for session data
 user_sessions = {}
@@ -33,6 +117,23 @@ auto_batch_jobs = {}
 auto_batch_jobs_lock = threading.Lock()
 season_count_cache = {}
 season_count_cache_lock = threading.Lock()
+MAX_FINISHED_AUTO_BATCH_JOBS = 20
+MAX_SEASON_COUNT_CACHE_ENTRIES = 2000
+
+
+def _prune_auto_batch_jobs():
+    # Caller must hold auto_batch_jobs_lock.
+    finished = [job_id for job_id, job in auto_batch_jobs.items() if job.get('done')]
+    for job_id in finished[:-MAX_FINISHED_AUTO_BATCH_JOBS]:
+        del auto_batch_jobs[job_id]
+
+
+def _prune_season_count_cache():
+    # Caller must hold season_count_cache_lock.
+    excess = len(season_count_cache) - MAX_SEASON_COUNT_CACHE_ENTRIES
+    if excess > 0:
+        for key in list(season_count_cache.keys())[:excess]:
+            del season_count_cache[key]
 
 
 def _evict_stale_user_sessions(max_age_sec=7200):
@@ -108,6 +209,7 @@ def _create_auto_batch_job(target_filter, skip_processed=False, include_season_p
         'updated_at': now,
     }
     with auto_batch_jobs_lock:
+        _prune_auto_batch_jobs()
         auto_batch_jobs[job_id] = job
     return job_id
 
@@ -576,16 +678,23 @@ def index():
         session_id = str(uuid.uuid4())
         session['session_id'] = session_id
 
-    # Accept 'movies' or 'series' or None
+    # Accept 'movies' or 'series' for the client-side visual filter.
     item_type = request.args.get('type', None)
-    # 'name', 'year', 'date_added'
-    sort_by = request.args.get('sort', 'name')
+    if item_type not in ('movies', 'series'):
+        item_type = None
+    current_library = request.args.get('library', None)
+    # 'library', 'name', 'year', 'date_added'
+    sort_by = request.args.get('sort', 'library')
 
     try:
         server_info = get_jellyfin_server_info()
         logging.info(f"Connected to server: {server_info['name']}")
 
-        jellyfin_items = get_jellyfin_items(item_type=item_type, sort_by=sort_by)
+        jellyfin_libraries = get_jellyfin_libraries()
+        jellyfin_items = get_jellyfin_items(sort_by=sort_by, libraries=jellyfin_libraries)
+        library_ids = {library['id'] for library in jellyfin_libraries}
+        if current_library not in library_ids:
+            current_library = None
 
         # Store in session
         user_sessions[session_id] = {
@@ -598,17 +707,21 @@ def index():
 
         return render_template('index.html',
                                items=jellyfin_items,
+                               libraries=jellyfin_libraries,
                                server_info=server_info,
                                current_filter=item_type,
+                               current_library=current_library,
                                current_sort=sort_by)
 
     except Exception as e:
         logging.error(f"Error loading main page: {e}")
         return render_template('index.html',
                                items=[],
+                               libraries=[],
                                server_info={'name': 'Jellyfin Server', 'version': '', 'id': ''},
                                error=str(e),
                                current_filter=item_type,
+                               current_library=current_library,
                                current_sort=sort_by)
 
 @app.route('/item/<item_id>/posters')
@@ -681,6 +794,7 @@ def get_item_season_count(item_id):
         seasons = get_jellyfin_seasons(item_id)
         season_count = len(seasons)
         with season_count_cache_lock:
+            _prune_season_count_cache()
             season_count_cache[item_id] = season_count
         return jsonify({'season_count': season_count})
     except Exception as e:
@@ -709,7 +823,7 @@ def select_poster(item_id):
         return jsonify({'error': 'No poster selection provided'}), 400
 
     user_sessions[session_id]['selections'][item_id] = selection or poster_url
-    logging.info(f"Poster selected for item {item_id}")
+    logging.debug(f"Poster selected for item {item_id}")
 
     return jsonify({'success': True})
 
@@ -945,7 +1059,7 @@ def debug_tpdb_search():
         }), 500
 
 
-def _select_auto_batch_target_items(all_items, target_filter, skip_processed=False):
+def _select_auto_batch_target_items(all_items, target_filter, skip_processed=False, library_id=''):
     if target_filter == 'all':
         target_items = all_items
     elif target_filter == 'no-poster':
@@ -956,6 +1070,9 @@ def _select_auto_batch_target_items(all_items, target_filter, skip_processed=Fal
         target_items = [item for item in all_items if item.get('type') == 'Series']
     else:
         target_items = []
+
+    if library_id:
+        target_items = [item for item in target_items if item.get('library_id') == library_id]
 
     if skip_processed:
         processed_item_ids = _read_processed_item_ids()
@@ -1028,7 +1145,7 @@ def _auto_search_and_upload_item(item, include_season_posters=False, replace_exi
     }
 
 
-def _run_auto_batch_job(job_id, target_filter, skip_processed=False, include_season_posters=False, replace_existing_season_posters=False):
+def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id='', include_season_posters=False, replace_existing_season_posters=False):
     results = []
     successful_count = 0
     failed_count = 0
@@ -1054,7 +1171,9 @@ def _run_auto_batch_job(job_id, target_filter, skip_processed=False, include_sea
 
         _update_auto_batch_job(job_id, phase='loading', message='Loading Jellyfin items...')
         all_items = get_jellyfin_items()
-        target_items = _select_auto_batch_target_items(all_items, target_filter, skip_processed=skip_processed)
+        target_items = _select_auto_batch_target_items(
+            all_items, target_filter, skip_processed=skip_processed, library_id=library_id
+        )
         total_items = len(target_items)
         _update_auto_batch_job(
             job_id,
@@ -1263,6 +1382,7 @@ def start_batch_auto_poster():
     data = request.get_json() or {}
     target_filter = data.get('filter', 'no-poster')
     skip_processed = bool(data.get('skip_processed'))
+    library_id = data.get('library_id') or ''
     include_season_posters = bool(data.get('include_season_posters'))
     replace_existing_season_posters = bool(data.get('replace_existing_season_posters'))
     job_id = _create_auto_batch_job(
@@ -1273,7 +1393,7 @@ def start_batch_auto_poster():
     )
     worker = threading.Thread(
         target=_run_auto_batch_job,
-        args=(job_id, target_filter, skip_processed, include_season_posters, replace_existing_season_posters),
+        args=(job_id, target_filter, skip_processed, library_id, include_season_posters, replace_existing_season_posters),
         daemon=True,
     )
     worker.start()
@@ -1306,6 +1426,7 @@ def batch_auto_poster():
 
         data = request.get_json() or {}
         target_filter = data.get('filter', 'no-poster')  # 'all', 'no-poster', 'movies', 'series'
+        library_id = data.get('library_id') or ''
 
         logging.info(f"Starting batch auto-poster operation with filter: {target_filter}")
 
@@ -1739,12 +1860,18 @@ def background_setup():
         # attempt setup on demand and return a concrete TPDB error instead of permanent 503.
         selenium_ready_event.set()
 
+
 if __name__ == '__main__':
+    host = '0.0.0.0'
+    port = 5001
+
     setup_thread = threading.Thread(target=background_setup, daemon=True)
     setup_thread.start()
 
     try:
-        app.run(debug=Config.DEBUG, host='0.0.0.0', port=5001)
+        app.run(debug=Config.DEBUG, host=host, port=port)
+    except KeyboardInterrupt:
+        logging.info("Shutdown requested by CTRL+C")
     except Exception as e:
         logging.error(f"Failed to start Flask application: {e}")
     finally:

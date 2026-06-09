@@ -175,29 +175,30 @@ document.addEventListener('DOMContentLoaded', function() {
     loadFailedItems();
     loadProcessedItems();
 
-    // If URL has filter param, apply it on load
     const urlParams = new URLSearchParams(window.location.search);
-    const currentFilter = urlParams.get('type') || 'all';
-    if (currentFilter !== 'all') {
-        filterContent(currentFilter);
-    }
+    const libraryFilter = document.getElementById('libraryFilter');
+    if (libraryFilter) libraryFilter.value = urlParams.get('library') || '';
+    filterContent(urlParams.get('type') || 'all', false);
 
     console.log('Jellyfin Poster Manager initialized');
 });
 
 // Filter and Sort Functions
-function filterContent(type) {
-    // Normalize to DOM data-type values
+function filterContent(type, updateUrl = true) {
     let domType = type;
     if (type === 'movies') domType = 'movie';
     if (type === 'series') domType = 'series';
 
     const items = document.querySelectorAll('.item-card-wrapper');
+    const selectedLibrary = document.getElementById('libraryFilter')?.value || '';
     let visibleCount = 0;
 
     items.forEach(item => {
         const itemType = item.getAttribute('data-type');
-        if (type === 'all' || itemType === domType) {
+        const itemLibrary = item.getAttribute('data-library-id') || '';
+        const matchesType = type === 'all' || itemType === domType;
+        const matchesLibrary = !selectedLibrary || itemLibrary === selectedLibrary;
+        if (matchesType && matchesLibrary) {
             item.classList.remove('hidden');
             visibleCount++;
         } else {
@@ -205,19 +206,50 @@ function filterContent(type) {
         }
     });
 
-    const totalCount = document.getElementById('totalItemCount');
-    if (totalCount) totalCount.textContent = visibleCount;
+    document.querySelectorAll('.library-group-header').forEach(header => {
+        const headerLibrary = header.getAttribute('data-library-id') || '';
+        const hasVisibleItems = Array.from(items).some(item =>
+            !item.classList.contains('hidden') && (item.getAttribute('data-library-id') || '') === headerLibrary
+        );
+        header.classList.toggle('hidden', !hasVisibleItems);
+    });
 
-    // Update URL without reload to persist filter
+    const visibleItemCount = document.getElementById('visibleItemCount');
+    if (visibleItemCount) visibleItemCount.textContent = visibleCount;
+
+    const itemCountTotalText = document.getElementById('itemCountTotalText');
+    const allItemCount = Number(document.getElementById('allItemCount')?.dataset.count || items.length);
+    if (itemCountTotalText) {
+        itemCountTotalText.innerHTML = type === 'all' && !selectedLibrary ? '' : ` of <strong>${allItemCount}</strong>`;
+    }
+
+    const filterId = type === 'movies' ? 'filterMovies' : type === 'series' ? 'filterSeries' : 'filterAll';
+    const filterInput = document.getElementById(filterId);
+    if (filterInput) filterInput.checked = true;
+
+    if (!updateUrl) return;
+
     const url = new URL(window.location);
     if (type === 'all') {
         url.searchParams.delete('type');
     } else {
         url.searchParams.set('type', type); // keep 'movies'/'series'
     }
+    if (selectedLibrary) {
+        url.searchParams.set('library', selectedLibrary);
+    } else {
+        url.searchParams.delete('library');
+    }
+    url.hash = '';
     window.history.pushState({}, '', url);
     applyProcessedItemMarkers(activeProcessedItemDetails);
     applyFailedItemMarkers(activeFailedItemIds);
+}
+
+function filterLibrary() {
+    const currentType = document.querySelector('input[name="contentFilter"]:checked')?.id;
+    const type = currentType === 'filterMovies' ? 'movies' : currentType === 'filterSeries' ? 'series' : 'all';
+    filterContent(type);
 }
 
 function sortContent(sortBy) {
@@ -1810,6 +1842,10 @@ async function startAutoBatchPoster(filter) {
             'movies': 'Automatically find and upload posters for all Movies?',
             'series': 'Automatically find and upload posters for all Series?'
         }[filter] || 'Start automatic poster upload?';
+        const librarySelect = document.getElementById('libraryFilter');
+        const libraryId = librarySelect?.value || '';
+        const libraryName = libraryId ? librarySelect.options[librarySelect.selectedIndex]?.text : '';
+
         const skipProcessed = Boolean(document.getElementById('skipProcessedAutoBatch')?.checked);
         const includeSeasonPosters = Boolean(document.getElementById('includeSeasonPostersAutoBatch')?.checked);
         const replaceSeasonPosters = Boolean(document.getElementById('replaceSeasonPostersAutoBatch')?.checked);
@@ -1820,6 +1856,7 @@ async function startAutoBatchPoster(filter) {
                 'Season posters will be included and existing season posters may be replaced.' :
                 'Season posters will be included only when a season is missing a poster.');
         }
+        if (libraryName) confirmNotes.push(`Library: ${libraryName}`);
         const fullConfirmText = confirmNotes.length ? `${confirmText}\n\n${confirmNotes.join('\n')}` : confirmText;
 
         if (!confirm(fullConfirmText)) return;
@@ -1847,6 +1884,7 @@ async function startAutoBatchPoster(filter) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 filter,
+                library_id: libraryId,
                 skip_processed: skipProcessed,
                 include_season_posters: includeSeasonPosters,
                 replace_existing_season_posters: replaceSeasonPosters
