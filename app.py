@@ -3,6 +3,8 @@ import uuid
 import json
 import os
 import logging
+import re
+import sys
 import time
 from datetime import datetime
 from poster_scraper import *
@@ -12,16 +14,98 @@ import threading
 app = Flask(__name__)
 app.config.from_object(Config)
 
-# Setup logging
-os.makedirs(Config.LOG_DIR, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO if not Config.DEBUG else logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f'{Config.LOG_DIR}/app.log'),
-        logging.StreamHandler()
-    ]
-)
+class ConsoleFormatter(logging.Formatter):
+    COLORS = {
+        logging.DEBUG: "\033[90m",
+        logging.INFO: "\033[36m",
+        logging.WARNING: "\033[33m",
+        logging.ERROR: "\033[31m",
+        logging.CRITICAL: "\033[97;41m",
+    }
+    VALUE = "\033[96m"
+    RESET = "\033[0m"
+    ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
+    VALUE_PREFIXES = (
+        "Successfully uploaded poster for: ",
+        "Searching posters for: ",
+        "Processing item ",
+        "No TPDB search results for ",
+        "Found 0 poster links for ",
+    )
+
+    def __init__(self, use_color=True):
+        super().__init__(datefmt="%H:%M:%S")
+        self.use_color = use_color
+
+    def format(self, record):
+        timestamp = self.formatTime(record, self.datefmt)
+        display_level = record.levelno
+        message = record.getMessage()
+        plain_message = self.ANSI_PATTERN.sub("", message).strip()
+
+        if plain_message.startswith("WARNING:"):
+            display_level = logging.WARNING
+            message = plain_message.removeprefix("WARNING:").strip()
+
+        level = logging.getLevelName(display_level).ljust(7)
+
+        if self.use_color:
+            color = self.COLORS.get(display_level, "")
+            level = f"{color}{level}{self.RESET}"
+            message = self.highlight_value(message)
+
+        return f"{timestamp} {level} {message}"
+
+    def highlight_value(self, message):
+        for prefix in self.VALUE_PREFIXES:
+            if message.startswith(prefix):
+                return f"{prefix}{self.VALUE}{message[len(prefix):]}{self.RESET}"
+        return message
+
+
+class WerkzeugAccessLogFilter(logging.Filter):
+    METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
+
+    def filter(self, record):
+        if getattr(Config, "DEBUG", False):
+            return True
+
+        message = record.getMessage()
+        is_access_log = " HTTP/" in message and any(f'"{method} ' in message for method in self.METHODS)
+        return not is_access_log
+
+
+def setup_logging():
+    os.makedirs(Config.LOG_DIR, exist_ok=True)
+
+    log_level = logging.DEBUG if Config.DEBUG else logging.INFO
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    root_logger.handlers.clear()
+
+    file_handler = logging.FileHandler(f'{Config.LOG_DIR}/app.log', encoding='utf-8')
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+    ))
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(ConsoleFormatter(
+        use_color=sys.stderr.isatty() and os.environ.get("NO_COLOR") is None
+    ))
+
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+    werkzeug_logger = logging.getLogger("werkzeug")
+    werkzeug_logger.handlers.clear()
+    werkzeug_logger.setLevel(log_level)
+    werkzeug_logger.addFilter(WerkzeugAccessLogFilter())
+    werkzeug_logger.propagate = True
+
+
+setup_logging()
 
 # Global storage for session data
 user_sessions = {}
@@ -31,6 +115,14 @@ FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR
 RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_DIR, 'results.log'))
 auto_batch_jobs = {}
 auto_batch_jobs_lock = threading.Lock()
+MAX_FINISHED_AUTO_BATCH_JOBS = 20
+
+
+def _prune_auto_batch_jobs():
+    # Caller must hold auto_batch_jobs_lock.
+    finished = [job_id for job_id, job in auto_batch_jobs.items() if job.get('done')]
+    for job_id in finished[:-MAX_FINISHED_AUTO_BATCH_JOBS]:
+        del auto_batch_jobs[job_id]
 
 
 def _evict_stale_user_sessions(max_age_sec=7200):
@@ -104,6 +196,7 @@ def _create_auto_batch_job(target_filter, skip_processed=False):
         'updated_at': now,
     }
     with auto_batch_jobs_lock:
+        _prune_auto_batch_jobs()
         auto_batch_jobs[job_id] = job
     return job_id
 
@@ -535,7 +628,7 @@ def select_poster(item_id):
         return jsonify({'error': 'No poster URL provided'}), 400
 
     user_sessions[session_id]['selections'][item_id] = poster_url
-    logging.info(f"Poster selected for item {item_id}: {poster_url}")
+    logging.debug(f"Poster selected for item {item_id}: {poster_url}")
 
     return jsonify({'success': True})
 
@@ -1587,12 +1680,18 @@ def background_setup():
         # attempt setup on demand and return a concrete TPDB error instead of permanent 503.
         selenium_ready_event.set()
 
+
 if __name__ == '__main__':
+    host = '0.0.0.0'
+    port = 5001
+
     setup_thread = threading.Thread(target=background_setup, daemon=True)
     setup_thread.start()
 
     try:
-        app.run(debug=Config.DEBUG, host='0.0.0.0', port=5001)
+        app.run(debug=Config.DEBUG, host=host, port=port)
+    except KeyboardInterrupt:
+        logging.info("Shutdown requested by CTRL+C")
     except Exception as e:
         logging.error(f"Failed to start Flask application: {e}")
     finally:
