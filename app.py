@@ -116,6 +116,7 @@ RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_D
 PROTECTED_ITEMS_FILE = getattr(Config, 'PROTECTED_ITEMS_FILE', os.path.join(Config.LOG_DIR, 'protected_items.json'))
 auto_batch_jobs = {}
 auto_batch_jobs_lock = threading.Lock()
+latest_auto_batch_job_id = None
 season_count_cache = {}
 season_count_cache_lock = threading.Lock()
 MAX_FINISHED_AUTO_BATCH_JOBS = 20
@@ -216,6 +217,7 @@ def _create_auto_batch_job(target_filter, skip_processed=False, include_season_p
 
 
 def _update_auto_batch_job(job_id, **updates):
+    global latest_auto_batch_job_id
     updates['updated_at'] = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
     with auto_batch_jobs_lock:
         job = auto_batch_jobs.get(job_id)
@@ -224,11 +226,25 @@ def _update_auto_batch_job(job_id, **updates):
         job.update(updates)
         if 'processed' in updates or 'total_items' in updates:
             job['remaining'] = max(job.get('total_items', 0) - job.get('processed', 0), 0)
+        if updates.get('done'):
+            latest_auto_batch_job_id = job_id
 
 
 def _get_auto_batch_job(job_id):
     with auto_batch_jobs_lock:
         job = auto_batch_jobs.get(job_id)
+        if not job:
+            return None
+        snapshot = dict(job)
+        snapshot['results'] = list(job.get('results', []))
+        return snapshot
+
+
+def _get_latest_auto_batch_job():
+    with auto_batch_jobs_lock:
+        if not latest_auto_batch_job_id:
+            return None
+        job = auto_batch_jobs.get(latest_auto_batch_job_id)
         if not job:
             return None
         snapshot = dict(job)
@@ -1459,6 +1475,12 @@ def cancel_batch_auto_poster(job_id):
     job = _cancel_auto_batch_job(job_id)
     if not job:
         return jsonify({'success': False, 'error': 'Batch job not found'}), 404
+    return jsonify({'success': True, 'job': job})
+
+
+@app.route('/batch-auto-poster/latest-results')
+def latest_batch_auto_poster_results():
+    job = _get_latest_auto_batch_job()
     return jsonify({'success': True, 'job': job})
 
 

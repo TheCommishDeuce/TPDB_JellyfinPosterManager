@@ -142,6 +142,7 @@ let protectedItemIds = new Set();
 let autoBatchPollTimer = null;
 let currentAutoBatchJobId = null;
 let autoBatchStartedAt = null;
+let latestAutoBatchJob = null;
 let manualSelectionVisible = false;
 let posterSearchProgressTimer = null;
 let posterSearchGroups = [];
@@ -182,6 +183,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadProtectedItems();
     loadFailedItems();
     loadProcessedItems();
+    loadLatestAutoBatchResults();
 
     const urlParams = new URLSearchParams(window.location.search);
     const libraryFilter = document.getElementById('libraryFilter');
@@ -1222,6 +1224,40 @@ function showBatchResults(results) {
     if (resultsModal) resultsModal.show();
 }
 
+function updateLastResultsButton() {
+    const button = document.getElementById('lastAutoBatchResultsBtn');
+    if (!button) return;
+
+    const hasResults = Boolean(latestAutoBatchJob?.results?.length);
+    button.style.display = hasResults ? 'inline-block' : 'none';
+}
+
+async function loadLatestAutoBatchResults() {
+    try {
+        const response = await fetch('/batch-auto-poster/latest-results');
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load latest results');
+
+        latestAutoBatchJob = data.job || null;
+        updateLastResultsButton();
+    } catch (error) {
+        console.error('Latest results error:', error);
+    }
+}
+
+async function showLastAutoBatchResults() {
+    if (!latestAutoBatchJob) {
+        await loadLatestAutoBatchResults();
+    }
+
+    if (!latestAutoBatchJob?.results?.length) {
+        showAlert('No previous Auto-Get results are available.', 'info');
+        return;
+    }
+
+    showBatchResults(latestAutoBatchJob.results);
+}
+
 function renderBatchResults(results, filter) {
     const tbody = document.getElementById('batchResultsBody');
     if (!tbody) return;
@@ -2029,6 +2065,8 @@ async function pollAutoBatchProgress(jobId) {
             currentAutoBatchJobId = null;
             autoBatchStartedAt = null;
             clearActiveAutoBatchJob();
+            latestAutoBatchJob = job;
+            updateLastResultsButton();
             loadFailedItems({ autoExpand: true });
             loadProcessedItems();
 
