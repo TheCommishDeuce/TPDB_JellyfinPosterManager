@@ -151,6 +151,7 @@ let posterGroupDisplayMode = 'group';
 let currentPosterSetLimit = 3;
 let canBrowseMorePosterSets = false;
 let loadingPosterSetUrls = new Set();
+const AUTO_BATCH_ESTIMATE_MIN_PROCESSED = 10;
 
 document.addEventListener('DOMContentLoaded', function() {
     // Theme first
@@ -1800,6 +1801,9 @@ function updateAutoBatchCurrentPoster(url) {
 }
 
 function calculateAutoBatchEta(job, processed, remaining) {
+    if (processed < AUTO_BATCH_ESTIMATE_MIN_PROCESSED && !job.done) {
+        return 'Waiting for more samples';
+    }
     if (!autoBatchStartedAt || processed <= 0 || remaining <= 0 || job.done) {
         return job.done ? 'Done' : 'Calculating...';
     }
@@ -1815,11 +1819,16 @@ function updateAutoBatchProgress(job) {
     const processed = Number(job.processed || 0);
     const remaining = Number(job.remaining ?? Math.max(total - processed, 0));
     const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+    const canShowEstimate = processed >= AUTO_BATCH_ESTIMATE_MIN_PROCESSED;
+    const progressWrap = document.getElementById('autoBatchProgressBarWrap');
+    const etaWrap = document.getElementById('autoBatchEtaWrap');
 
     panel.style.display = 'block';
     document.getElementById('autoBatchProgressStatus').textContent = job.message || 'Running automatic poster batch...';
     document.getElementById('autoBatchCurrentItem').textContent = job.current_item ? `Current item: ${job.current_item}` : 'No item currently processing';
     document.getElementById('autoBatchProgressCounts').textContent = `${processed} / ${total}`;
+    if (progressWrap) progressWrap.style.display = canShowEstimate ? '' : 'none';
+    if (etaWrap) etaWrap.style.display = canShowEstimate ? '' : 'none';
     document.getElementById('autoBatchProgressBar').style.width = `${percent}%`;
     document.getElementById('autoBatchProgressBar').setAttribute('aria-valuenow', String(percent));
     document.getElementById('autoBatchRemaining').textContent = remaining;

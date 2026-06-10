@@ -186,11 +186,13 @@
                         </div>
                         <div class="text-end">
                             <small class="text-muted d-block" id="autoBatchProgressCounts">0 / 0</small>
-                            <small class="text-muted d-block mt-1">Estimated time remaining</small>
-                            <strong id="autoBatchEta">Calculating...</strong>
+                            <div id="autoBatchEtaWrap" style="display: none;">
+                                <small class="text-muted d-block mt-1">Estimated time remaining</small>
+                                <strong id="autoBatchEta">Calculating...</strong>
+                            </div>
                         </div>
                     </div>
-                    <div class="progress">
+                    <div class="progress" id="autoBatchProgressBarWrap" style="display: none;">
                         <div id="autoBatchProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
                     </div>
                     <div class="row row-cols-2 row-cols-md-4 text-center mt-2 g-2">
