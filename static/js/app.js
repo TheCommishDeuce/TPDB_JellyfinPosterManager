@@ -153,6 +153,7 @@ let currentPosterSetLimit = 3;
 let canBrowseMorePosterSets = false;
 let loadingPosterSetUrls = new Set();
 const AUTO_BATCH_ESTIMATE_MIN_PROCESSED = 10;
+const ACTIVE_AUTO_BATCH_JOB_KEY = 'jpm_active_auto_batch_job_id';
 
 document.addEventListener('DOMContentLoaded', function() {
     // Theme first
@@ -186,6 +187,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const libraryFilter = document.getElementById('libraryFilter');
     if (libraryFilter) libraryFilter.value = urlParams.get('library') || '';
     filterContent(urlParams.get('type') || 'all', false);
+    resumeAutoBatchProgressOnLoad();
 
     console.log('Jellyfin Poster Manager initialized');
 });
@@ -1929,6 +1931,38 @@ function updateAutoBatchCurrentPoster(url) {
     empty.style.display = 'none';
 }
 
+function saveActiveAutoBatchJob(jobId) {
+    try {
+        if (jobId) localStorage.setItem(ACTIVE_AUTO_BATCH_JOB_KEY, jobId);
+        else localStorage.removeItem(ACTIVE_AUTO_BATCH_JOB_KEY);
+    } catch (e) {}
+}
+
+function getSavedActiveAutoBatchJob() {
+    try {
+        return localStorage.getItem(ACTIVE_AUTO_BATCH_JOB_KEY);
+    } catch (e) {
+        return null;
+    }
+}
+
+function clearActiveAutoBatchJob() {
+    saveActiveAutoBatchJob(null);
+}
+
+async function resumeAutoBatchProgressOnLoad() {
+    const savedJobId = getSavedActiveAutoBatchJob();
+    if (!savedJobId || currentAutoBatchJobId) return;
+
+    currentAutoBatchJobId = savedJobId;
+    setAutoBatchRunning(true);
+    await pollAutoBatchProgress(savedJobId);
+
+    if (currentAutoBatchJobId === savedJobId && !autoBatchPollTimer) {
+        autoBatchPollTimer = setInterval(() => pollAutoBatchProgress(savedJobId), 1000);
+    }
+}
+
 function calculateAutoBatchEta(job, processed, remaining) {
     if (processed < AUTO_BATCH_ESTIMATE_MIN_PROCESSED && !job.done) {
         return 'Waiting for more samples';
@@ -1982,6 +2016,10 @@ async function pollAutoBatchProgress(jobId) {
         if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load batch progress');
 
         const job = data.job;
+        if (!autoBatchStartedAt && job.created_at) {
+            const createdAt = Date.parse(job.created_at);
+            if (!Number.isNaN(createdAt)) autoBatchStartedAt = createdAt;
+        }
         updateAutoBatchProgress(job);
         applyAutoBatchResultMarkers(job.results || [], job.updated_at);
 
@@ -1989,6 +2027,8 @@ async function pollAutoBatchProgress(jobId) {
             stopAutoBatchPolling();
             setAutoBatchRunning(false);
             currentAutoBatchJobId = null;
+            autoBatchStartedAt = null;
+            clearActiveAutoBatchJob();
             loadFailedItems({ autoExpand: true });
             loadProcessedItems();
 
@@ -2003,6 +2043,8 @@ async function pollAutoBatchProgress(jobId) {
         stopAutoBatchPolling();
         setAutoBatchRunning(false);
         currentAutoBatchJobId = null;
+        autoBatchStartedAt = null;
+        clearActiveAutoBatchJob();
         console.error('Auto-batch progress error:', error);
         showAlert('Failed to update auto-batch progress: ' + error.message, 'danger');
     }
@@ -2078,6 +2120,7 @@ async function startAutoBatchPoster(filter) {
         stopAutoBatchPolling();
         setAutoBatchRunning(true);
         currentAutoBatchJobId = null;
+        clearActiveAutoBatchJob();
         autoBatchStartedAt = Date.now();
 
         updateAutoBatchProgress({
@@ -2109,14 +2152,19 @@ async function startAutoBatchPoster(filter) {
         if (!resp.ok || !data.success) throw new Error(data.error || 'Automatic batch failed');
 
         currentAutoBatchJobId = data.job_id;
+        saveActiveAutoBatchJob(data.job_id);
         await pollAutoBatchProgress(data.job_id);
-        autoBatchPollTimer = setInterval(() => pollAutoBatchProgress(data.job_id), 1000);
+        if (currentAutoBatchJobId === data.job_id && !autoBatchPollTimer) {
+            autoBatchPollTimer = setInterval(() => pollAutoBatchProgress(data.job_id), 1000);
+        }
 
     } catch (err) {
         console.error('Auto-batch error:', err);
         stopAutoBatchPolling();
         setAutoBatchRunning(false);
         currentAutoBatchJobId = null;
+        autoBatchStartedAt = null;
+        clearActiveAutoBatchJob();
         showAlert('Automatic batch failed: ' + err.message, 'danger');
     }
 }
