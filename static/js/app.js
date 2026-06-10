@@ -144,6 +144,14 @@ let currentAutoBatchJobId = null;
 let autoBatchStartedAt = null;
 let latestAutoBatchJob = null;
 let manualSelectionVisible = false;
+let manualQueueIds = new Set();
+let manualQueueOrder = [];
+let manualQueueResults = new Map();
+let manualQueueErrors = new Map();
+let manualQueuePresentedIds = new Set();
+let manualQueueActive = false;
+let manualQueueWorkerRunning = false;
+let manualQueueCurrentItemId = null;
 let posterSearchProgressTimer = null;
 let posterSearchGroups = [];
 let currentPosterSelection = null;
@@ -170,7 +178,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const rm = document.getElementById('resultsModal');
     const cm = document.getElementById('confirmModal');
     if (lm && bootstrap?.Modal) loadingModal = new bootstrap.Modal(lm);
-    if (pm && bootstrap?.Modal) posterModal = new bootstrap.Modal(pm);
+    if (pm && bootstrap?.Modal) {
+        posterModal = new bootstrap.Modal(pm);
+        pm.addEventListener('hidden.bs.modal', () => {
+            if (!manualQueueActive || !manualQueueCurrentItemId) return;
+            manualQueuePresentedIds.add(manualQueueCurrentItemId);
+            manualQueueCurrentItemId = null;
+            setTimeout(showNextManualQueueResult, 150);
+        });
+    }
     if (rm && bootstrap?.Modal) {
         resultsModal = new bootstrap.Modal(rm);
         rm.addEventListener('hidden.bs.modal', () => loadFailedItems({ autoExpand: true }));
@@ -179,6 +195,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize counters/buttons
     updateUploadAllButton();
+    initManualQueueControls();
     initProtectedItemButtons();
     loadProtectedItems();
     loadFailedItems();
@@ -305,25 +322,21 @@ function stopPosterSearchProgress() {
     if (loadingSubtext) loadingSubtext.textContent = 'This may take a few moments';
 }
 
+async function fetchPostersForItem(itemId, setLimit = 3) {
+    const response = await fetch(`/item/${itemId}/posters?set_limit=${encodeURIComponent(setLimit)}`);
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+}
+
 // Load posters for item
 async function loadPosters(itemId, setLimit = 3) {
-    if (currentPosterSearchItem?.id !== itemId) {
-        currentPosterSelection = null;
-        posterGroupDisplayMode = 'group';
-        loadingPosterSetUrls = new Set();
-    }
-    currentItemId = itemId;
-    currentPosterSetLimit = setLimit;
+    preparePosterSearchForItem(itemId, setLimit);
     startPosterSearchProgress();
     if (loadingModal) loadingModal.show();
 
     try {
-        const response = await fetch(`/item/${itemId}/posters?set_limit=${encodeURIComponent(setLimit)}`);
-        const data = await response.json();
-
-        if (data.error) {
-            throw new Error(data.error);
-        }
+        const data = await fetchPostersForItem(itemId, setLimit);
 
         if (loadingModal) loadingModal.hide();
         currentPosterSetLimit = data.poster_set_limit || setLimit;
@@ -336,6 +349,16 @@ async function loadPosters(itemId, setLimit = 3) {
     } finally {
         stopPosterSearchProgress();
     }
+}
+
+function preparePosterSearchForItem(itemId, setLimit = 3) {
+    if (currentPosterSearchItem?.id !== itemId) {
+        currentPosterSelection = null;
+        posterGroupDisplayMode = 'group';
+        loadingPosterSetUrls = new Set();
+    }
+    currentItemId = itemId;
+    currentPosterSetLimit = setLimit;
 }
 
 // Display posters in modal (image-only, no author/download box)
@@ -1300,21 +1323,37 @@ function renderBatchResults(results, filter) {
 // Button enable state
 function updateUploadAllButton() {
     const uploadBtn = document.getElementById('uploadAllBtn');
+    const queueBtn = document.getElementById('manualQueueStartBtn');
+    const queueActionCount = document.getElementById('manualQueueActionCount');
+    const uploadActionCount = document.getElementById('manualUploadActionCount');
+    const queueCountSpan = document.getElementById('manualQueueCount');
     const selectedCountSpan = document.getElementById('selectedCount');
     const toolbarCount = document.getElementById('manualSelectionToolbarCount');
     const selectedCount = Object.keys(selectedPosters).length;
+    const queuedCount = manualQueueIds.size;
 
+    if (queueCountSpan) queueCountSpan.textContent = queuedCount;
+    if (queueActionCount) queueActionCount.textContent = queuedCount;
     if (selectedCountSpan) selectedCountSpan.textContent = selectedCount;
-    if (toolbarCount) toolbarCount.textContent = selectedCount;
+    if (uploadActionCount) uploadActionCount.textContent = selectedCount;
+    if (toolbarCount) toolbarCount.textContent = selectedCount + queuedCount;
+
+    if (queueBtn) {
+        queueBtn.disabled = queuedCount === 0 && !manualQueueActive;
+        if (manualQueueWorkerRunning) {
+            queueBtn.innerHTML = `<i class="fas fa-spinner fa-spin me-1"></i>Set Queued Posters<span class="badge bg-primary ms-2" id="manualQueueActionCount">${queuedCount}</span>`;
+        } else {
+            queueBtn.innerHTML = `<i class="fas fa-search me-1"></i>Set Queued Posters<span class="badge bg-primary ms-2" id="manualQueueActionCount">${queuedCount}</span>`;
+        }
+    }
 
     if (uploadBtn) {
         if (selectedCount > 0) {
             uploadBtn.disabled = false;
-            uploadBtn.innerHTML = `<i class="fas fa-cloud-upload-alt me-2"></i>Upload All Selected (${selectedCount})`;
         } else {
             uploadBtn.disabled = true;
-            uploadBtn.innerHTML = '<i class="fas fa-cloud-upload-alt me-2"></i>Upload All Selected';
         }
+        uploadBtn.innerHTML = `<i class="fas fa-cloud-upload-alt"></i><span class="badge bg-light text-dark ms-2" id="manualUploadActionCount">${selectedCount}</span>`;
     }
 
     updateManualSelectionVisibility();
@@ -1324,18 +1363,144 @@ function updateManualSelectionVisibility() {
     const manualRow = document.getElementById('manualSelectionRow');
     const toolbarBtn = document.getElementById('manualSelectionToolbarBtn');
     const selectedCount = Object.keys(selectedPosters).length;
-    const shouldShow = selectedCount > 0 || manualSelectionVisible;
+    const queuedCount = manualQueueIds.size;
+    const isActive = selectedCount > 0 || queuedCount > 0 || manualQueueActive || manualSelectionVisible;
 
-    if (manualRow) manualRow.style.display = shouldShow ? '' : 'none';
+    if (manualRow) manualRow.style.display = '';
     if (toolbarBtn) {
-        toolbarBtn.classList.toggle('active', shouldShow);
-        toolbarBtn.setAttribute('aria-expanded', shouldShow ? 'true' : 'false');
+        toolbarBtn.classList.toggle('active', isActive);
+        toolbarBtn.setAttribute('aria-expanded', 'true');
     }
 }
 
 function toggleManualSelectionPanel() {
     manualSelectionVisible = !manualSelectionVisible;
     updateManualSelectionVisibility();
+}
+
+function initManualQueueControls() {
+    document.querySelectorAll('.manual-queue-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', () => toggleManualQueueItem(checkbox));
+    });
+}
+
+function toggleManualQueueItem(checkbox) {
+    const itemId = checkbox.getAttribute('data-item-id');
+    if (!itemId) return;
+
+    const wrapper = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`);
+    if (checkbox.checked) {
+        manualQueueIds.add(itemId);
+        wrapper?.classList.add('manual-queued');
+    } else {
+        manualQueueIds.delete(itemId);
+        wrapper?.classList.remove('manual-queued');
+    }
+
+    updateUploadAllButton();
+}
+
+function setManualQueueItemQueued(itemId, queued) {
+    const checkbox = document.querySelector(`.manual-queue-checkbox[data-item-id="${cssEscapeValue(itemId)}"]`);
+    const wrapper = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`);
+    if (checkbox) checkbox.checked = queued;
+    wrapper?.classList.toggle('manual-queued', queued);
+    if (queued) manualQueueIds.add(itemId);
+    else manualQueueIds.delete(itemId);
+}
+
+function isPosterModalOpen() {
+    return document.getElementById('posterModal')?.classList.contains('show');
+}
+
+async function startManualPosterQueue() {
+    if (manualQueueIds.size === 0 && !manualQueueActive) {
+        showAlert('Choose one or more items to queue first.', 'warning');
+        return;
+    }
+
+    if (!manualQueueActive) {
+        manualQueueActive = true;
+        manualQueueOrder = Array.from(document.querySelectorAll('.manual-queue-checkbox:checked'))
+            .map(checkbox => checkbox.getAttribute('data-item-id'))
+            .filter(Boolean);
+        manualQueueResults = new Map();
+        manualQueueErrors = new Map();
+        manualQueuePresentedIds = new Set();
+    }
+
+    updateUploadAllButton();
+    startManualQueueWorker();
+    showNextManualQueueResult();
+}
+
+async function startManualQueueWorker() {
+    if (manualQueueWorkerRunning) return;
+    manualQueueWorkerRunning = true;
+    updateUploadAllButton();
+
+    try {
+        for (const itemId of manualQueueOrder) {
+            if (!manualQueueActive || manualQueueResults.has(itemId) || manualQueueErrors.has(itemId)) continue;
+            if (!manualQueueIds.has(itemId)) {
+                manualQueuePresentedIds.add(itemId);
+                continue;
+            }
+
+            try {
+                const data = await fetchPostersForItem(itemId, 3);
+                manualQueueResults.set(itemId, data);
+            } catch (error) {
+                manualQueueErrors.set(itemId, error.message);
+                showAlert(`Failed to load queued posters: ${error.message}`, 'danger');
+            }
+
+            showNextManualQueueResult();
+        }
+    } finally {
+        manualQueueWorkerRunning = false;
+        updateUploadAllButton();
+        showNextManualQueueResult();
+    }
+}
+
+function showNextManualQueueResult() {
+    if (!manualQueueActive || manualQueueCurrentItemId || isPosterModalOpen()) return;
+
+    for (const itemId of manualQueueOrder) {
+        if (manualQueuePresentedIds.has(itemId)) continue;
+        if (!manualQueueIds.has(itemId)) {
+            manualQueuePresentedIds.add(itemId);
+            continue;
+        }
+
+        if (manualQueueErrors.has(itemId)) {
+            manualQueuePresentedIds.add(itemId);
+            setManualQueueItemQueued(itemId, false);
+            continue;
+        }
+
+        const data = manualQueueResults.get(itemId);
+        if (!data) break;
+
+        manualQueueCurrentItemId = itemId;
+        setManualQueueItemQueued(itemId, false);
+        preparePosterSearchForItem(itemId, data.poster_set_limit || 3);
+        currentPosterSetLimit = data.poster_set_limit || 3;
+        canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
+        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || []);
+        updateUploadAllButton();
+        return;
+    }
+
+    const pending = manualQueueOrder.some(itemId =>
+        !manualQueuePresentedIds.has(itemId) && !manualQueueResults.has(itemId) && !manualQueueErrors.has(itemId)
+    );
+    if (!pending && !manualQueueWorkerRunning) {
+        manualQueueActive = false;
+        manualQueueOrder = [];
+        updateUploadAllButton();
+    }
 }
 
 // Notifications

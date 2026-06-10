@@ -58,43 +58,7 @@
     </div>
 </div>
 
-<!-- Manual Selection -->
-<div class="row mb-3" id="manualSelectionRow" style="display: none;">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body py-3">
-                <div class="row align-items-center">
-                    <div class="col-md-8">
-                        <h5 class="mb-0">
-                            <i class="fas fa-tasks me-2"></i>Manual Selection
-                        </h5>
-                        <small class="text-muted">
-                            <span id="selectedCount">0</span> items selected for manual upload
-                        </small>
-                    </div>
-                    <div class="col-md-4 text-md-end">
-                        <button class="btn btn-success" id="uploadAllBtn" onclick="uploadAllSelected()" disabled>
-                            <i class="fas fa-cloud-upload-alt me-2"></i>
-                            Upload All Selected
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Progress (hidden until used) -->
-                <div id="progressContainer" class="mt-3" style="display:none;">
-                    <div class="progress">
-                        <div id="progressBar" class="progress-bar" style="width: 0%"></div>
-                    </div>
-                    <div class="text-end mt-1">
-                        <small id="progressText" class="text-muted">0%</small>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Automatic Batch Operations -->
+<!-- Automatic Selection -->
 <div class="row mb-4 automatic-batch-row">
     <div class="col-12">
         <div class="card automatic-batch-card">
@@ -102,7 +66,7 @@
                 <div class="row align-items-center">
                     <div class="col-md-8">
                         <h5 class="mb-0">
-                            <i class="fas fa-magic me-2"></i>Automatic Batch Operations
+                            <i class="fas fa-magic me-2"></i>Automatic Selection
                         </h5>
                         <small class="text-muted">
                             Automatically find and upload the first available poster for items
@@ -215,6 +179,51 @@
                             <small class="text-muted d-block">Status</small>
                             <strong id="autoBatchPhase">Starting</strong>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manual Selection -->
+<div class="row mb-3" id="manualSelectionRow">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body py-3">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h5 class="mb-0">
+                            <i class="fas fa-tasks me-2"></i>Manual Selection
+                        </h5>
+                        <small class="text-muted">
+                            <span id="manualQueueCount">0</span> queued for poster search
+                            <span class="mx-1">&bull;</span>
+                            <span id="selectedCount">0</span> ready to upload
+                        </small>
+                    </div>
+                    <div class="col-md-4 text-md-end">
+                        <div class="d-flex flex-wrap align-items-center justify-content-md-end gap-2">
+                            <button class="btn btn-outline-primary manual-action-btn" id="manualQueueStartBtn" onclick="startManualPosterQueue()" disabled title="Manually Get Posters" aria-label="Manually Get Posters">
+                                <i class="fas fa-search me-1"></i>
+                                Set Queued Posters
+                                <span class="badge bg-primary ms-2" id="manualQueueActionCount">0</span>
+                            </button>
+                            <button class="btn btn-success manual-action-btn" id="uploadAllBtn" onclick="uploadAllSelected()" disabled title="Upload All Selected" aria-label="Upload All Selected">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <span class="badge bg-light text-dark ms-2" id="manualUploadActionCount">0</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress (hidden until used) -->
+                <div id="progressContainer" class="mt-3" style="display:none;">
+                    <div class="progress">
+                        <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div class="text-end mt-1">
+                        <small id="progressText" class="text-muted">0%</small>
                     </div>
                 </div>
             </div>
@@ -388,6 +397,15 @@
                         <i class="fas fa-search me-1"></i>
                         Find Posters
                     </button>
+                    <input class="btn-check manual-queue-checkbox"
+                           type="checkbox"
+                           id="manual-queue-{{ item.id }}"
+                           data-item-id="{{ item.id }}"
+                           autocomplete="off">
+                    <label class="btn btn-outline-secondary btn-sm mt-2 manual-queue-label" for="manual-queue-{{ item.id }}">
+                        <i class="fas fa-list-check me-1"></i>
+                        Queue
+                    </label>
                 </div>
 
                 <div class="mt-2" id="status-{{ item.id }}"></div>

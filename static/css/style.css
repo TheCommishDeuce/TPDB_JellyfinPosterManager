@@ -96,8 +96,10 @@ body {
 .item-card.failed-item { border-color: var(--danger-color); box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.25), var(--box-shadow); }
 .item-card.failed-item:hover { border-color: var(--danger-color); box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.35), var(--box-shadow-hover); }
 .item-card.protected-item { border-color: var(--warning-color); }
+.item-card-wrapper.manual-queued .item-card { border-color: var(--info-color); box-shadow: 0 0 0 2px rgba(23, 162, 184, 0.18), var(--box-shadow); }
 .item-card.failed-item .find-posters-btn { border: 1px solid var(--danger-color); color: var(--danger-color); }
 .item-card.failed-item .find-posters-btn:hover { background-color: var(--danger-color); color: #fff; }
+.manual-queue-checkbox:checked + .manual-queue-label { background: var(--info-color); border-color: var(--info-color); color: #fff; }
 .processed-item-overlay { position: absolute; top: 0.5rem; left: 0.5rem; z-index: 10; }
 .failed-item-overlay { position: absolute; top: 0.5rem; left: 0.5rem; z-index: 10; }
 .failed-card-focus { animation: failed-card-pulse 1.4s ease-out; }
@@ -122,6 +124,8 @@ body {
     background-color: var(--primary-color) !important;
     color: #fff;
 }
+.manual-action-btn { min-width: 3.5rem; }
+.manual-action-btn .badge { min-width: 1.4rem; }
 
 /* Automatic-batch */
 .automatic-batch-progress {
