@@ -82,6 +82,9 @@ body {
 .item-type-overlay { position: absolute; top: 0.5rem; right: 0.5rem; z-index: 10; }
 .item-type-badge-movie  { background-color: rgba(25, 118, 210, 0.9); color: white; }
 .item-type-badge-series { background-color: rgba(123, 31, 162, 0.9); color: white; }
+.protected-item-toggle { position: absolute; bottom: 0.5rem; right: 0.5rem; z-index: 10; width: 2rem; height: 2rem; border: 1px solid rgba(255,255,255,0.35); border-radius: 999px; background: rgba(15,17,21,0.72); color: #fff; display: inline-flex; align-items: center; justify-content: center; transition: var(--transition); }
+.protected-item-toggle:hover, .protected-item-toggle.active { background: var(--warning-color); border-color: var(--warning-color); color: #111; }
+.protected-item-toggle:disabled { opacity: 0.65; }
 
 /* Card hover effects */
 .item-card { transition: all 0.3s ease; border: 1px solid var(--border-color); background: var(--surface); overflow: hidden; }
@@ -92,6 +95,7 @@ body {
 .item-card.processed-item:hover { border-color: var(--success-color); box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.28), var(--box-shadow-hover); }
 .item-card.failed-item { border-color: var(--danger-color); box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.25), var(--box-shadow); }
 .item-card.failed-item:hover { border-color: var(--danger-color); box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.35), var(--box-shadow-hover); }
+.item-card.protected-item { border-color: var(--warning-color); }
 .item-card.failed-item .find-posters-btn { border: 1px solid var(--danger-color); color: var(--danger-color); }
 .item-card.failed-item .find-posters-btn:hover { background-color: var(--danger-color); color: #fff; }
 .processed-item-overlay { position: absolute; top: 0.5rem; left: 0.5rem; z-index: 10; }

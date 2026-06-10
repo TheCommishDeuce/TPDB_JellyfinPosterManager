@@ -113,6 +113,7 @@ selenium_ready_event = threading.Event()
 BATCH_DELAY_SEC = getattr(Config, 'TPDB_BATCH_DELAY_SEC', 1.5)
 FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR, 'failed.log'))
 RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_DIR, 'results.log'))
+PROTECTED_ITEMS_FILE = getattr(Config, 'PROTECTED_ITEMS_FILE', os.path.join(Config.LOG_DIR, 'protected_items.json'))
 auto_batch_jobs = {}
 auto_batch_jobs_lock = threading.Lock()
 season_count_cache = {}
@@ -281,6 +282,47 @@ def _get_failed_log_path():
 
 def _get_results_log_path():
     return RESULTS_LOG_FILE
+
+
+def _get_protected_items_path():
+    return PROTECTED_ITEMS_FILE
+
+
+def _read_protected_item_ids():
+    path = _get_protected_items_path()
+    if not os.path.exists(path):
+        return set()
+
+    with open(path, 'r', encoding='utf-8') as protected_file:
+        data = json.load(protected_file)
+
+    if isinstance(data, dict):
+        items = data.get('items', [])
+    else:
+        items = data
+
+    return {str(item_id) for item_id in items if item_id}
+
+
+def _write_protected_item_ids(item_ids):
+    os.makedirs(Config.LOG_DIR, exist_ok=True)
+    payload = {
+        'updated_at': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+        'items': sorted(str(item_id) for item_id in item_ids if item_id),
+    }
+    with open(_get_protected_items_path(), 'w', encoding='utf-8') as protected_file:
+        json.dump(payload, protected_file, ensure_ascii=False, indent=2)
+
+
+def _set_item_protected(item_id, protected):
+    protected_ids = _read_protected_item_ids()
+    item_id = str(item_id)
+    if protected:
+        protected_ids.add(item_id)
+    else:
+        protected_ids.discard(item_id)
+    _write_protected_item_ids(protected_ids)
+    return protected_ids
 
 
 def _write_failed_log_entry(entry):
@@ -1078,6 +1120,10 @@ def _select_auto_batch_target_items(all_items, target_filter, skip_processed=Fal
         processed_item_ids = _read_processed_item_ids()
         target_items = [item for item in target_items if item.get('id') not in processed_item_ids]
 
+    protected_item_ids = _read_protected_item_ids()
+    if protected_item_ids:
+        target_items = [item for item in target_items if item.get('id') not in protected_item_ids]
+
     return target_items
 
 
@@ -1450,20 +1496,7 @@ def batch_auto_poster():
         # Get all items
         all_items = get_jellyfin_items()
 
-        # Filter items
-        if target_filter == 'all':
-            target_items = all_items
-        elif target_filter == 'no-poster':
-            target_items = [item for item in all_items if not item.get('thumbnail_url')]
-        elif target_filter == 'movies':
-            target_items = [item for item in all_items if item.get('type') == 'Movie']
-        elif target_filter == 'series':
-            target_items = [item for item in all_items if item.get('type') == 'Series']
-        else:
-            target_items = []
-
-        if library_id:
-            target_items = [item for item in target_items if item.get('library_id') == library_id]
+        target_items = _select_auto_batch_target_items(all_items, target_filter, library_id=library_id)
 
         if not target_items:
             return jsonify({
@@ -1652,6 +1685,43 @@ def processed_items():
     except Exception as e:
         logging.error(f"Error reading processed items log: {e}")
         return jsonify({'items': [], 'error': str(e)}), 500
+
+
+@app.route('/protected-items')
+def protected_items():
+    """Return items protected from Auto-Get batch processing."""
+    try:
+        return jsonify({
+            'items': sorted(_read_protected_item_ids()),
+            'file': _get_protected_items_path(),
+        })
+    except Exception as e:
+        logging.error(f"Error reading protected items: {e}")
+        return jsonify({'items': [], 'error': str(e)}), 500
+
+
+@app.route('/protected-items/toggle', methods=['POST'])
+def toggle_protected_item():
+    """Protect or unprotect a Jellyfin item from Auto-Get batch processing."""
+    data = request.get_json() or {}
+    item_id = data.get('item_id')
+    if not item_id:
+        return jsonify({'success': False, 'error': 'Missing item_id'}), 400
+
+    try:
+        protected_ids = _read_protected_item_ids()
+        current_state = str(item_id) in protected_ids
+        protected = bool(data.get('protected')) if 'protected' in data else not current_state
+        updated_ids = _set_item_protected(item_id, protected)
+        return jsonify({
+            'success': True,
+            'item_id': str(item_id),
+            'protected': str(item_id) in updated_ids,
+            'items': sorted(updated_ids),
+        })
+    except Exception as e:
+        logging.error(f"Error updating protected item {item_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/failed-items', methods=['DELETE'])

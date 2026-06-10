@@ -137,6 +137,7 @@ let failedItemsPanelVisible = false;
 let activeFailedItemIds = new Set();
 let activeFailedItemDetails = new Map();
 let activeProcessedItemDetails = new Map();
+let protectedItemIds = new Set();
 let autoBatchPollTimer = null;
 let currentAutoBatchJobId = null;
 let autoBatchStartedAt = null;
@@ -172,6 +173,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize counters/buttons
     updateUploadAllButton();
+    initProtectedItemButtons();
+    loadProtectedItems();
     loadFailedItems();
     loadProcessedItems();
 
@@ -1459,6 +1462,66 @@ async function loadProcessedItems() {
         applyFailedItemMarkers(activeFailedItemIds);
     } catch (error) {
         console.error('Processed items error:', error);
+    }
+}
+
+function initProtectedItemButtons() {
+    document.querySelectorAll('.protected-item-toggle').forEach(button => {
+        button.addEventListener('click', () => toggleProtectedItem(button.getAttribute('data-item-id'), button));
+    });
+}
+
+async function loadProtectedItems() {
+    try {
+        const response = await fetch('/protected-items');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to load protected items');
+
+        protectedItemIds = new Set((data.items || []).filter(Boolean));
+        applyProtectedItemMarkers();
+    } catch (error) {
+        console.error('Protected items error:', error);
+        showAlert('Failed to load protected items: ' + error.message, 'danger');
+    }
+}
+
+function applyProtectedItemMarkers() {
+    document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
+        const itemId = wrapper.getAttribute('data-item-id');
+        const card = wrapper.querySelector('.item-card');
+        const button = wrapper.querySelector('.protected-item-toggle');
+        const isProtected = protectedItemIds.has(itemId);
+        if (card) card.classList.toggle('protected-item', isProtected);
+        if (!button) return;
+
+        button.classList.toggle('active', isProtected);
+        button.title = isProtected ? 'Protected from Auto-Get' : 'Protect from Auto-Get';
+        button.setAttribute('aria-label', isProtected ? 'Remove Auto-Get protection' : 'Protect from Auto-Get');
+        button.innerHTML = isProtected ? '<i class="fas fa-lock"></i>' : '<i class="fas fa-lock-open"></i>';
+    });
+}
+
+async function toggleProtectedItem(itemId, button) {
+    if (!itemId) return;
+    if (button) button.disabled = true;
+
+    try {
+        const response = await fetch('/protected-items/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ item_id: itemId })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to update protected item');
+
+        protectedItemIds = new Set((data.items || []).filter(Boolean));
+        applyProtectedItemMarkers();
+        showAlert(data.protected ? 'Item protected from Auto-Get' : 'Item can be processed by Auto-Get again', 'success');
+    } catch (error) {
+        console.error('Protected item toggle error:', error);
+        showAlert('Failed to update protection: ' + error.message, 'danger');
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
