@@ -369,6 +369,13 @@
                         aria-label="Protect {{ item.title }} from Auto-Get">
                     <i class="fas fa-lock-open"></i>
                 </button>
+                <button class="find-posters-overlay-btn"
+                        type="button"
+                        onclick="loadPosters('{{ item.id }}')"
+                        title="Find Posters"
+                        aria-label="Find posters for {{ item.title }}">
+                    <i class="fas fa-search"></i>
+                </button>
             </div>
 
             <div class="card-body p-2">
@@ -393,16 +400,12 @@
                 {% endif %}
 
                 <div class="d-grid">
-                    <button class="btn btn-outline-primary btn-sm find-posters-btn" onclick="loadPosters('{{ item.id }}')">
-                        <i class="fas fa-search me-1"></i>
-                        Find Posters
-                    </button>
                     <input class="btn-check manual-queue-checkbox"
                            type="checkbox"
                            id="manual-queue-{{ item.id }}"
                            data-item-id="{{ item.id }}"
                            autocomplete="off">
-                    <label class="btn btn-outline-secondary btn-sm mt-2 manual-queue-label" for="manual-queue-{{ item.id }}">
+                    <label class="btn btn-outline-secondary btn-sm manual-queue-label" for="manual-queue-{{ item.id }}">
                         <i class="fas fa-list-check me-1"></i>
                         Queue
                     </label>
@@ -443,9 +446,11 @@
             <div class="modal-body" id="posterModalBody"></div>
             <div class="modal-footer" id="posterModalFooter" style="display:none;">
                 <small class="text-muted me-auto" id="posterSelectionHint">Choose a poster to save it for upload.</small>
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-primary" id="savePosterSelectionBtn" onclick="finishPosterSelection()" disabled>
-                    <i class="fas fa-save me-1"></i>Save Selection
+                <button type="button" class="btn btn-queue-upload" id="queuePosterSelectionBtn" onclick="queueCurrentPosterSelection()" disabled>
+                    <i class="fas fa-list-check me-1"></i>Queue Upload
+                </button>
+                <button type="button" class="btn btn-primary" id="uploadPosterSelectionBtn" onclick="uploadCurrentPosterSelection()" disabled>
+                    <i class="fas fa-cloud-upload-alt me-1"></i>Select and Upload
                 </button>
             </div>
         </div>

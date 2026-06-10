@@ -149,6 +149,7 @@ let manualQueueOrder = [];
 let manualQueueResults = new Map();
 let manualQueueErrors = new Map();
 let manualQueuePresentedIds = new Set();
+let manualQueueSelectionIds = new Set();
 let manualQueueActive = false;
 let manualQueueWorkerRunning = false;
 let manualQueueCurrentItemId = null;
@@ -361,6 +362,42 @@ function preparePosterSearchForItem(itemId, setLimit = 3) {
     currentPosterSetLimit = setLimit;
 }
 
+function isCurrentManualQueueModal() {
+    return manualQueueActive && manualQueueCurrentItemId === currentItemId;
+}
+
+function updatePosterSelectionFooter() {
+    const modalFooter = document.getElementById('posterModalFooter');
+    const queueBtn = document.getElementById('queuePosterSelectionBtn');
+    const uploadBtn = document.getElementById('uploadPosterSelectionBtn');
+    const selectionHint = document.getElementById('posterSelectionHint');
+    const hasSelection = hasCurrentPosterSelection();
+    const fromQueue = isCurrentManualQueueModal();
+
+    if (modalFooter) modalFooter.style.display = '';
+    if (queueBtn) {
+        queueBtn.disabled = !hasSelection;
+        queueBtn.innerHTML = fromQueue
+            ? '<i class="fas fa-check me-1"></i>Save Queued Selection'
+            : '<i class="fas fa-list-check me-1"></i>Queue Upload';
+    }
+    if (uploadBtn) {
+        uploadBtn.disabled = !hasSelection || fromQueue;
+        uploadBtn.style.display = fromQueue ? 'none' : '';
+    }
+    if (selectionHint) {
+        if (fromQueue) {
+            selectionHint.textContent = hasSelection
+                ? 'Save this selection, then the next queued item will open.'
+                : 'Choose a poster for this queued item.';
+        } else {
+            selectionHint.textContent = hasSelection
+                ? 'Queue this poster for later, or upload it now.'
+                : 'Choose a poster, then queue it or upload it now.';
+        }
+    }
+}
+
 // Display posters in modal (image-only, no author/download box)
 function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) {
     const modalBody = document.getElementById('posterModalBody');
@@ -368,7 +405,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
     const modalFooter = document.getElementById('posterModalFooter');
     const previousItemId = currentPosterSearchItem?.id;
     if (modalTitle) modalTitle.innerHTML = `<i class="fas fa-images me-2"></i>Choose Poster for ${item.title}`;
-    if (modalFooter) modalFooter.style.display = 'none';
+    if (modalFooter) modalFooter.style.display = '';
     posterSearchGroups = Array.isArray(posterGroups) ? posterGroups : [];
     if (previousItemId !== item.id) {
         currentPosterSelection = null;
@@ -377,6 +414,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
     }
     currentPosterSearchItem = item;
     currentPosterEligibleSeasons = Array.isArray(eligibleSeasons) ? eligibleSeasons : [];
+    updatePosterSelectionFooter();
 
     if (item.type === 'Series' && posterSearchGroups.length > 0) {
         displayPosterGroups(item, posterSearchGroups, currentPosterEligibleSeasons);
@@ -439,16 +477,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
 
 function displayPosterGroups(item, groups, eligibleSeasons) {
     const modalBody = document.getElementById('posterModalBody');
-    const modalFooter = document.getElementById('posterModalFooter');
-    const saveBtn = document.getElementById('savePosterSelectionBtn');
-    const selectionHint = document.getElementById('posterSelectionHint');
-    if (modalFooter) modalFooter.style.display = '';
-    if (saveBtn) saveBtn.disabled = !currentPosterSelection;
-    if (selectionHint) {
-        selectionHint.textContent = currentPosterSelection
-            ? 'Selection saved. Upload it from the item card when you are ready.'
-            : 'Choose posters individually, or use Select Set to pick a whole set.';
-    }
+    updatePosterSelectionFooter();
     let html = `
         <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
             <div>
@@ -796,6 +825,7 @@ function createEmptySeriesPosterSelection() {
 }
 
 function hasCurrentPosterSelection() {
+    if (typeof currentPosterSelection === 'string') return currentPosterSelection.length > 0;
     return Boolean(
         currentPosterSelection?.series_poster_url ||
         Object.keys(currentPosterSelection?.season_posters || {}).length > 0
@@ -864,30 +894,43 @@ function buildSelectionFromPosterSet(group, setIndex, setId = null) {
     return selection;
 }
 
-async function saveCurrentPosterSelection() {
+async function saveCurrentPosterSelection(options = {}) {
     if (!hasCurrentPosterSelection()) {
         await clearCurrentPosterSelection();
         return;
     }
 
+    const body = typeof currentPosterSelection === 'string'
+        ? { poster_url: currentPosterSelection }
+        : { selection: currentPosterSelection };
     const response = await fetch(`/item/${currentItemId}/select`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ selection: currentPosterSelection })
+        body: JSON.stringify(body)
     });
     const data = await response.json();
     if (!data.success) throw new Error(data.error || 'Failed to select poster');
 
     selectedPosters[currentItemId] = currentPosterSelection;
+    if (options.fromQueue) {
+        manualQueueSelectionIds.add(currentItemId);
+    } else {
+        manualQueueSelectionIds.delete(currentItemId);
+    }
     updateItemStatus(currentItemId, 'selected');
     updateUploadAllButton();
-    document.getElementById('savePosterSelectionBtn')?.removeAttribute('disabled');
-    const selectionHint = document.getElementById('posterSelectionHint');
-    if (selectionHint) selectionHint.textContent = 'Selection saved. Upload it from the item card when you are ready.';
+    updatePosterSelectionFooter();
 }
 
 async function clearCurrentPosterSelection() {
-    const response = await fetch(`/item/${currentItemId}/select`, {
+    await clearPosterSelectionForItem(currentItemId);
+
+    currentPosterSelection = null;
+    updatePosterSelectionFooter();
+}
+
+async function clearPosterSelectionForItem(itemId) {
+    const response = await fetch(`/item/${itemId}/select`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clear_selection: true })
@@ -895,16 +938,14 @@ async function clearCurrentPosterSelection() {
     const data = await response.json();
     if (!data.success) throw new Error(data.error || 'Failed to clear poster selection');
 
-    currentPosterSelection = null;
-    delete selectedPosters[currentItemId];
-    const statusElement = document.getElementById(`status-${currentItemId}`);
-    const itemCard = document.querySelector(`[data-item-id="${currentItemId}"]`);
+    delete selectedPosters[itemId];
+    manualQueueSelectionIds.delete(itemId);
+    const statusElement = document.getElementById(`status-${itemId}`);
+    const itemCard = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`);
     if (statusElement) statusElement.innerHTML = '';
     if (itemCard) itemCard.classList.remove('selected');
+    setManualQueueUploadState(itemId, false);
     updateUploadAllButton();
-    document.getElementById('savePosterSelectionBtn')?.setAttribute('disabled', 'disabled');
-    const selectionHint = document.getElementById('posterSelectionHint');
-    if (selectionHint) selectionHint.textContent = 'Choose posters individually, or use Select Set to pick a whole set.';
 }
 
 async function selectPosterGroup(groupId) {
@@ -913,8 +954,8 @@ async function selectPosterGroup(groupId) {
 
     try {
         currentPosterSelection = buildSelectionFromGroup(group);
-        await saveCurrentPosterSelection();
         applyGroupedSelectionHighlight();
+        updatePosterSelectionFooter();
     } catch (error) {
         console.error('Error selecting poster set:', error);
         showAlert('Failed to select poster set: ' + error.message, 'danger');
@@ -927,8 +968,8 @@ async function selectPosterSet(groupId, setIndex, setId = null) {
 
     try {
         currentPosterSelection = buildSelectionFromPosterSet(group, setIndex, setId);
-        await saveCurrentPosterSelection();
         applyGroupedSelectionHighlight();
+        updatePosterSelectionFooter();
     } catch (error) {
         console.error('Error selecting poster set:', error);
         showAlert('Failed to select poster set: ' + error.message, 'danger');
@@ -944,8 +985,8 @@ async function selectGroupedShowPoster(groupId, posterId) {
         currentPosterSelection = currentPosterSelection || createEmptySeriesPosterSelection();
         currentPosterSelection.series_poster_url =
             currentPosterSelection.series_poster_url === poster.url ? null : poster.url;
-        await saveCurrentPosterSelection();
         applyGroupedSelectionHighlight();
+        updatePosterSelectionFooter();
     } catch (error) {
         console.error('Error selecting series poster:', error);
         showAlert('Failed to select series poster: ' + error.message, 'danger');
@@ -967,8 +1008,8 @@ async function selectGroupedSeasonPoster(groupId, seasonId, posterId) {
                 title: poster.season_title || 'Season'
             };
         }
-        await saveCurrentPosterSelection();
         applyGroupedSelectionHighlight();
+        updatePosterSelectionFooter();
     } catch (error) {
         console.error('Error selecting season poster:', error);
         showAlert('Failed to select season poster: ' + error.message, 'danger');
@@ -989,15 +1030,52 @@ function applyGroupedSelectionHighlight() {
     });
 }
 
-function finishPosterSelection() {
+function setManualQueueUploadState(itemId, queuedForUpload) {
+    const checkbox = document.querySelector(`.manual-queue-checkbox[data-item-id="${cssEscapeValue(itemId)}"]`);
+    const label = checkbox?.nextElementSibling;
+    if (!label?.classList.contains('manual-queue-label')) return;
+
+    label.classList.toggle('queued-for-upload', queuedForUpload);
+    label.innerHTML = queuedForUpload
+        ? '<i class="fas fa-clock me-1"></i>Queued for Upload'
+        : '<i class="fas fa-list-check me-1"></i>Queue';
+}
+
+async function queueCurrentPosterSelection() {
     if (!currentPosterSelection) {
         showAlert('Choose a poster before saving.', 'warning');
         return;
     }
+    try {
+        await saveCurrentPosterSelection({ fromQueue: true });
+        showAlert(isCurrentManualQueueModal() ? 'Queued selection saved' : 'Poster queued for upload', 'success');
+        if (posterModal) posterModal.hide();
+    } catch (error) {
+        console.error('Error queueing poster selection:', error);
+        showAlert('Failed to queue poster: ' + error.message, 'danger');
+    }
+}
+
+async function uploadCurrentPosterSelection() {
+    if (!currentPosterSelection) {
+        showAlert('Choose a poster before uploading.', 'warning');
+        return;
+    }
+    try {
+        await saveCurrentPosterSelection({ fromQueue: false });
+        if (posterModal) posterModal.hide();
+        await uploadPoster(currentItemId);
+    } catch (error) {
+        console.error('Error uploading poster selection:', error);
+        showAlert('Failed to upload poster: ' + error.message, 'danger');
+    }
+}
+
+function finishPosterSelection() {
     if (posterModal) posterModal.hide();
 }
 
-// Select a poster (store selection server-side; no immediate upload)
+// Select a poster in the modal; footer buttons decide queue vs upload.
 async function selectPoster(posterUrl, posterId) {
     try {
         // Visual feedback
@@ -1005,27 +1083,8 @@ async function selectPoster(posterUrl, posterId) {
         const selectedCard = document.querySelector(`[data-poster-id="${posterId}"]`);
         if (selectedCard) selectedCard.classList.add('selected');
 
-        const response = await fetch(`/item/${currentItemId}/select`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ poster_url: posterUrl })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            selectedPosters[currentItemId] = posterUrl;
-            updateItemStatus(currentItemId, 'selected');
-
-            // Close modal after short delay
-            setTimeout(() => {
-                if (posterModal) posterModal.hide();
-            }, 400);
-
-            updateUploadAllButton();
-        } else {
-            throw new Error(data.error || 'Failed to select poster');
-        }
+        currentPosterSelection = posterUrl;
+        updatePosterSelectionFooter();
     } catch (error) {
         console.error('Error selecting poster:', error);
         showAlert('Failed to select poster: ' + error.message, 'danger');
@@ -1041,15 +1100,9 @@ function updateItemStatus(itemId, status) {
 
     switch (status) {
         case 'selected':
-            statusElement.innerHTML = `
-                <span class="badge status-selected">
-                    <i class="fas fa-check me-1"></i>Selected
-                </span>
-                <button class="btn btn-warning btn-sm mt-1 w-100" onclick="uploadPoster('${itemId}')">
-                    <i class="fas fa-cloud-upload-alt me-1"></i>Upload Now
-                </button>
-            `;
+            statusElement.innerHTML = '';
             itemCard.classList.add('selected');
+            setManualQueueUploadState(itemId, true);
             break;
 
         case 'uploading':
@@ -1068,6 +1121,8 @@ function updateItemStatus(itemId, status) {
             `;
             itemCard.classList.remove('selected');
             delete selectedPosters[itemId];
+            manualQueueSelectionIds.delete(itemId);
+            setManualQueueUploadState(itemId, false);
             updateUploadAllButton();
             break;
 
@@ -1384,11 +1439,41 @@ function initManualQueueControls() {
     });
 }
 
-function toggleManualQueueItem(checkbox) {
+async function toggleManualQueueItem(checkbox) {
     const itemId = checkbox.getAttribute('data-item-id');
     if (!itemId) return;
 
     const wrapper = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`);
+    const hasQueuedUpload = Boolean(selectedPosters[itemId]) || manualQueueSelectionIds.has(itemId);
+
+    if (hasQueuedUpload && checkbox.checked) {
+        checkbox.checked = false;
+        const confirmed = await showConfirmDialog({
+            title: 'Discard queued upload?',
+            message: 'This item already has a selected poster queued for upload.',
+            details: 'Discard the selected poster and queue this item for manual selection instead?',
+            confirmText: 'Discard and Queue',
+            cancelText: 'Keep Queued Upload',
+            variant: 'warning'
+        });
+
+        if (!confirmed) {
+            updateUploadAllButton();
+            return;
+        }
+
+        try {
+            await clearPosterSelectionForItem(itemId);
+        } catch (error) {
+            console.error('Error clearing queued poster:', error);
+            showAlert('Failed to discard queued poster: ' + error.message, 'danger');
+            updateUploadAllButton();
+            return;
+        }
+
+        checkbox.checked = true;
+    }
+
     if (checkbox.checked) {
         manualQueueIds.add(itemId);
         wrapper?.classList.add('manual-queued');
