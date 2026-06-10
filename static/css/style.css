@@ -188,6 +188,7 @@ body {
 }
 
 /* Alerts */
+#toastContainer { z-index: 1090; }
 .alert { border: none; border-radius: var(--border-radius); padding: 1rem 1.5rem; margin-bottom: 1rem; border-left: 4px solid; }
 .alert-success { background-color: #d4edda; color: #155724; border-left-color: var(--success-color); }
 .alert-danger  { background-color: #f8d7da; color: #721c24; border-left-color: var(--danger-color); }
