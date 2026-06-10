@@ -158,9 +158,9 @@ body {
 .modal-body { max-height: 70vh; overflow-y: auto; }
 
 /* Poster modal grid */
-.poster-container { position: relative; height: 280px; background-color: var(--surface-muted); border-radius: var(--border-radius-sm); overflow: hidden; display: flex; align-items: center; justify-content: center; border: 2px solid var(--border-color); }
+.poster-container { position: relative; aspect-ratio: 2 / 3; width: 100%; background-color: var(--surface-muted); border-radius: var(--border-radius-sm); overflow: hidden; display: flex; align-items: center; justify-content: center; border: 2px solid var(--border-color); }
 .poster-loading { position: absolute; inset: 0; background-color: var(--surface-muted); z-index: 2; display: flex !important; align-items: center; justify-content: center; color: var(--muted-color); }
-.poster-image { height: 280px; width: 100%; object-fit: cover; transition: transform 0.3s ease; position: relative; z-index: 3; border-radius: var(--border-radius-sm); }
+.poster-image { height: 100%; width: 100%; object-fit: cover; transition: transform 0.3s ease; position: relative; z-index: 3; border-radius: var(--border-radius-sm); }
 .poster-card { cursor: pointer; transition: var(--transition); border: 2px solid transparent; position: relative; height: 100%; background: var(--surface); }
 .poster-card:hover { transform: translateY(-5px); box-shadow: var(--box-shadow-hover); border-color: var(--primary-color); }
 .poster-card:hover .poster-image { transform: scale(1.03); }
@@ -243,13 +243,6 @@ body {
 @media (max-width: 575px) {
     .card-img-top-wrapper { height: 240px; }
 }
-@media (max-width: 1199px) and (min-width: 992px) {
-    .poster-container, .poster-image { height: 250px; }
-}
-@media (max-width: 991px) and (min-width: 768px) {
-    .poster-container, .poster-image { height: 220px; }
-}
 @media (max-width: 767px) {
-    .poster-container, .poster-image { height: 200px; }
     .modal-dialog { max-width: 95%; margin: 1rem auto; }
 }
