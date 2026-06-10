@@ -133,6 +133,7 @@ let selectedPosters = {};
 let loadingModal = null;
 let posterModal = null;
 let resultsModal = null;
+let confirmModal = null;
 let failedItemsPanelVisible = false;
 let activeFailedItemIds = new Set();
 let activeFailedItemDetails = new Map();
@@ -165,12 +166,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const lm = document.getElementById('loadingModal');
     const pm = document.getElementById('posterModal');
     const rm = document.getElementById('resultsModal');
+    const cm = document.getElementById('confirmModal');
     if (lm && bootstrap?.Modal) loadingModal = new bootstrap.Modal(lm);
     if (pm && bootstrap?.Modal) posterModal = new bootstrap.Modal(pm);
     if (rm && bootstrap?.Modal) {
         resultsModal = new bootstrap.Modal(rm);
         rm.addEventListener('hidden.bs.modal', () => loadFailedItems({ autoExpand: true }));
     }
+    if (cm && bootstrap?.Modal) confirmModal = new bootstrap.Modal(cm);
 
     // Initialize counters/buttons
     updateUploadAllButton();
@@ -1086,9 +1089,13 @@ async function uploadAllSelected() {
         return;
     }
 
-    if (!confirm(`Upload ${selectedCount} selected poster(s)?`)) {
-        return;
-    }
+    const confirmed = await showConfirmDialog({
+        title: 'Upload selected posters?',
+        message: `Upload ${selectedCount} selected poster(s)?`,
+        confirmText: 'Upload',
+        variant: 'primary'
+    });
+    if (!confirmed) return;
 
     const progressContainer = document.getElementById('progressContainer');
     const progressBar = document.getElementById('progressBar');
@@ -1294,21 +1301,89 @@ function toggleManualSelectionPanel() {
 }
 
 // Notifications
+function getAlertIcon(type) {
+    return {
+        success: 'fa-check-circle',
+        danger: 'fa-exclamation-circle',
+        warning: 'fa-triangle-exclamation',
+        info: 'fa-info-circle',
+    }[type] || 'fa-info-circle';
+}
+
 function showAlert(message, type = 'info') {
     const safeMessage = escapeHtml(message);
-    const alertHtml = `
-        <div class="alert alert-${type} alert-dismissible fade show" role="alert">
-            <i class="fas fa-info-circle me-2"></i>
-            ${safeMessage}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    const container = document.getElementById('toastContainer');
+    if (!container || !window.bootstrap?.Toast) {
+        const alertHtml = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                <i class="fas ${getAlertIcon(type)} me-2"></i>
+                ${safeMessage}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        const fallbackContainer = document.querySelector('.container') || document.body;
+        fallbackContainer.insertAdjacentHTML('afterbegin', alertHtml);
+        setTimeout(() => fallbackContainer.querySelector('.alert')?.remove(), 5000);
+        return;
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast app-toast app-toast-${type}`;
+    toast.setAttribute('role', 'alert');
+    toast.setAttribute('aria-live', 'assertive');
+    toast.setAttribute('aria-atomic', 'true');
+    toast.innerHTML = `
+        <div class="toast-body d-flex align-items-start gap-2">
+            <i class="fas ${getAlertIcon(type)} mt-1"></i>
+            <div class="flex-grow-1">${safeMessage}</div>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
         </div>
     `;
-    const container = document.querySelector('.container') || document.body;
-    container.insertAdjacentHTML('afterbegin', alertHtml);
-    setTimeout(() => {
-        const alert = container.querySelector('.alert');
-        if (alert) alert.remove();
-    }, 5000);
+    container.appendChild(toast);
+
+    const toastInstance = new bootstrap.Toast(toast, { delay: 5000 });
+    toast.addEventListener('hidden.bs.toast', () => toast.remove());
+    toastInstance.show();
+}
+
+function showConfirmDialog({ title = 'Confirm action', message = '', details = '', confirmText = 'Continue', cancelText = 'Cancel', variant = 'primary' } = {}) {
+    const modalElement = document.getElementById('confirmModal');
+    const titleElement = document.getElementById('confirmModalTitle');
+    const bodyElement = document.getElementById('confirmModalBody');
+    const confirmButton = document.getElementById('confirmModalConfirmBtn');
+    const cancelButton = document.getElementById('confirmModalCancelBtn');
+    if (!modalElement || !confirmButton || !bodyElement || !window.bootstrap?.Modal) {
+        return Promise.resolve(false);
+    }
+
+    titleElement.textContent = title;
+    cancelButton.textContent = cancelText;
+    confirmButton.textContent = confirmText;
+    confirmButton.className = `btn btn-${variant}`;
+    bodyElement.innerHTML = `
+        <p class="mb-${details ? '2' : '0'}">${escapeHtml(message)}</p>
+        ${details ? `<div class="confirm-details">${escapeHtml(details).replace(/\n/g, '<br>')}</div>` : ''}
+    `;
+
+    return new Promise(resolve => {
+        let resolved = false;
+        const finish = (value) => {
+            if (resolved) return;
+            resolved = true;
+            confirmButton.removeEventListener('click', onConfirm);
+            modalElement.removeEventListener('hidden.bs.modal', onHidden);
+            resolve(value);
+        };
+        const onConfirm = () => {
+            finish(true);
+            (confirmModal || bootstrap.Modal.getOrCreateInstance(modalElement)).hide();
+        };
+        const onHidden = () => finish(false);
+
+        confirmButton.addEventListener('click', onConfirm);
+        modalElement.addEventListener('hidden.bs.modal', onHidden, { once: true });
+        (confirmModal || bootstrap.Modal.getOrCreateInstance(modalElement)).show();
+    });
 }
 
 function escapeHtml(value) {
@@ -1637,7 +1712,13 @@ function scrollToItemCard(itemId) {
 }
 
 async function clearFailedItems() {
-    if (!confirm('Clear all failed item entries from failed.log?')) return;
+    const confirmed = await showConfirmDialog({
+        title: 'Clear failed items?',
+        message: 'Clear all failed item entries from failed.log?',
+        confirmText: 'Clear list',
+        variant: 'danger'
+    });
+    if (!confirmed) return;
 
     const clearBtn = document.getElementById('clearFailedItemsBtn');
     const retryAllBtn = document.getElementById('retryAllFailedBtn');
@@ -1711,7 +1792,13 @@ async function retryFailedItem(itemId, button) {
 
 async function retryAllFailedItems() {
     const retryAllBtn = document.getElementById('retryAllFailedBtn');
-    if (!confirm('Retry poster fetch and upload for all recent failed items?')) return;
+    const confirmed = await showConfirmDialog({
+        title: 'Retry failed items?',
+        message: 'Retry poster fetch and upload for all recent failed items?',
+        confirmText: 'Retry all',
+        variant: 'warning'
+    });
+    if (!confirmed) return;
 
     if (retryAllBtn) {
         retryAllBtn.disabled = true;
@@ -1880,7 +1967,13 @@ async function pollAutoBatchProgress(jobId) {
 
 async function cancelAutoBatch() {
     if (!currentAutoBatchJobId) return;
-    if (!confirm('Cancel the running Auto-Get Posters job?')) return;
+    const confirmed = await showConfirmDialog({
+        title: 'Cancel Auto-Get?',
+        message: 'Cancel the running Auto-Get Posters job?',
+        confirmText: 'Cancel job',
+        variant: 'danger'
+    });
+    if (!confirmed) return;
 
     const cancelBtn = document.getElementById('cancelAutoBatchBtn');
     if (cancelBtn) {
@@ -1929,9 +2022,15 @@ async function startAutoBatchPoster(filter) {
                 'Season posters will be included only when a season is missing a poster.');
         }
         if (libraryName) confirmNotes.push(`Library: ${libraryName}`);
-        const fullConfirmText = confirmNotes.length ? `${confirmText}\n\n${confirmNotes.join('\n')}` : confirmText;
 
-        if (!confirm(fullConfirmText)) return;
+        const confirmed = await showConfirmDialog({
+            title: 'Start Auto-Get Posters?',
+            message: confirmText,
+            details: confirmNotes.join('\n'),
+            confirmText: 'Start Auto-Get',
+            variant: 'primary'
+        });
+        if (!confirmed) return;
 
         stopAutoBatchPolling();
         setAutoBatchRunning(true);
