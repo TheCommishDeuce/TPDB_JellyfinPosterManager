@@ -1686,6 +1686,48 @@ function applyFailedItemMarkers(itemIds) {
     });
 }
 
+function applyAutoBatchResultMarkers(results = [], timestamp = null) {
+    results.forEach(result => {
+        const itemId = result.item_id;
+        if (!itemId) return;
+
+        if (result.success) {
+            const seasonResults = Array.isArray(result.season_results) ? result.season_results : [];
+            const successfulSeasons = seasonResults.filter(season => season.success);
+            activeFailedItemIds.delete(itemId);
+            activeFailedItemDetails.delete(itemId);
+            activeProcessedItemDetails.set(itemId, {
+                item_id: itemId,
+                item_title: result.item_title,
+                item_type: result.item_type,
+                item_year: result.item_year,
+                poster_url: result.poster_url,
+                timestamp: timestamp || new Date().toISOString(),
+                poster_targets: {
+                    series_poster: Boolean(result.poster_url),
+                    season_count: successfulSeasons.length,
+                    season_titles: successfulSeasons.map(season => season.season_title).filter(Boolean)
+                }
+            });
+        } else {
+            activeProcessedItemDetails.delete(itemId);
+            activeFailedItemIds.add(itemId);
+            activeFailedItemDetails.set(itemId, {
+                item_id: itemId,
+                item_title: result.item_title,
+                item_type: result.item_type,
+                item_year: result.item_year,
+                error: result.error || 'Unknown failure',
+                timestamp: timestamp || new Date().toISOString(),
+                operation: 'auto-poster'
+            });
+        }
+    });
+
+    applyProcessedItemMarkers(activeProcessedItemDetails);
+    applyFailedItemMarkers(activeFailedItemIds);
+}
+
 function scrollToItemCard(itemId) {
     if (!itemId) return;
 
@@ -1941,6 +1983,7 @@ async function pollAutoBatchProgress(jobId) {
 
         const job = data.job;
         updateAutoBatchProgress(job);
+        applyAutoBatchResultMarkers(job.results || [], job.updated_at);
 
         if (job.done) {
             stopAutoBatchPolling();
