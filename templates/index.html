@@ -414,8 +414,8 @@
                         <i class="fas fa-layer-group me-1"></i>{{ item.season_count }} season{{ '' if item.season_count == 1 else 's' }}
                     </button>
                     {% elif item.type == 'Series' %}
+                    {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
                     <button class="series-season-count season-count-button" type="button" data-season-count-item-id="{{ item.id }}" onclick="showSeasonPosters('{{ item.id }}')" title="View season posters">
-                        {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
                         <i class="fas fa-layer-group me-1"></i><span class="season-count-text">Seasons</span>
                     </button>
                     {% endif %}
