@@ -419,12 +419,14 @@
                     {% endif %}
                     {% if item.type == 'Series' and item.season_count is defined and item.season_count is not none %}
                     {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
-                    <i class="fas fa-layer-group me-1"></i>{{ item.season_count }} season{{ '' if item.season_count == 1 else 's' }}
+                    <button class="season-count-button" type="button" onclick="showSeasonPosters('{{ item.id }}')" title="View season posters">
+                        <i class="fas fa-layer-group me-1"></i>{{ item.season_count }} season{{ '' if item.season_count == 1 else 's' }}
+                    </button>
                     {% elif item.type == 'Series' %}
-                    <span class="series-season-count" data-season-count-item-id="{{ item.id }}">
+                    <button class="series-season-count season-count-button" type="button" data-season-count-item-id="{{ item.id }}" onclick="showSeasonPosters('{{ item.id }}')" title="View season posters">
                         {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
                         <i class="fas fa-layer-group me-1"></i><span class="season-count-text">Seasons</span>
-                    </span>
+                    </button>
                     {% endif %}
                 </small>
                 {% endif %}
@@ -483,6 +485,21 @@
                     <i class="fas fa-cloud-upload-alt me-1"></i>Select and Upload
                 </button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Season Posters Modal -->
+<div class="modal fade" id="seasonPostersModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="seasonPostersModalTitle">
+                    <i class="fas fa-layer-group me-2"></i>Season Posters
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="seasonPostersModalBody"></div>
         </div>
     </div>
 </div>

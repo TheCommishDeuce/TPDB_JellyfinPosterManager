@@ -113,6 +113,8 @@ body {
 .item-card.failed-item .find-posters-overlay-btn { background: var(--danger-color); border-color: var(--danger-color); color: #fff; }
 .manual-queue-checkbox:checked + .manual-queue-label { background: var(--info-color); border-color: var(--info-color); color: #fff; }
 .manual-queue-label.queued-for-upload { background: var(--warning-color); border-color: var(--warning-color); color: #111; }
+.season-count-button { background: transparent; border: 0; color: inherit; padding: 0; font: inherit; }
+.season-count-button:hover { color: var(--primary-color); text-decoration: underline; }
 .processed-item-overlay { position: absolute; top: 0.5rem; left: 0.5rem; z-index: 10; }
 .failed-item-overlay { position: absolute; top: 0.5rem; left: 0.5rem; z-index: 10; }
 .failed-card-focus { animation: failed-card-pulse 1.4s ease-out; }
@@ -183,6 +185,11 @@ body {
 .poster-set-browser-list { display: grid; gap: 0.5rem; }
 .poster-set-browser-row { border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem; background: var(--surface); }
 .poster-target-label { padding: 0.35rem 0.5rem; font-size: 0.8rem; color: var(--muted-color); text-align: center; border-top: 1px solid var(--border-color); }
+.season-poster-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.season-poster-card { border: 1px solid var(--border-color); border-radius: var(--border-radius-sm); background: var(--surface-muted); overflow: hidden; }
+.season-poster-frame { aspect-ratio: 2 / 3; background: var(--surface); display: flex; align-items: center; justify-content: center; color: var(--muted-color); }
+.season-poster-frame img { width: 100%; height: 100%; object-fit: cover; }
+.season-poster-meta { padding: 0.65rem; }
 
 /* Dropdown menu */
 .dropdown-menu { z-index: 1060; background: var(--surface); color: var(--app-text); border: 1px solid var(--border-color); }

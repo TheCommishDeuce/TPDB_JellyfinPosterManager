@@ -132,6 +132,7 @@ let currentItemId = null;
 let selectedPosters = {};
 let loadingModal = null;
 let posterModal = null;
+let seasonPostersModal = null;
 let resultsModal = null;
 let confirmModal = null;
 let failedItemsPanelVisible = false;
@@ -176,6 +177,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Modals
     const lm = document.getElementById('loadingModal');
     const pm = document.getElementById('posterModal');
+    const sm = document.getElementById('seasonPostersModal');
     const rm = document.getElementById('resultsModal');
     const cm = document.getElementById('confirmModal');
     if (lm && bootstrap?.Modal) loadingModal = new bootstrap.Modal(lm);
@@ -188,6 +190,7 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(showNextManualQueueResult, 150);
         });
     }
+    if (sm && bootstrap?.Modal) seasonPostersModal = new bootstrap.Modal(sm);
     if (rm && bootstrap?.Modal) {
         resultsModal = new bootstrap.Modal(rm);
         rm.addEventListener('hidden.bs.modal', () => loadFailedItems({ autoExpand: true }));
@@ -357,6 +360,65 @@ function updateFilterToolbarState() {
 
 function filterLibrary() {
     filterContent(getCurrentContentFilter());
+}
+
+async function showSeasonPosters(itemId) {
+    const titleElement = document.getElementById('seasonPostersModalTitle');
+    const bodyElement = document.getElementById('seasonPostersModalBody');
+    if (!itemId || !bodyElement) return;
+
+    bodyElement.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary mb-3" role="status"></div>
+            <div class="text-muted">Loading season posters...</div>
+        </div>
+    `;
+    if (seasonPostersModal) seasonPostersModal.show();
+
+    try {
+        const response = await fetch(`/item/${encodeURIComponent(itemId)}/seasons`);
+        const data = await response.json();
+        if (!response.ok || data.error) throw new Error(data.error || 'Failed to load season posters');
+
+        const item = data.item || {};
+        const seasons = data.seasons || [];
+        if (titleElement) {
+            titleElement.innerHTML = `<i class="fas fa-layer-group me-2"></i>${escapeHtml(item.title || 'Season Posters')}`;
+        }
+
+        if (!seasons.length) {
+            bodyElement.innerHTML = '<div class="text-muted text-center py-4">No eligible seasons found.</div>';
+            return;
+        }
+
+        bodyElement.innerHTML = `
+            <div class="season-poster-grid">
+                ${seasons.map(season => renderSeasonPosterCard(season)).join('')}
+            </div>
+        `;
+    } catch (error) {
+        console.error('Season posters error:', error);
+        bodyElement.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function renderSeasonPosterCard(season) {
+    const title = season.title || (season.is_special ? 'Specials' : `Season ${season.number ?? ''}`);
+    const posterHtml = season.thumbnail_url
+        ? `<img src="/jellyfin-image?url=${encodeURIComponent(season.thumbnail_url)}" alt="${escapeHtml(title)} poster">`
+        : '<div class="text-center px-2"><i class="fas fa-image fa-2x mb-2 d-block"></i><small>No poster</small></div>';
+    const statusClass = season.has_poster ? 'bg-success' : 'bg-secondary';
+    const statusText = season.has_poster ? 'Has poster' : 'Missing poster';
+    return `
+        <article class="season-poster-card">
+            <div class="season-poster-frame">${posterHtml}</div>
+            <div class="season-poster-meta">
+                <div class="fw-semibold text-truncate" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+                <small class="text-muted d-block">${season.is_special ? 'Specials' : `Season ${season.number ?? '-'}`}</small>
+                <span class="badge ${statusClass} mt-2">${statusText}</span>
+            </div>
+        </article>
+    `;
 }
 
 function sortContent(sortBy) {
