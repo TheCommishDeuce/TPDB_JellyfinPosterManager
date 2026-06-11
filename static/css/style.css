@@ -137,6 +137,7 @@ body {
 #selectedCount { font-weight: 600; color: var(--primary-color); }
 .manual-action-btn { min-width: 3.5rem; }
 .manual-action-btn .badge { min-width: 1.4rem; }
+#uploadAllBtn { width: 105px; }
 
 /* Automatic-batch */
 .automatic-batch-progress {
@@ -162,6 +163,7 @@ body {
 .automatic-batch-card { position: relative; }
 .automatic-batch-settings-menu { min-width: 240px; }
 .automatic-batch-settings-menu .form-check-label { color: var(--app-text); }
+.poster-selection-manual-row { border-top: 1px solid var(--border-color); }
 
 /* Modals */
 .modal-dialog { max-width: 1200px; }

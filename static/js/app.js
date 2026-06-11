@@ -1601,9 +1601,9 @@ function updateUploadAllButton() {
     if (queueBtn) {
         queueBtn.disabled = queuedCount === 0 && !manualQueueActive;
         if (manualQueueWorkerRunning) {
-            queueBtn.innerHTML = `<i class="fas fa-spinner fa-spin me-1"></i>Set Queued Posters<span class="badge bg-primary ms-2" id="manualQueueActionCount">${queuedCount}</span>`;
+            queueBtn.innerHTML = `<i class="fas fa-spinner fa-spin me-1"></i>Set Posters for Queued<span class="badge bg-primary ms-2" id="manualQueueActionCount">${queuedCount}</span>`;
         } else {
-            queueBtn.innerHTML = `<i class="fas fa-search me-1"></i>Set Queued Posters<span class="badge bg-primary ms-2" id="manualQueueActionCount">${queuedCount}</span>`;
+            queueBtn.innerHTML = `<i class="fas fa-search me-1"></i>Set Posters for Queued<span class="badge bg-primary ms-2" id="manualQueueActionCount">${queuedCount}</span>`;
         }
     }
 
@@ -2298,7 +2298,7 @@ function scrollToItemCard(itemId) {
 async function clearFailedItems() {
     const confirmed = await showConfirmDialog({
         title: 'Clear failed items?',
-        message: 'Clear all failed item entries from failed.log?',
+        message: 'Clear all failed item entries?',
         confirmText: 'Clear list',
         variant: 'danger'
     });
@@ -2595,8 +2595,8 @@ async function pollAutoBatchProgress(jobId) {
 async function cancelAutoBatch() {
     if (!currentAutoBatchJobId) return;
     const confirmed = await showConfirmDialog({
-        title: 'Cancel Auto-Get?',
-        message: 'Cancel the running Auto-Get Posters job?',
+        title: 'Cancel poster search?',
+        message: 'Cancel the running poster search and apply job?',
         confirmText: 'Cancel job',
         variant: 'danger'
     });
@@ -2648,7 +2648,7 @@ async function startAutoBatchPoster(filter) {
         const includeSeasonPosters = Boolean(document.getElementById('includeSeasonPostersAutoBatch')?.checked);
         const replaceSeasonPosters = Boolean(document.getElementById('replaceSeasonPostersAutoBatch')?.checked);
         const confirmNotes = [];
-        if (skipProcessed) confirmNotes.push('Already processed items in results.log will be skipped.');
+        if (skipProcessed) confirmNotes.push('Already processed items will be skipped.');
         if (includeSeasonPosters) {
             confirmNotes.push(replaceSeasonPosters ?
                 'Season posters will be included and existing season posters may be replaced.' :
@@ -2657,10 +2657,10 @@ async function startAutoBatchPoster(filter) {
         if (libraryName) confirmNotes.push(`Library: ${libraryName}`);
 
         const confirmed = await showConfirmDialog({
-            title: 'Start Auto-Get Posters?',
+            title: 'Find and apply posters?',
             message: confirmText,
             details: confirmNotes.join('\n'),
-            confirmText: 'Start Auto-Get',
+            confirmText: 'Start',
             variant: 'primary'
         });
         if (!confirmed) return;
