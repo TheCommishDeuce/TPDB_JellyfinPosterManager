@@ -214,11 +214,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Filter and Sort Functions
 function filterContent(type, updateUrl = true) {
-    const selectedLibrary = document.getElementById('libraryFilter')?.value || '';
-
     const filterId = type === 'movies' ? 'filterMovies' : type === 'series' ? 'filterSeries' : 'filterAll';
     const filterInput = document.getElementById(filterId);
     if (filterInput) filterInput.checked = true;
+
+    const selectedLibrary = updateLibraryFilterOptions(type);
     applyGridFilters(type, selectedLibrary);
 
     if (!updateUrl) return;
@@ -236,6 +236,45 @@ function filterContent(type, updateUrl = true) {
     }
     url.hash = '';
     window.history.pushState({}, '', url);
+}
+
+function updateLibraryFilterOptions(type = getCurrentContentFilter()) {
+    const libraryFilter = document.getElementById('libraryFilter');
+    if (!libraryFilter) return '';
+
+    let domType = type;
+    if (type === 'movies') domType = 'movie';
+    if (type === 'series') domType = 'series';
+
+    const matchingLibraryIds = new Set(
+        Array.from(document.querySelectorAll('.item-card-wrapper'))
+            .filter(item => type === 'all' || item.getAttribute('data-type') === domType)
+            .map(item => item.getAttribute('data-library-id') || '')
+            .filter(Boolean)
+    );
+
+    Array.from(libraryFilter.options).forEach(option => {
+        if (!option.value) {
+            option.textContent = type === 'movies'
+                ? 'All Movie Libraries'
+                : type === 'series'
+                    ? 'All Series Libraries'
+                    : 'All Libraries';
+            option.hidden = false;
+            option.disabled = false;
+            return;
+        }
+
+        const hasMatchingItems = type === 'all' || matchingLibraryIds.has(option.value);
+        option.hidden = !hasMatchingItems;
+        option.disabled = !hasMatchingItems;
+    });
+
+    if (libraryFilter.value && libraryFilter.selectedOptions[0]?.disabled) {
+        libraryFilter.value = '';
+    }
+
+    return libraryFilter.value || '';
 }
 
 function applyGridFilters(type = getCurrentContentFilter(), selectedLibrary = document.getElementById('libraryFilter')?.value || '') {
