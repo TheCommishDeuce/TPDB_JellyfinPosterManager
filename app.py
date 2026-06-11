@@ -441,6 +441,45 @@ def _read_processed_items(limit=500):
     return latest_entries
 
 
+def _clear_processed_items(item_ids=None):
+    results_log_path = _get_results_log_path()
+    os.makedirs(os.path.dirname(results_log_path), exist_ok=True)
+
+    if not item_ids:
+        with open(results_log_path, 'w', encoding='utf-8'):
+            pass
+        return 0
+
+    item_ids = set(str(item_id) for item_id in item_ids if item_id)
+    if not item_ids:
+        return 0
+    if not os.path.exists(results_log_path):
+        return 0
+
+    kept_lines = []
+    removed_count = 0
+    with open(results_log_path, 'r', encoding='utf-8') as results_log:
+        for line in results_log:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                entry = json.loads(stripped)
+            except json.JSONDecodeError:
+                kept_lines.append(line)
+                continue
+
+            if entry.get('status') == 'success' and entry.get('item_id') in item_ids:
+                removed_count += 1
+            else:
+                kept_lines.append(line)
+
+    with open(results_log_path, 'w', encoding='utf-8') as results_log:
+        results_log.writelines(kept_lines)
+
+    return removed_count
+
+
 def _log_failed_item(item=None, error=None, operation='poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None):
     """Append one structured active failure entry to failed.log."""
     try:
@@ -1707,6 +1746,19 @@ def processed_items():
     except Exception as e:
         logging.error(f"Error reading processed items log: {e}")
         return jsonify({'items': [], 'error': str(e)}), 500
+
+
+@app.route('/processed-items', methods=['DELETE'])
+def clear_processed_items():
+    """Clear successful poster application history from results.log."""
+    try:
+        data = request.get_json(silent=True) or {}
+        item_ids = data.get('item_ids')
+        removed_count = _clear_processed_items(item_ids if isinstance(item_ids, list) else None)
+        return jsonify({'success': True, 'removed_count': removed_count})
+    except Exception as e:
+        logging.error(f"Error clearing processed items log: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/protected-items')

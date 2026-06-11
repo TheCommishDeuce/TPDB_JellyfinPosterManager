@@ -1895,6 +1895,63 @@ async function loadProcessedItems() {
     }
 }
 
+async function clearProcessedItems() {
+    await clearProcessedItemsByScope();
+}
+
+async function clearProcessedItemsForVisibleItems() {
+    const visibleItemIds = Array.from(document.querySelectorAll('.item-card-wrapper:not(.hidden)'))
+        .map(wrapper => wrapper.getAttribute('data-item-id'))
+        .filter(itemId => itemId && activeProcessedItemDetails.has(itemId));
+
+    if (visibleItemIds.length === 0) {
+        showAlert('No visible processed items to clear.', 'info');
+        return;
+    }
+
+    await clearProcessedItemsByScope(visibleItemIds);
+}
+
+async function clearProcessedItemsByScope(itemIds = null) {
+    const isVisibleOnly = Array.isArray(itemIds);
+    const confirmed = await showConfirmDialog({
+        title: isVisibleOnly ? 'Clear visible processed items?' : 'Clear processed items?',
+        message: isVisibleOnly
+            ? `This will remove processed markers for ${itemIds.length} visible item${itemIds.length === 1 ? '' : 's'}.`
+            : 'This will remove all processed markers and history used by Skip already processed.',
+        details: isVisibleOnly
+            ? 'Items outside the current visible grid will keep their processed history.'
+            : 'Posters that were already changed will no longer be considered processed until they are processed again.',
+        confirmText: isVisibleOnly ? 'Clear visible processed' : 'Clear processed',
+        cancelText: 'Cancel',
+        variant: 'danger'
+    });
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/processed-items', {
+            method: 'DELETE',
+            headers: isVisibleOnly ? { 'Content-Type': 'application/json' } : undefined,
+            body: isVisibleOnly ? JSON.stringify({ item_ids: itemIds }) : undefined
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to clear processed items');
+
+        if (isVisibleOnly) {
+            itemIds.forEach(itemId => activeProcessedItemDetails.delete(itemId));
+        } else {
+            activeProcessedItemDetails = new Map();
+        }
+        applyProcessedItemMarkers(activeProcessedItemDetails);
+        applyFailedItemMarkers(activeFailedItemIds);
+        showAlert(isVisibleOnly ? 'Visible processed items cleared' : 'Processed items cleared', 'success');
+    } catch (error) {
+        console.error('Clear processed items error:', error);
+        showAlert('Failed to clear processed items: ' + error.message, 'danger');
+    }
+}
+
 function initProtectedItemButtons() {
     document.querySelectorAll('.protected-item-toggle').forEach(button => {
         button.addEventListener('click', () => toggleProtectedItem(button.getAttribute('data-item-id'), button));
