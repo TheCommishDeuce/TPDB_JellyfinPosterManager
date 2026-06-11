@@ -780,7 +780,6 @@ function renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex 
         <section class="poster-group poster-set-group mb-4">
             <div class="poster-group-header d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                 <div>
-                    <h6 class="mb-1">Set ${displayGroupNumber}</h6>
                     <small class="text-muted">
                         <i class="fas fa-user me-1"></i>${escapeHtml(metadata.uploader)}
                         ${metadata.setPosterCount ? ` &bull; <i class="fas fa-images me-1"></i>${escapeHtml(metadata.setPosterCount)} poster${String(metadata.setPosterCount) === '1' ? '' : 's'}` : ''}
