@@ -2499,10 +2499,16 @@ async function cancelAutoBatch() {
 async function startAutoBatchPoster(filter) {
     try {
         if (!filter) filter = 'no-poster';
+        const queuedItemIds = filter === 'queued' ? Array.from(manualQueueIds) : [];
+        if (filter === 'queued' && queuedItemIds.length === 0) {
+            showAlert('Choose one or more items with the Queue checkbox first.', 'warning');
+            return;
+        }
 
         const confirmText = {
             'no-poster': 'Automatically find and upload posters for items without posters?',
             'all': 'Automatically find and upload posters for ALL items?',
+            'queued': `Automatically find and upload posters for ${queuedItemIds.length} queued item${queuedItemIds.length === 1 ? '' : 's'}?`,
             'movies': 'Automatically find and upload posters for all Movies?',
             'series': 'Automatically find and upload posters for all Series?'
         }[filter] || 'Start automatic poster upload?';
@@ -2556,6 +2562,7 @@ async function startAutoBatchPoster(filter) {
             body: JSON.stringify({
                 filter,
                 library_id: libraryId,
+                item_ids: queuedItemIds,
                 skip_processed: skipProcessed,
                 include_season_posters: includeSeasonPosters,
                 replace_existing_season_posters: replaceSeasonPosters

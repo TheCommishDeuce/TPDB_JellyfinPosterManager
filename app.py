@@ -179,7 +179,7 @@ def _sweep_stale_temp_posters(max_age_sec=3600):
         logging.info("Removed %d stale temp poster files.", removed_count)
 
 
-def _create_auto_batch_job(target_filter, skip_processed=False, include_season_posters=False, replace_existing_season_posters=False):
+def _create_auto_batch_job(target_filter, skip_processed=False, include_season_posters=False, replace_existing_season_posters=False, item_ids=None):
     job_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
     job = {
@@ -188,6 +188,7 @@ def _create_auto_batch_job(target_filter, skip_processed=False, include_season_p
         'skip_processed': skip_processed,
         'include_season_posters': include_season_posters,
         'replace_existing_season_posters': replace_existing_season_posters,
+        'item_ids': item_ids or [],
         'status': 'starting',
         'phase': 'starting',
         'message': 'Starting automatic poster batch...',
@@ -1156,8 +1157,11 @@ def debug_tpdb_search():
         }), 500
 
 
-def _select_auto_batch_target_items(all_items, target_filter, skip_processed=False, library_id=''):
-    if target_filter == 'all':
+def _select_auto_batch_target_items(all_items, target_filter, skip_processed=False, library_id='', item_ids=None):
+    item_id_set = set(str(item_id) for item_id in (item_ids or []) if item_id)
+    if target_filter == 'queued':
+        target_items = [item for item in all_items if item.get('id') in item_id_set]
+    elif target_filter == 'all':
         target_items = all_items
     elif target_filter == 'no-poster':
         target_items = [item for item in all_items if not item.get('thumbnail_url')]
@@ -1246,7 +1250,7 @@ def _auto_search_and_upload_item(item, include_season_posters=False, replace_exi
     }
 
 
-def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id='', include_season_posters=False, replace_existing_season_posters=False):
+def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id='', include_season_posters=False, replace_existing_season_posters=False, item_ids=None):
     results = []
     successful_count = 0
     failed_count = 0
@@ -1273,7 +1277,7 @@ def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id=
         _update_auto_batch_job(job_id, phase='loading', message='Loading Jellyfin items...')
         all_items = get_jellyfin_items()
         target_items = _select_auto_batch_target_items(
-            all_items, target_filter, skip_processed=skip_processed, library_id=library_id
+            all_items, target_filter, skip_processed=skip_processed, library_id=library_id, item_ids=item_ids
         )
         total_items = len(target_items)
         _update_auto_batch_job(
@@ -1486,15 +1490,17 @@ def start_batch_auto_poster():
     library_id = data.get('library_id') or ''
     include_season_posters = bool(data.get('include_season_posters'))
     replace_existing_season_posters = bool(data.get('replace_existing_season_posters'))
+    item_ids = data.get('item_ids') if isinstance(data.get('item_ids'), list) else []
     job_id = _create_auto_batch_job(
         target_filter,
         skip_processed=skip_processed,
         include_season_posters=include_season_posters,
         replace_existing_season_posters=replace_existing_season_posters,
+        item_ids=item_ids,
     )
     worker = threading.Thread(
         target=_run_auto_batch_job,
-        args=(job_id, target_filter, skip_processed, library_id, include_season_posters, replace_existing_season_posters),
+        args=(job_id, target_filter, skip_processed, library_id, include_season_posters, replace_existing_season_posters, item_ids),
         daemon=True,
     )
     worker.start()
