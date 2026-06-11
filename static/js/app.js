@@ -286,6 +286,7 @@ function applyGridFilters(type = getCurrentContentFilter(), selectedLibrary = do
     if (type === 'series') domType = 'series';
 
     const items = document.querySelectorAll('.item-card-wrapper');
+    const visibleLibraryIds = new Set();
     let visibleCount = 0;
 
     items.forEach(item => {
@@ -296,15 +297,15 @@ function applyGridFilters(type = getCurrentContentFilter(), selectedLibrary = do
         const matchesStatus = matchesGridStatusFilters(item);
         const isVisible = matchesType && matchesLibrary && matchesStatus;
         item.classList.toggle('hidden', !isVisible);
-        if (isVisible) visibleCount++;
+        if (isVisible) {
+            visibleCount++;
+            visibleLibraryIds.add(itemLibrary);
+        }
     });
 
     document.querySelectorAll('.library-group-header').forEach(header => {
         const headerLibrary = header.getAttribute('data-library-id') || '';
-        const hasVisibleItems = Array.from(items).some(item =>
-            !item.classList.contains('hidden') && (item.getAttribute('data-library-id') || '') === headerLibrary
-        );
-        header.classList.toggle('hidden', !hasVisibleItems);
+        header.classList.toggle('hidden', !visibleLibraryIds.has(headerLibrary));
     });
 
     const visibleItemCount = document.getElementById('visibleItemCount');
@@ -336,7 +337,10 @@ function matchesGridStatusFilters(item) {
         locked: card?.classList.contains('protected-item') || protectedItemIds.has(itemId),
     };
 
-    return Array.from(activeGridStatusFilters).some(filter => Boolean(states[filter]));
+    for (const filter of activeGridStatusFilters) {
+        if (states[filter]) return true;
+    }
+    return false;
 }
 
 function setGridStatusFilter(checkbox) {
@@ -1921,7 +1925,7 @@ async function loadFailedItems(options = {}) {
         const items = data.items || [];
         activeFailedItemIds = new Set(items.map(item => item.item_id).filter(Boolean));
         activeFailedItemDetails = new Map(items.filter(item => item.item_id).map(item => [item.item_id, item]));
-        applyProcessedItemMarkers(activeProcessedItemDetails);
+        applyProcessedItemMarkers(activeProcessedItemDetails, { refreshFilters: false });
         applyFailedItemMarkers(activeFailedItemIds);
         failedItemsCount.textContent = items.length;
         const toolbarCount = document.getElementById('failedItemsToolbarCount');
@@ -2016,7 +2020,7 @@ async function loadProcessedItems() {
 
         const items = data.items || [];
         activeProcessedItemDetails = new Map(items.filter(item => item.item_id).map(item => [item.item_id, item]));
-        applyProcessedItemMarkers(activeProcessedItemDetails);
+        applyProcessedItemMarkers(activeProcessedItemDetails, { refreshFilters: false });
         applyFailedItemMarkers(activeFailedItemIds);
     } catch (error) {
         console.error('Processed items error:', error);
@@ -2071,7 +2075,7 @@ async function clearProcessedItemsByScope(itemIds = null) {
         } else {
             activeProcessedItemDetails = new Map();
         }
-        applyProcessedItemMarkers(activeProcessedItemDetails);
+        applyProcessedItemMarkers(activeProcessedItemDetails, { refreshFilters: false });
         applyFailedItemMarkers(activeFailedItemIds);
         showAlert(isVisibleOnly ? 'Visible processed items cleared' : 'Processed items cleared', 'success');
     } catch (error) {
@@ -2164,7 +2168,8 @@ function formatProcessedItemTooltip(detail) {
     return `${targetSummary}\nProcessed ${timestamp}`;
 }
 
-function applyProcessedItemMarkers(itemDetails) {
+function applyProcessedItemMarkers(itemDetails, options = {}) {
+    const refreshFilters = options.refreshFilters !== false;
     document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
         const itemId = wrapper.getAttribute('data-item-id');
         const card = wrapper.querySelector('.item-card');
@@ -2189,10 +2194,11 @@ function applyProcessedItemMarkers(itemDetails) {
             overlay.remove();
         }
     });
-    applyGridFilters();
+    if (refreshFilters) applyGridFilters();
 }
 
-function applyFailedItemMarkers(itemIds) {
+function applyFailedItemMarkers(itemIds, options = {}) {
+    const refreshFilters = options.refreshFilters !== false;
     document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
         const itemId = wrapper.getAttribute('data-item-id');
         const card = wrapper.querySelector('.item-card');
@@ -2225,7 +2231,7 @@ function applyFailedItemMarkers(itemIds) {
             overlay.remove();
         }
     });
-    applyGridFilters();
+    if (refreshFilters) applyGridFilters();
 }
 
 function applyAutoBatchResultMarkers(results = [], timestamp = null) {
@@ -2266,7 +2272,7 @@ function applyAutoBatchResultMarkers(results = [], timestamp = null) {
         }
     });
 
-    applyProcessedItemMarkers(activeProcessedItemDetails);
+    applyProcessedItemMarkers(activeProcessedItemDetails, { refreshFilters: false });
     applyFailedItemMarkers(activeFailedItemIds);
 }
 
@@ -2326,7 +2332,7 @@ async function clearFailedItems() {
         if (failedToolbarCount) failedToolbarCount.textContent = '0';
         activeFailedItemIds = new Set();
         activeFailedItemDetails = new Map();
-        applyFailedItemMarkers(activeFailedItemIds);
+        applyFailedItemMarkers(activeFailedItemIds, { refreshFilters: false });
         applyProcessedItemMarkers(activeProcessedItemDetails);
         failedItemsPanelVisible = false;
         if (failedItemsRow) failedItemsRow.style.display = 'none';
