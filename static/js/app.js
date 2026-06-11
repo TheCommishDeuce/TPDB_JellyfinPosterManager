@@ -441,18 +441,18 @@ function startPosterSearchProgress(itemType = '') {
     const startedAt = Date.now();
     const isSeries = itemType === 'Series';
     const steps = isSeries ? [
-        { at: 0, text: 'Searching TPDB for matching entries...' },
+        { at: 0, text: 'Searching TPDb for matching entries...' },
         { at: 5, text: 'Opening the best match and reading posters...' },
         { at: 10, text: 'Checking linked sets for matching season posters...' },
         { at: 18, text: 'Checking season-specific poster pages...' },
         { at: 25, text: 'Downloading poster previews...' },
-        { at: 40, text: 'Still working. TPDB is being checked gently to avoid rate limits...' }
+        { at: 40, text: 'Still working. TPDb is being checked gently to avoid rate limits...' }
     ] : [
-        { at: 0, text: 'Searching TPDB for matching entries...' },
+        { at: 0, text: 'Searching TPDb for matching entries...' },
         { at: 5, text: 'Opening the best match and reading movie posters...' },
         { at: 10, text: 'Reading poster details from the result page...' },
         { at: 18, text: 'Downloading poster previews...' },
-        { at: 35, text: 'Still working. TPDB is being checked gently to avoid rate limits...' }
+        { at: 35, text: 'Still working. TPDb is being checked gently to avoid rate limits...' }
     ];
 
     const update = () => {
@@ -634,7 +634,7 @@ function renderSinglePosterMetadata(poster) {
     const uploader = poster.uploader || 'Unknown uploader';
     const setCount = poster.set_poster_count;
     const setLink = poster.set_url
-        ? `<a href="${escapeHtml(poster.set_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">TPDB Set</a>`
+        ? `<a href="${escapeHtml(poster.set_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">TPDb Set</a>`
         : '';
     if (!uploader && !setCount && !setLink) return '';
 
@@ -664,7 +664,7 @@ function displayPosterGroups(item, groups, eligibleSeasons) {
                 <small class="text-muted">${escapeHtml(item.year || 'Unknown Year')} &bull; ${escapeHtml(item.type)}</small>
                 <small class="text-muted ms-3">
                     <i class="fas fa-layer-group me-1"></i>
-                    Found ${groups.length} TPDB result${groups.length !== 1 ? 's' : ''}
+                    Found ${groups.length} TPDb result${groups.length !== 1 ? 's' : ''}
                 </small>
             </div>
             <div class="btn-group btn-group-sm" role="group" aria-label="Poster display mode">
@@ -782,7 +782,7 @@ function renderUnloadedPosterSets(group, loadedSetIds = []) {
     return `
         <section class="poster-group poster-set-browser mb-4">
             <div class="poster-group-header mb-3">
-                <h6 class="mb-1">More TPDB Sets</h6>
+                <h6 class="mb-1">More TPDb Sets</h6>
                 <small class="text-muted">Load individual sets when you want to preview them.</small>
             </div>
             <div class="poster-set-browser-list">
@@ -795,7 +795,7 @@ function renderUnloadedPosterSets(group, loadedSetIds = []) {
                                 <small class="text-muted">
                                     ${escapeHtml(setInfo.set_poster_count || '?')} poster${String(setInfo.set_poster_count || '') === '1' ? '' : 's'}
                                     &bull;
-                                    <a href="${escapeHtml(setInfo.set_url)}" target="_blank" rel="noopener">TPDB Set</a>
+                                    <a href="${escapeHtml(setInfo.set_url)}" target="_blank" rel="noopener">TPDb Set</a>
                                 </small>
                             </div>
                             <button type="button" class="btn btn-sm btn-outline-primary load-poster-set-btn"
@@ -823,7 +823,7 @@ function renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex 
                         <i class="fas fa-user me-1"></i>${escapeHtml(metadata.uploader)}
                         ${metadata.setPosterCount ? ` &bull; <i class="fas fa-images me-1"></i>${escapeHtml(metadata.setPosterCount)} poster${String(metadata.setPosterCount) === '1' ? '' : 's'}` : ''}
                         ${coverageText ? ` &bull; <i class="fas fa-layer-group me-1"></i>${escapeHtml(coverageText)}` : ''}
-                        ${metadata.setUrl ? ` &bull; <a href="${escapeHtml(metadata.setUrl)}" target="_blank" rel="noopener">TPDB Set</a>` : ` &bull; ${escapeHtml(group.title || 'TPDB result')}`}
+                        ${metadata.setUrl ? ` &bull; <a href="${escapeHtml(metadata.setUrl)}" target="_blank" rel="noopener">TPDb Set</a>` : ` &bull; ${escapeHtml(group.title || 'TPDb result')}`}
                     </small>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-success select-poster-set-btn"
@@ -877,7 +877,7 @@ function renderPosterTargetSection(title, posters, targetType) {
     });
     const metadataText = Array.from(groups.values()).slice(0, 3).map(poster => {
         const sourceLink = poster.set_url
-            ? `<a href="${escapeHtml(poster.set_url)}" target="_blank" rel="noopener">TPDB Set</a>`
+            ? `<a href="${escapeHtml(poster.set_url)}" target="_blank" rel="noopener">TPDb Set</a>`
             : '';
         return `${escapeHtml(poster.uploader || 'Unknown uploader')}${poster.set_poster_count ? `, ${escapeHtml(poster.set_poster_count)} poster${String(poster.set_poster_count) === '1' ? '' : 's'}` : ''}${sourceLink ? `, ${sourceLink}` : ''}`;
     }).join(' &bull; ');
@@ -943,8 +943,8 @@ async function loadPosterSet(setUrl) {
         displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
         applyGroupedSelectionHighlight();
     } catch (error) {
-        console.error('Error loading TPDB set:', error);
-        showAlert('Failed to load TPDB set: ' + error.message, 'danger');
+        console.error('Error loading TPDb set:', error);
+        showAlert('Failed to load TPDb set: ' + error.message, 'danger');
         displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
     } finally {
         loadingPosterSetUrls.delete(setUrl);

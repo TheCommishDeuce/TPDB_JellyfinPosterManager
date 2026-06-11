@@ -29,7 +29,7 @@ class ConsoleFormatter(logging.Formatter):
         "Successfully uploaded poster for: ",
         "Searching posters for: ",
         "Processing item ",
-        "No TPDB search results for ",
+        "No TPDb search results for ",
         "Found 0 poster links for ",
     )
 
@@ -863,7 +863,7 @@ def get_item_posters(item_id):
             'can_browse_more_sets': item.get('type') == 'Series' and poster_set_limit < Config.MAX_POSTERS_PER_ITEM,
         })
     except TPDBRateLimited as e:
-        logging.warning(f"TPDB challenge/rate-limit for {item_id}: {e}")
+        logging.warning(f"TPDb challenge/rate-limit for {item_id}: {e}")
         return jsonify({'error': str(e), 'error_type': 'tpdb_rate_limited'}), 429
     except Exception as e:
         logging.error(f"Error getting posters for {item_id}: {e}")
@@ -1067,7 +1067,7 @@ def get_jellyfin_image():
 
 @app.route('/thumbnail')
 def get_thumbnail():
-    """Serve TPDB thumbnails with proper headers and caching"""
+    """Serve TPDb thumbnails with proper headers and caching"""
     thumbnail_url = request.args.get('url')
     if not thumbnail_url or thumbnail_url == 'None':
         return create_placeholder_thumbnail(), 200
@@ -1095,7 +1095,7 @@ def get_thumbnail():
         )
 
     except Exception as e:
-        logging.warning(f"Error fetching TPDB thumbnail {thumbnail_url}: {e}")
+        logging.warning(f"Error fetching TPDb thumbnail {thumbnail_url}: {e}")
         return create_placeholder_thumbnail(), 200
 
 @app.route('/health')
@@ -1126,7 +1126,7 @@ def health_check():
 @app.route('/debug/tpdb-search')
 def debug_tpdb_search():
     """
-    Debug endpoint for TPDB scraping without depending on a Jellyfin item.
+    Debug endpoint for TPDb scraping without depending on a Jellyfin item.
     Enabled only in DEBUG mode.
     """
     if not Config.DEBUG:
@@ -1279,19 +1279,19 @@ def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id=
     failed_count = 0
 
     try:
-        _update_auto_batch_job(job_id, status='running', phase='preparing', message='Preparing TPDB login...')
+        _update_auto_batch_job(job_id, status='running', phase='preparing', message='Preparing TPDb login...')
         try:
             if not selenium_driver:
                 setup_selenium_and_login()
-            logging.info("Selenium/TPDB login ready for auto-batch job.")
+            logging.info("Selenium/TPDb login ready for auto-batch job.")
         except Exception as e:
-            logging.error(f"Failed to setup Selenium/login to TPDB: {e}")
+            logging.error(f"Failed to setup Selenium/login to TPDb: {e}")
             _update_auto_batch_job(
                 job_id,
                 status='failed',
                 phase='failed',
-                message='Failed to login to TPDB',
-                error=f'Failed to login to TPDB: {str(e)}',
+                message='Failed to login to TPDb',
+                error=f'Failed to login to TPDb: {str(e)}',
                 done=True,
                 success=False,
             )
@@ -1427,12 +1427,12 @@ def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id=
                 )
             except TPDBRateLimited as e:
                 rate_limited_error = str(e)
-                logging.warning(f"TPDB rate-limit detected during batch job; aborting early: {rate_limited_error}")
+                logging.warning(f"TPDb rate-limit detected during batch job; aborting early: {rate_limited_error}")
                 result = {
                     'item_id': item_id,
                     'item_title': item_title,
                     'success': False,
-                    'error': f'Aborted due to TPDB rate limit: {rate_limited_error}',
+                    'error': f'Aborted due to TPDb rate limit: {rate_limited_error}',
                     'old_poster_url': old_poster_url,
                     'poster_url': None
                 }
@@ -1446,7 +1446,7 @@ def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id=
                     processed=i + 1,
                     failed=failed_count,
                     results=list(results),
-                    message='Batch aborted due to TPDB rate limit.',
+                    message='Batch aborted due to TPDb rate limit.',
                     error=result['error'],
                     done=True,
                     success=False,
@@ -1570,12 +1570,12 @@ def batch_auto_poster():
         try:
             if not selenium_driver:
                 setup_selenium_and_login()
-            logging.info("Selenium/TPDB login ready for auto-batch.")
+            logging.info("Selenium/TPDb login ready for auto-batch.")
         except Exception as e:
-            logging.error(f"Failed to setup Selenium/login to TPDB: {e}")
+            logging.error(f"Failed to setup Selenium/login to TPDb: {e}")
             return jsonify({
                 'success': False,
-                'error': f'Failed to login to TPDB: {str(e)}',
+                'error': f'Failed to login to TPDb: {str(e)}',
                 'results': [],
                 'total_items': 0,
                 'processed': 0,
@@ -1686,13 +1686,13 @@ def batch_auto_poster():
                     failed_count += 1
             except TPDBRateLimited as e:
                 rate_limited_error = str(e)
-                logging.warning(f"TPDB rate-limit detected during batch; aborting early: {rate_limited_error}")
-                _log_failed_item(item, f'Aborted due to TPDB rate limit: {rate_limited_error}', operation='auto-poster')
+                logging.warning(f"TPDb rate-limit detected during batch; aborting early: {rate_limited_error}")
+                _log_failed_item(item, f'Aborted due to TPDb rate limit: {rate_limited_error}', operation='auto-poster')
                 results.append({
                     'item_id': item.get('id', 'Unknown'),
                     'item_title': item.get('title', 'Unknown'),
                     'success': False,
-                    'error': f'Aborted due to TPDB rate limit: {rate_limited_error}',
+                    'error': f'Aborted due to TPDb rate limit: {rate_limited_error}',
                     'poster_url': None
                 })
                 failed_count += 1
@@ -1714,7 +1714,7 @@ def batch_auto_poster():
         if rate_limited_error:
             return jsonify({
                 'success': False,
-                'error': f'Batch aborted due to TPDB rate limit: {rate_limited_error}',
+                'error': f'Batch aborted due to TPDb rate limit: {rate_limited_error}',
                 'results': results,
                 'total_items': len(target_items),
                 'processed': len(results),
@@ -2030,7 +2030,7 @@ def background_setup():
         logging.error(f"Failed to perform background setup: {e}")
     finally:
         # Always release startup waiters. If Selenium login failed, routes can still
-        # attempt setup on demand and return a concrete TPDB error instead of permanent 503.
+        # attempt setup on demand and return a concrete TPDb error instead of permanent 503.
         selenium_ready_event.set()
 
 

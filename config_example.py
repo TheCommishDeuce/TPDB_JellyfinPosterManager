@@ -9,7 +9,7 @@ class Config:
     JELLYFIN_URL = ""
     JELLYFIN_API_KEY = ""
     
-    # TPDB Configuration
+    # TPDb Configuration
     TPDB_BASE_URL = "https://theposterdb.com"
     TPDB_SEARCH_URL_TEMPLATE = "https://theposterdb.com/search?term={query}"
     TPDB_EMAIL = ""
