@@ -603,6 +603,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
                                 loading="lazy"
                                 style="${!poster.base64 ? 'display: none;' : ''}">
                         </div>
+                        ${renderSinglePosterMetadata(poster)}
                     </div>
                 </div>
             `;
@@ -613,6 +614,30 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
     }
 
     if (posterModal) posterModal.show();
+}
+
+function renderSinglePosterMetadata(poster) {
+    const uploader = poster.uploader || 'Unknown uploader';
+    const setCount = poster.set_poster_count;
+    const setLink = poster.set_url
+        ? `<a href="${escapeHtml(poster.set_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">TPDB Set</a>`
+        : '';
+    if (!uploader && !setCount && !setLink) return '';
+
+    return `
+        <div class="poster-card-meta">
+            <div class="text-truncate" title="${escapeHtml(uploader)}">
+                <i class="fas fa-user me-1"></i>${escapeHtml(uploader)}
+            </div>
+            ${(setCount || setLink) ? `
+                <small class="text-muted">
+                    ${setCount ? `<i class="fas fa-images me-1"></i>${escapeHtml(setCount)} poster${String(setCount) === '1' ? '' : 's'}` : ''}
+                    ${setCount && setLink ? ' &bull; ' : ''}
+                    ${setLink}
+                </small>
+            ` : ''}
+        </div>
+    `;
 }
 
 function displayPosterGroups(item, groups, eligibleSeasons) {
