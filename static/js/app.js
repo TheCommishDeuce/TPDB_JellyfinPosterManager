@@ -143,7 +143,7 @@ let autoBatchPollTimer = null;
 let currentAutoBatchJobId = null;
 let autoBatchStartedAt = null;
 let latestAutoBatchJob = null;
-let manualSelectionVisible = false;
+let activeGridStatusFilters = new Set();
 let manualQueueIds = new Set();
 let manualQueueOrder = [];
 let manualQueueResults = new Map();
@@ -214,47 +214,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Filter and Sort Functions
 function filterContent(type, updateUrl = true) {
-    let domType = type;
-    if (type === 'movies') domType = 'movie';
-    if (type === 'series') domType = 'series';
-
-    const items = document.querySelectorAll('.item-card-wrapper');
     const selectedLibrary = document.getElementById('libraryFilter')?.value || '';
-    let visibleCount = 0;
-
-    items.forEach(item => {
-        const itemType = item.getAttribute('data-type');
-        const itemLibrary = item.getAttribute('data-library-id') || '';
-        const matchesType = type === 'all' || itemType === domType;
-        const matchesLibrary = !selectedLibrary || itemLibrary === selectedLibrary;
-        if (matchesType && matchesLibrary) {
-            item.classList.remove('hidden');
-            visibleCount++;
-        } else {
-            item.classList.add('hidden');
-        }
-    });
-
-    document.querySelectorAll('.library-group-header').forEach(header => {
-        const headerLibrary = header.getAttribute('data-library-id') || '';
-        const hasVisibleItems = Array.from(items).some(item =>
-            !item.classList.contains('hidden') && (item.getAttribute('data-library-id') || '') === headerLibrary
-        );
-        header.classList.toggle('hidden', !hasVisibleItems);
-    });
-
-    const visibleItemCount = document.getElementById('visibleItemCount');
-    if (visibleItemCount) visibleItemCount.textContent = visibleCount;
-
-    const itemCountTotalText = document.getElementById('itemCountTotalText');
-    const allItemCount = Number(document.getElementById('allItemCount')?.dataset.count || items.length);
-    if (itemCountTotalText) {
-        itemCountTotalText.innerHTML = type === 'all' && !selectedLibrary ? '' : ` of <strong>${allItemCount}</strong>`;
-    }
 
     const filterId = type === 'movies' ? 'filterMovies' : type === 'series' ? 'filterSeries' : 'filterAll';
     const filterInput = document.getElementById(filterId);
     if (filterInput) filterInput.checked = true;
+    applyGridFilters(type, selectedLibrary);
 
     if (!updateUrl) return;
 
@@ -271,14 +236,88 @@ function filterContent(type, updateUrl = true) {
     }
     url.hash = '';
     window.history.pushState({}, '', url);
-    applyProcessedItemMarkers(activeProcessedItemDetails);
-    applyFailedItemMarkers(activeFailedItemIds);
+}
+
+function applyGridFilters(type = getCurrentContentFilter(), selectedLibrary = document.getElementById('libraryFilter')?.value || '') {
+    let domType = type;
+    if (type === 'movies') domType = 'movie';
+    if (type === 'series') domType = 'series';
+
+    const items = document.querySelectorAll('.item-card-wrapper');
+    let visibleCount = 0;
+
+    items.forEach(item => {
+        const itemType = item.getAttribute('data-type');
+        const itemLibrary = item.getAttribute('data-library-id') || '';
+        const matchesType = type === 'all' || itemType === domType;
+        const matchesLibrary = !selectedLibrary || itemLibrary === selectedLibrary;
+        const matchesStatus = matchesGridStatusFilters(item);
+        const isVisible = matchesType && matchesLibrary && matchesStatus;
+        item.classList.toggle('hidden', !isVisible);
+        if (isVisible) visibleCount++;
+    });
+
+    document.querySelectorAll('.library-group-header').forEach(header => {
+        const headerLibrary = header.getAttribute('data-library-id') || '';
+        const hasVisibleItems = Array.from(items).some(item =>
+            !item.classList.contains('hidden') && (item.getAttribute('data-library-id') || '') === headerLibrary
+        );
+        header.classList.toggle('hidden', !hasVisibleItems);
+    });
+
+    const visibleItemCount = document.getElementById('visibleItemCount');
+    if (visibleItemCount) visibleItemCount.textContent = visibleCount;
+
+    const itemCountTotalText = document.getElementById('itemCountTotalText');
+    const allItemCount = Number(document.getElementById('allItemCount')?.dataset.count || items.length);
+    if (itemCountTotalText) {
+        itemCountTotalText.innerHTML = type === 'all' && !selectedLibrary && activeGridStatusFilters.size === 0 ? '' : ` of <strong>${allItemCount}</strong>`;
+    }
+
+    updateFilterToolbarState();
+}
+
+function getCurrentContentFilter() {
+    const currentType = document.querySelector('input[name="contentFilter"]:checked')?.id;
+    return currentType === 'filterMovies' ? 'movies' : currentType === 'filterSeries' ? 'series' : 'all';
+}
+
+function matchesGridStatusFilters(item) {
+    if (activeGridStatusFilters.size === 0) return true;
+
+    const itemId = item.getAttribute('data-item-id');
+    const card = item.querySelector('.item-card');
+    const states = {
+        processed: card?.classList.contains('processed-item'),
+        failed: card?.classList.contains('failed-item'),
+        queued: item.classList.contains('manual-queued') || Boolean(selectedPosters[itemId]) || manualQueueSelectionIds.has(itemId),
+        locked: card?.classList.contains('protected-item') || protectedItemIds.has(itemId),
+    };
+
+    return Array.from(activeGridStatusFilters).some(filter => Boolean(states[filter]));
+}
+
+function setGridStatusFilter(checkbox) {
+    if (checkbox.checked) activeGridStatusFilters.add(checkbox.value);
+    else activeGridStatusFilters.delete(checkbox.value);
+    applyGridFilters();
+}
+
+function clearGridStatusFilters() {
+    activeGridStatusFilters.clear();
+    document.querySelectorAll('.grid-status-filter').forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    applyGridFilters();
+}
+
+function updateFilterToolbarState() {
+    const filterBtn = document.getElementById('filterDropdownBtn');
+    if (filterBtn) filterBtn.classList.toggle('active', activeGridStatusFilters.size > 0);
 }
 
 function filterLibrary() {
-    const currentType = document.querySelector('input[name="contentFilter"]:checked')?.id;
-    const type = currentType === 'filterMovies' ? 'movies' : currentType === 'filterSeries' ? 'series' : 'all';
-    filterContent(type);
+    filterContent(getCurrentContentFilter());
 }
 
 function sortContent(sortBy) {
@@ -1039,6 +1078,7 @@ function setManualQueueUploadState(itemId, queuedForUpload) {
     label.innerHTML = queuedForUpload
         ? '<i class="fas fa-clock me-1"></i>Queued for Upload'
         : '<i class="fas fa-list-check me-1"></i>Queue';
+    applyGridFilters();
 }
 
 async function queueCurrentPosterSelection() {
@@ -1307,7 +1347,7 @@ function updateLastResultsButton() {
     if (!button) return;
 
     const hasResults = Boolean(latestAutoBatchJob?.results?.length);
-    button.style.display = hasResults ? 'inline-block' : 'none';
+    button.disabled = !hasResults;
 }
 
 async function loadLatestAutoBatchResults() {
@@ -1383,7 +1423,6 @@ function updateUploadAllButton() {
     const uploadActionCount = document.getElementById('manualUploadActionCount');
     const queueCountSpan = document.getElementById('manualQueueCount');
     const selectedCountSpan = document.getElementById('selectedCount');
-    const toolbarCount = document.getElementById('manualSelectionToolbarCount');
     const selectedCount = Object.keys(selectedPosters).length;
     const queuedCount = manualQueueIds.size;
 
@@ -1391,7 +1430,6 @@ function updateUploadAllButton() {
     if (queueActionCount) queueActionCount.textContent = queuedCount;
     if (selectedCountSpan) selectedCountSpan.textContent = selectedCount;
     if (uploadActionCount) uploadActionCount.textContent = selectedCount;
-    if (toolbarCount) toolbarCount.textContent = selectedCount + queuedCount;
 
     if (queueBtn) {
         queueBtn.disabled = queuedCount === 0 && !manualQueueActive;
@@ -1416,21 +1454,8 @@ function updateUploadAllButton() {
 
 function updateManualSelectionVisibility() {
     const manualRow = document.getElementById('manualSelectionRow');
-    const toolbarBtn = document.getElementById('manualSelectionToolbarBtn');
-    const selectedCount = Object.keys(selectedPosters).length;
-    const queuedCount = manualQueueIds.size;
-    const isActive = selectedCount > 0 || queuedCount > 0 || manualQueueActive || manualSelectionVisible;
 
     if (manualRow) manualRow.style.display = '';
-    if (toolbarBtn) {
-        toolbarBtn.classList.toggle('active', isActive);
-        toolbarBtn.setAttribute('aria-expanded', 'true');
-    }
-}
-
-function toggleManualSelectionPanel() {
-    manualSelectionVisible = !manualSelectionVisible;
-    updateManualSelectionVisibility();
 }
 
 function initManualQueueControls() {
@@ -1483,6 +1508,7 @@ async function toggleManualQueueItem(checkbox) {
     }
 
     updateUploadAllButton();
+    applyGridFilters();
 }
 
 function setManualQueueItemQueued(itemId, queued) {
@@ -1492,6 +1518,7 @@ function setManualQueueItemQueued(itemId, queued) {
     wrapper?.classList.toggle('manual-queued', queued);
     if (queued) manualQueueIds.add(itemId);
     else manualQueueIds.delete(itemId);
+    applyGridFilters();
 }
 
 function isPosterModalOpen() {
@@ -1863,6 +1890,7 @@ function applyProtectedItemMarkers() {
         button.setAttribute('aria-label', isProtected ? 'Remove Auto-Get protection' : 'Protect from Auto-Get');
         button.innerHTML = isProtected ? '<i class="fas fa-lock"></i>' : '<i class="fas fa-lock-open"></i>';
     });
+    applyGridFilters();
 }
 
 async function toggleProtectedItem(itemId, button) {
@@ -1937,6 +1965,7 @@ function applyProcessedItemMarkers(itemDetails) {
             overlay.remove();
         }
     });
+    applyGridFilters();
 }
 
 function applyFailedItemMarkers(itemIds) {
@@ -1972,6 +2001,7 @@ function applyFailedItemMarkers(itemIds) {
             overlay.remove();
         }
     });
+    applyGridFilters();
 }
 
 function applyAutoBatchResultMarkers(results = [], timestamp = null) {

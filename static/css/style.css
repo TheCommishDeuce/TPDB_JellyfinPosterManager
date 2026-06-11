@@ -71,6 +71,14 @@ body {
 .btn-danger  { background: linear-gradient(135deg, var(--danger-color) 0%, #c82333 100%); color: #fff; }
 .btn-outline-secondary { border: 1px solid var(--border-color); color: var(--muted-color); background: transparent; }
 .btn-outline-secondary:hover { background-color: var(--muted-color); border-color: var(--muted-color); color: white; }
+.btn-outline-secondary.active,
+.btn-outline-secondary:active,
+.btn-outline-secondary.show,
+.show > .btn-outline-secondary.dropdown-toggle {
+    background-color: rgba(0, 123, 255, 0.12);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
 .btn-queue-upload { border: 1px solid var(--warning-color); color: var(--warning-color); background: transparent; }
 .btn-queue-upload:hover, .btn-queue-upload:focus { background: var(--warning-color); border-color: var(--warning-color); color: #111; }
 .btn-queue-upload:disabled { border-color: var(--border-color); color: var(--muted-color); background: transparent; opacity: 0.65; }
@@ -125,10 +133,6 @@ body {
 
 /* Selected counter */
 #selectedCount { font-weight: 600; color: var(--primary-color); }
-#manualSelectionToolbarBtn.active #manualSelectionToolbarCount {
-    background-color: var(--primary-color) !important;
-    color: #fff;
-}
 .manual-action-btn { min-width: 3.5rem; }
 .manual-action-btn .badge { min-width: 1.4rem; }
 
@@ -184,6 +188,7 @@ body {
 .dropdown-menu { z-index: 1060; background: var(--surface); color: var(--app-text); border: 1px solid var(--border-color); }
 .dropdown-item { color: var(--app-text); }
 .dropdown-item:hover, .dropdown-item:focus { background: var(--surface-muted); color: var(--app-text); }
+.grid-filter-menu { min-width: 280px; padding: 1rem; }
 .form-select {
     background-color: var(--surface);
     color: var(--app-text);

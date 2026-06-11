@@ -64,7 +64,7 @@
         <div class="card automatic-batch-card">
             <div class="card-body py-3">
                 <div class="row align-items-center">
-                    <div class="col-md-8">
+                    <div class="col-md-4">
                         <h5 class="mb-0">
                             <i class="fas fa-magic me-2"></i>Automatic Selection
                         </h5>
@@ -72,11 +72,8 @@
                             Automatically find and upload the first available poster for items
                         </small>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-8">
                         <div class="d-flex flex-wrap align-items-center justify-content-md-end gap-2">
-                            <button class="btn btn-outline-secondary" type="button" id="lastAutoBatchResultsBtn" onclick="showLastAutoBatchResults()" style="display: none;">
-                                <i class="fas fa-clock-rotate-left me-1"></i>Last Results
-                            </button>
                             <button class="btn btn-outline-danger" type="button" id="cancelAutoBatchBtn" onclick="cancelAutoBatch()" style="display: none;">
                                 <i class="fas fa-stop me-1"></i>Cancel
                             </button>
@@ -114,6 +111,9 @@
                                     </li>
                                 </ul>
                             </div>
+                            <button class="btn btn-outline-secondary" type="button" id="lastAutoBatchResultsBtn" onclick="showLastAutoBatchResults()" title="Last Results" aria-label="Last Results" disabled>
+                                <i class="fas fa-clock-rotate-left"></i>
+                            </button>
                             <div class="dropdown">
                                 <button type="button" class="btn btn-outline-secondary"
                                         data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
@@ -279,16 +279,40 @@
 <!-- Grid Tools -->
 <div class="row mb-3">
     <div class="col-12 d-flex flex-wrap justify-content-end gap-2">
-        <button class="btn btn-outline-secondary btn-sm" type="button" id="manualSelectionToolbarBtn" onclick="toggleManualSelectionPanel()" aria-expanded="false">
-            <i class="fas fa-tasks me-1"></i>
-            Manual
-            <span class="badge bg-secondary ms-1" id="manualSelectionToolbarCount">0</span>
-        </button>
         <button class="btn btn-outline-secondary btn-sm" type="button" id="failedItemsToolbarBtn" onclick="toggleFailedItemsFromToolbar()" aria-expanded="false">
             <i class="fas fa-triangle-exclamation me-1"></i>
             Failed
             <span class="badge bg-danger ms-1" id="failedItemsToolbarCount">0</span>
         </button>
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
+                    id="filterDropdownBtn" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" data-bs-boundary="viewport">
+                <i class="fas fa-filter me-1"></i>
+                Filter
+            </button>
+            <div class="dropdown-menu dropdown-menu-end grid-filter-menu" aria-labelledby="filterDropdownBtn">
+                <div class="small text-muted mb-2">Status</div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input grid-status-filter" type="checkbox" value="processed" id="filterProcessed" onchange="setGridStatusFilter(this)">
+                    <label class="form-check-label" for="filterProcessed">Processed</label>
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input grid-status-filter" type="checkbox" value="failed" id="filterFailed" onchange="setGridStatusFilter(this)">
+                    <label class="form-check-label" for="filterFailed">Failed</label>
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input grid-status-filter" type="checkbox" value="queued" id="filterQueued" onchange="setGridStatusFilter(this)">
+                    <label class="form-check-label" for="filterQueued">Queued</label>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input grid-status-filter" type="checkbox" value="locked" id="filterLocked" onchange="setGridStatusFilter(this)">
+                    <label class="form-check-label" for="filterLocked">Locked</label>
+                </div>
+                <button class="btn btn-outline-secondary btn-sm w-100" type="button" onclick="clearGridStatusFilters()">
+                    Clear filters
+                </button>
+            </div>
+        </div>
         <div class="dropdown">
             <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
                     id="sortDropdownBtn" data-bs-toggle="dropdown" aria-expanded="false" data-bs-boundary="viewport">
