@@ -774,14 +774,19 @@ function renderUnloadedPosterSets(group, loadedSetIds = []) {
 
 function renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex = null, setId = null) {
     const posters = setPosters.map(entry => entry.poster);
-    const uploader = getPosterSetUploader(posters);
-    const setUrl = posters.find(poster => poster.set_url)?.set_url;
+    const metadata = getPosterSetMetadata(group, posters, setId);
+    const coverageText = getPosterSetCoverageText(setPosters, group);
     let html = `
         <section class="poster-group poster-set-group mb-4">
             <div class="poster-group-header d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                 <div>
-                    <h6 class="mb-1">Set ${displayGroupNumber}${uploader ? ` <span class="text-muted">(uploader: ${escapeHtml(uploader)})</span>` : ''}</h6>
-                    <small class="text-muted">${setUrl ? `<a href="${escapeHtml(setUrl)}" target="_blank" rel="noopener">TPDB Set</a>` : escapeHtml(group.title || 'TPDB result')}</small>
+                    <h6 class="mb-1">Set ${displayGroupNumber}</h6>
+                    <small class="text-muted">
+                        <i class="fas fa-user me-1"></i>${escapeHtml(metadata.uploader)}
+                        ${metadata.setPosterCount ? ` &bull; <i class="fas fa-images me-1"></i>${escapeHtml(metadata.setPosterCount)} poster${String(metadata.setPosterCount) === '1' ? '' : 's'}` : ''}
+                        ${coverageText ? ` &bull; <i class="fas fa-layer-group me-1"></i>${escapeHtml(coverageText)}` : ''}
+                        ${metadata.setUrl ? ` &bull; <a href="${escapeHtml(metadata.setUrl)}" target="_blank" rel="noopener">TPDB Set</a>` : ` &bull; ${escapeHtml(group.title || 'TPDB result')}`}
+                    </small>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-success select-poster-set-btn"
                     data-group-id="${escapeHtml(group.id)}"
@@ -827,10 +832,22 @@ function renderPosterGroupsByTarget(groups, eligibleSeasons) {
 
 function renderPosterTargetSection(title, posters, targetType) {
     if (!posters.length) return '';
+    const groups = new Map();
+    posters.forEach(poster => {
+        const key = poster.group_id || poster.id;
+        if (!groups.has(key)) groups.set(key, poster);
+    });
+    const metadataText = Array.from(groups.values()).slice(0, 3).map(poster => {
+        const sourceLink = poster.set_url
+            ? `<a href="${escapeHtml(poster.set_url)}" target="_blank" rel="noopener">TPDB Set</a>`
+            : '';
+        return `${escapeHtml(poster.uploader || 'Unknown uploader')}${poster.set_poster_count ? `, ${escapeHtml(poster.set_poster_count)} poster${String(poster.set_poster_count) === '1' ? '' : 's'}` : ''}${sourceLink ? `, ${sourceLink}` : ''}`;
+    }).join(' &bull; ');
     let html = `
         <section class="poster-group poster-target-section mb-4">
             <div class="poster-group-header mb-3">
-                <h6 class="mb-0">${escapeHtml(title)}</h6>
+                <h6 class="mb-1">${escapeHtml(title)}</h6>
+                <small class="text-muted">${metadataText || `${posters.length} poster${posters.length === 1 ? '' : 's'}`}</small>
             </div>
             <div class="row">
     `;
@@ -843,6 +860,29 @@ function renderPosterTargetSection(title, posters, targetType) {
 function getPosterSetUploader(posters) {
     const posterWithUploader = posters.find(poster => poster.uploader && poster.uploader !== 'Unknown');
     return posterWithUploader?.uploader || '';
+}
+
+function getPosterSetMetadata(group, posters, setId = null) {
+    const matchingAvailableSet = (group.available_sets || []).find(setInfo => {
+        return setId && String(setInfo.set_id || '') === String(setId);
+    });
+    const posterWithSet = posters.find(poster => poster.set_url || poster.set_poster_count || poster.uploader);
+    return {
+        uploader: getPosterSetUploader(posters) || matchingAvailableSet?.uploader || 'Unknown uploader',
+        setPosterCount: posterWithSet?.set_poster_count || matchingAvailableSet?.set_poster_count || '',
+        setUrl: posterWithSet?.set_url || matchingAvailableSet?.set_url || '',
+    };
+}
+
+function getPosterSetCoverageText(setPosters, group) {
+    const seasonTargets = new Set(
+        setPosters
+            .filter(entry => entry.targetType === 'season' && entry.poster?.season_id)
+            .map(entry => entry.poster.season_id)
+    );
+    const eligibleCount = Number(group.eligible_season_count || currentPosterEligibleSeasons.length || 0);
+    if (!eligibleCount) return '';
+    return `${seasonTargets.size}/${eligibleCount} seasons`;
 }
 
 function setPosterGroupDisplayMode(mode) {
