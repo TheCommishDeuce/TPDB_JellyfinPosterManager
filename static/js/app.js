@@ -433,19 +433,26 @@ function sortContent(sortBy) {
     window.location.href = url.toString();
 }
 
-function startPosterSearchProgress() {
+function startPosterSearchProgress(itemType = '') {
     stopPosterSearchProgress();
 
     const loadingText = document.getElementById('loadingText');
     const loadingSubtext = document.getElementById('loadingSubtext');
     const startedAt = Date.now();
-    const steps = [
+    const isSeries = itemType === 'Series';
+    const steps = isSeries ? [
         { at: 0, text: 'Searching TPDB for matching entries...' },
         { at: 5, text: 'Opening the best match and reading posters...' },
         { at: 10, text: 'Checking linked sets for matching season posters...' },
         { at: 18, text: 'Checking season-specific poster pages...' },
         { at: 25, text: 'Downloading poster previews...' },
         { at: 40, text: 'Still working. TPDB is being checked gently to avoid rate limits...' }
+    ] : [
+        { at: 0, text: 'Searching TPDB for matching entries...' },
+        { at: 5, text: 'Opening the best match and reading movie posters...' },
+        { at: 10, text: 'Reading poster details from the result page...' },
+        { at: 18, text: 'Downloading poster previews...' },
+        { at: 35, text: 'Still working. TPDB is being checked gently to avoid rate limits...' }
     ];
 
     const update = () => {
@@ -479,7 +486,8 @@ async function fetchPostersForItem(itemId, setLimit = 3) {
 // Load posters for item
 async function loadPosters(itemId, setLimit = 3) {
     preparePosterSearchForItem(itemId, setLimit);
-    startPosterSearchProgress();
+    const itemType = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`)?.getAttribute('data-type') === 'series' ? 'Series' : 'Movie';
+    startPosterSearchProgress(itemType);
     if (loadingModal) loadingModal.show();
 
     try {
