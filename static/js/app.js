@@ -403,7 +403,9 @@ async function showSeasonPosters(itemId) {
 }
 
 function renderSeasonPosterCard(season) {
-    const title = season.title || (season.is_special ? 'Specials' : `Season ${season.number ?? ''}`);
+    const defaultLabel = season.is_special ? 'Specials' : `Season ${season.number ?? '-'}`;
+    const title = season.title || defaultLabel;
+    const showDefaultLabel = defaultLabel.trim().toLowerCase() !== title.trim().toLowerCase();
     const posterHtml = season.thumbnail_url
         ? `<img src="/jellyfin-image?url=${encodeURIComponent(season.thumbnail_url)}" alt="${escapeHtml(title)} poster">`
         : '<div class="text-center px-2"><i class="fas fa-image fa-2x mb-2 d-block"></i><small>No poster</small></div>';
@@ -414,7 +416,7 @@ function renderSeasonPosterCard(season) {
             <div class="season-poster-frame">${posterHtml}</div>
             <div class="season-poster-meta">
                 <div class="fw-semibold text-truncate" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
-                <small class="text-muted d-block">${season.is_special ? 'Specials' : `Season ${season.number ?? '-'}`}</small>
+                ${showDefaultLabel ? `<small class="text-muted d-block">${escapeHtml(defaultLabel)}</small>` : ''}
                 <span class="badge ${statusClass} mt-2">${statusText}</span>
             </div>
         </article>
