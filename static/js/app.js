@@ -2158,7 +2158,7 @@ function applyProcessedItemMarkers(itemDetails) {
 
         if (isProcessed && overlay) {
             overlay.title = formatProcessedItemTooltip(detail);
-            overlay.innerHTML = '<span class="badge bg-success"><i class="fas fa-check me-1"></i>Processed</span>';
+            overlay.innerHTML = '<span class="badge bg-success"><i class="fas fa-check"></i></span>';
         } else if (!isProcessed && overlay) {
             overlay.remove();
         }
@@ -2194,7 +2194,7 @@ function applyFailedItemMarkers(itemIds) {
             const reason = detail?.error || 'Unknown failure';
             const timestamp = formatLogTimestamp(detail?.timestamp);
             overlay.title = `Failed ${timestamp}\n${reason}`;
-            overlay.innerHTML = '<span class="badge bg-danger"><i class="fas fa-triangle-exclamation me-1"></i>Failed</span>';
+            overlay.innerHTML = '<span class="badge bg-danger"><i class="fas fa-triangle-exclamation"></i></span>';
         } else if (!isFailed && overlay) {
             overlay.remove();
         }
