@@ -2036,7 +2036,7 @@ def background_setup():
 
 if __name__ == '__main__':
     host = '0.0.0.0'
-    port = 5001
+    port = int(getattr(Config, 'WEB_PORT', 5001))
 
     setup_thread = threading.Thread(target=background_setup, daemon=True)
     setup_thread.start()

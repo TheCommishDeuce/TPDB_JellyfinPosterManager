@@ -23,6 +23,9 @@ from config import Config
 import logging
 from requests.exceptions import ChunkedEncodingError, ConnectionError
 
+if Config.JELLYFIN_URL:
+    Config.JELLYFIN_URL = Config.JELLYFIN_URL.rstrip('/')
+
 # Global Selenium driver
 selenium_driver = None
 selenium_lock = threading.RLock()
