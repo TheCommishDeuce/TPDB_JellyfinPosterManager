@@ -954,6 +954,9 @@ async function loadPosterSet(setUrl) {
 }
 
 function mergePosterGroups(newGroups) {
+    const nextPosterId = getHighestPosterId(posterSearchGroups) + 1;
+    reassignPosterIds(newGroups || [], nextPosterId);
+
     (newGroups || []).forEach(newGroup => {
         const existingGroup = findPosterGroup(newGroup.id);
         if (!existingGroup) {
@@ -967,6 +970,27 @@ function mergePosterGroups(newGroups) {
         existingGroup.covered_season_count = Math.max(existingGroup.covered_season_count || 0, newGroup.covered_season_count || 0);
         existingGroup.covered_season_keys = [...new Set([...(existingGroup.covered_season_keys || []), ...(newGroup.covered_season_keys || [])])];
     });
+}
+
+function getHighestPosterId(groups) {
+    let highestId = 0;
+    (groups || []).forEach(group => {
+        [...(group.show_posters || []), ...(group.season_posters || [])].forEach(poster => {
+            const numericId = Number(poster?.id);
+            if (Number.isFinite(numericId)) highestId = Math.max(highestId, numericId);
+        });
+    });
+    return highestId;
+}
+
+function reassignPosterIds(groups, nextPosterId) {
+    (groups || []).forEach(group => {
+        [...(group.show_posters || []), ...(group.season_posters || [])].forEach(poster => {
+            poster.id = nextPosterId;
+            nextPosterId += 1;
+        });
+    });
+    return nextPosterId;
 }
 
 function mergePostersByUrl(existingPosters, newPosters) {
