@@ -856,7 +856,7 @@ function renderUnloadedPosterSets(group, loadedSetIds = [], inlineLoadedSetIds =
                     if (inlineLoadedSetIds.has(setId)) {
                         const setPosters = getPosterEntriesForSet(group, setId, seasonLists);
                         return setPosters.length
-                            ? renderPosterSetSection(group, setPosters, null, null, setId)
+                            ? renderPosterSetSection(group, setPosters, null, null, setId, true)
                             : '';
                     }
 
@@ -914,12 +914,12 @@ function getPosterEntriesForSet(group, setId, seasonLists) {
     return setPosters;
 }
 
-function renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex = null, setId = null) {
+function renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex = null, setId = null, compact = false) {
     const posters = setPosters.map(entry => entry.poster);
     const metadata = getPosterSetMetadata(group, posters, setId);
     const coverageText = getPosterSetCoverageText(setPosters, group);
     let html = `
-        <section class="poster-group poster-set-group mb-4">
+        <section class="poster-group poster-set-group ${compact ? 'poster-set-group-compact' : ''} mb-4">
             <div class="poster-group-header d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                 <div>
                     <small class="text-muted">

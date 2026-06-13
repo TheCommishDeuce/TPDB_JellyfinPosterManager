@@ -196,14 +196,29 @@ body {
     background: var(--surface-muted);
     border: 1px solid var(--border-color);
     border-radius: 4px;
-    flex: 0 0 44px;
-    height: 66px;
+    flex: 0 0 56px;
+    height: 84px;
     object-fit: cover;
 }
 .poster-set-browser-preview-empty {
     align-items: center;
     display: flex;
     justify-content: center;
+}
+.poster-set-group-compact {
+    padding: 0.75rem;
+    margin-bottom: 0 !important;
+}
+.poster-set-group-compact .poster-group-header {
+    margin-bottom: 0.75rem !important;
+    padding-bottom: 0.5rem;
+}
+.poster-set-group-compact .row {
+    --bs-gutter-x: 0.75rem;
+    --bs-gutter-y: 0.75rem;
+}
+.poster-set-group-compact .grouped-poster-option .poster-target-label {
+    padding: 0.25rem 0.35rem;
 }
 .poster-target-label { padding: 0.35rem 0.5rem; font-size: 0.8rem; color: var(--muted-color); text-align: center; border-top: 1px solid var(--border-color); }
 .season-poster-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
