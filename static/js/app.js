@@ -1433,6 +1433,7 @@ async function uploadAllSelected() {
     const uploadBtn = document.getElementById('uploadAllBtn');
     if (uploadBtn) {
         uploadBtn.disabled = true;
+        uploadBtn.classList.add('is-expanded');
         uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading...';
     }
 
@@ -1472,6 +1473,7 @@ async function uploadAllSelected() {
     } finally {
         if (uploadBtn) {
             uploadBtn.disabled = false;
+            uploadBtn.classList.remove('is-expanded');
             uploadBtn.innerHTML = '<i class="fas fa-cloud-upload-alt me-2"></i>Upload All Selected';
         }
         updateUploadAllButton();

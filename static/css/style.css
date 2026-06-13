@@ -137,7 +137,8 @@ body {
 #selectedCount { font-weight: 600; color: var(--primary-color); }
 .manual-action-btn { min-width: 3.5rem; }
 .manual-action-btn .badge { min-width: 1.4rem; }
-#uploadAllBtn { width: 105px; }
+#uploadAllBtn { width: 105px; white-space: nowrap; }
+#uploadAllBtn.is-expanded { width: auto; min-width: 150px; }
 
 /* Automatic-batch */
 .automatic-batch-progress {
