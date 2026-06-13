@@ -520,6 +520,7 @@ def _poster_dict(poster_id, poster_url, base64_image=None, target_type="series",
         'set_url': metadata.get('set_url'),
         'set_poster_count': metadata.get('set_poster_count'),
         'tpdb_poster_id': metadata.get('tpdb_poster_id'),
+        'source_url': metadata.get('source_url'),
     }
     if season:
         poster.update({
@@ -749,6 +750,7 @@ def search_tpdb_for_poster_groups(
                                 continue
 
                             metadata = _extract_tpdb_card_metadata(poster_link)
+                            metadata['source_url'] = candidate['url']
                             set_url = metadata.get('set_url')
                             if set_url and set_url not in discovered_set_lookup:
                                 discovered_set_order[set_url] = len(discovered_set_urls)
@@ -819,6 +821,7 @@ def search_tpdb_for_poster_groups(
                                         continue
 
                                     metadata = _extract_tpdb_card_metadata(poster_link)
+                                    metadata['source_url'] = candidate['url']
                                     season_key = _extract_tpdb_season_key(poster_link)
                                     poster_type = (metadata.get('tpdb_poster_type') or '').lower()
                                     if season_key and season_key in season_by_key:
@@ -898,6 +901,7 @@ def search_tpdb_for_poster_groups(
                                     continue
 
                                 metadata = _extract_tpdb_card_metadata(poster_link)
+                                metadata['source_url'] = candidate['url']
                                 base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
                                 group['season_posters'].append(_poster_dict(
                                     poster_id,

@@ -586,8 +586,11 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
     } else {
         let html = `
             <div class="mb-3">
-                <h6><i class="fas fa-film me-2"></i>${item.title}</h6>
-                <small class="text-muted">${item.year || 'Unknown Year'} • ${item.type}</small>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                    ${renderTpdbPageLink(getPosterPickerTpdbPageUrl(posters, posterSearchGroups))}
+                </div>
+                <small class="text-muted">${escapeHtml(item.year || 'Unknown Year')} &bull; ${escapeHtml(item.type)}</small>
                 <small class="text-muted ms-3">
                     <i class="fas fa-images me-1"></i>
                     Found ${posters.length} poster${posters.length !== 1 ? 's' : ''}
@@ -630,6 +633,29 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
     if (posterModal) posterModal.show();
 }
 
+function getPosterPickerTpdbPageUrl(posters = [], groups = []) {
+    const groupUrl = (groups || []).find(group => group?.url)?.url;
+    if (groupUrl) return groupUrl;
+
+    const sourceUrl = (posters || []).find(poster => poster?.source_url)?.source_url;
+    if (sourceUrl) return sourceUrl;
+
+    return '';
+}
+
+function renderTpdbPageLink(url) {
+    if (!url) return '';
+    return `
+        <a class="btn btn-sm btn-outline-secondary tpdb-page-link"
+            href="${escapeHtml(url)}"
+            target="_blank"
+            rel="noopener"
+            onclick="event.stopPropagation()">
+            <i class="fas fa-external-link-alt me-1"></i>TPDb Page
+        </a>
+    `;
+}
+
 function renderSinglePosterMetadata(poster) {
     const uploader = poster.uploader || 'Unknown uploader';
     const setCount = poster.set_poster_count;
@@ -660,7 +686,10 @@ function displayPosterGroups(item, groups, eligibleSeasons) {
     let html = `
         <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
             <div>
-                <h6><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                    ${renderTpdbPageLink(getPosterPickerTpdbPageUrl([], groups))}
+                </div>
                 <small class="text-muted">${escapeHtml(item.year || 'Unknown Year')} &bull; ${escapeHtml(item.type)}</small>
                 <small class="text-muted ms-3">
                     <i class="fas fa-layer-group me-1"></i>
