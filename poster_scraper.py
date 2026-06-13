@@ -775,6 +775,11 @@ def search_tpdb_for_poster_groups(
                             metadata['source_url'] = candidate['url']
                             set_url = metadata.get('set_url')
                             if set_url and set_url not in discovered_set_lookup:
+                                preview_base64 = _get_tpdb_preview_image(
+                                    poster_url,
+                                    include_base64,
+                                    metadata.get('preview_url'),
+                                )
                                 discovered_set_order[set_url] = len(discovered_set_urls)
                                 discovered_set_urls.append(set_url)
                                 discovered_set_lookup[set_url] = {
@@ -782,6 +787,7 @@ def search_tpdb_for_poster_groups(
                                     'set_url': set_url,
                                     'set_poster_count': metadata.get('set_poster_count'),
                                     'uploader': metadata.get('uploader') or 'Unknown',
+                                    'preview_base64': preview_base64,
                                 }
                             if requested_set_urls and set_url not in requested_set_urls:
                                 continue

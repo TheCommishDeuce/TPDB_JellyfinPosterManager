@@ -190,6 +190,21 @@ body {
 .poster-group a:hover { text-decoration: none; }
 .poster-set-browser-list { display: grid; gap: 0.5rem; }
 .poster-set-browser-row { border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem; background: var(--surface); }
+.poster-set-browser-info { min-width: 0; }
+.poster-set-browser-preview {
+    aspect-ratio: 2 / 3;
+    background: var(--surface-muted);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    flex: 0 0 44px;
+    height: 66px;
+    object-fit: cover;
+}
+.poster-set-browser-preview-empty {
+    align-items: center;
+    display: flex;
+    justify-content: center;
+}
 .poster-target-label { padding: 0.35rem 0.5rem; font-size: 0.8rem; color: var(--muted-color); text-align: center; border-top: 1px solid var(--border-color); }
 .season-poster-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
 .season-poster-card { border: 1px solid var(--border-color); border-radius: var(--border-radius-sm); background: var(--surface-muted); overflow: hidden; }

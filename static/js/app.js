@@ -863,15 +863,28 @@ function renderUnloadedPosterSets(group, loadedSetIds = [], inlineLoadedSetIds =
                     const isLoading = loadingPosterSetUrls.has(setInfo.set_url);
                     const buttonIcon = isLoading ? 'fa-spinner fa-spin' : 'fa-plus';
                     const buttonText = isLoading ? 'Loading' : 'Load set';
+                    const previewBase64 = setInfo.preview_base64 || '';
                     return `
                         <div class="poster-set-browser-row d-flex flex-wrap justify-content-between align-items-center gap-2">
-                            <div>
-                                <div class="fw-semibold">${escapeHtml(setInfo.uploader || 'Unknown uploader')}</div>
-                                <small class="text-muted">
-                                    ${escapeHtml(setInfo.set_poster_count || '?')} poster${String(setInfo.set_poster_count || '') === '1' ? '' : 's'}
-                                    &bull;
-                                    <a href="${escapeHtml(setInfo.set_url)}" target="_blank" rel="noopener">TPDb Set</a>
-                                </small>
+                            <div class="poster-set-browser-info d-flex align-items-center gap-3">
+                                ${previewBase64 ? `
+                                    <img class="poster-set-browser-preview"
+                                        src="${previewBase64}"
+                                        alt="${escapeHtml(setInfo.uploader || 'TPDb set')} preview"
+                                        loading="lazy">
+                                ` : `
+                                    <div class="poster-set-browser-preview poster-set-browser-preview-empty">
+                                        <i class="fas fa-image text-muted"></i>
+                                    </div>
+                                `}
+                                <div>
+                                    <div class="fw-semibold">${escapeHtml(setInfo.uploader || 'Unknown uploader')}</div>
+                                    <small class="text-muted">
+                                        ${escapeHtml(setInfo.set_poster_count || '?')} poster${String(setInfo.set_poster_count || '') === '1' ? '' : 's'}
+                                        &bull;
+                                        <a href="${escapeHtml(setInfo.set_url)}" target="_blank" rel="noopener">TPDb Set</a>
+                                    </small>
+                                </div>
                             </div>
                             <button type="button" class="btn btn-sm btn-outline-primary load-poster-set-btn"
                                 data-set-url="${escapeHtml(setInfo.set_url)}"
