@@ -163,6 +163,7 @@ let posterGroupDisplayMode = 'group';
 let currentPosterSetLimit = 3;
 let canBrowseMorePosterSets = false;
 let loadingPosterSetUrls = new Set();
+let manuallyLoadedPosterSetUrls = new Set();
 const AUTO_BATCH_ESTIMATE_MIN_PROCESSED = 10;
 const ACTIVE_AUTO_BATCH_JOB_KEY = 'jpm_active_auto_batch_job_id';
 
@@ -511,6 +512,7 @@ function preparePosterSearchForItem(itemId, setLimit = 3) {
         currentPosterSelection = null;
         posterGroupDisplayMode = 'group';
         loadingPosterSetUrls = new Set();
+        manuallyLoadedPosterSetUrls = new Set();
     }
     currentItemId = itemId;
     currentPosterSetLimit = setLimit;
@@ -565,6 +567,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
         currentPosterSelection = null;
         posterGroupDisplayMode = 'group';
         loadingPosterSetUrls = new Set();
+        manuallyLoadedPosterSetUrls = new Set();
     }
     currentPosterSearchItem = item;
     currentPosterEligibleSeasons = Array.isArray(eligibleSeasons) ? eligibleSeasons : [];
@@ -749,10 +752,15 @@ function renderPosterGroupsByGroup(groups, eligibleSeasons) {
             ...showPosters,
             ...seasonLists.flatMap(entry => entry.posters)
         ];
-        const setIds = [...new Set(allPosters.map(poster => poster.set_id).filter(Boolean))];
+        const setIds = sortPosterSetIdsByAvailableSets(
+            [...new Set(allPosters.map(poster => poster.set_id).filter(Boolean))],
+            group.available_sets || []
+        );
+        const inlineLoadedSetIds = getInlineLoadedSetIds(group, setIds);
+        const mainSetIds = setIds.filter(setId => !inlineLoadedSetIds.has(String(setId)));
         let html = '';
-        if (setIds.length) {
-            html += setIds.map(setId => {
+        if (mainSetIds.length) {
+            html += mainSetIds.map(setId => {
                 const displayGroupNumber = groupNumber++;
                 const setPosters = [];
                 const showPoster = showPosters.find(poster => poster.set_id === setId);
@@ -768,7 +776,7 @@ function renderPosterGroupsByGroup(groups, eligibleSeasons) {
 
                 return renderPosterSetSection(group, setPosters, displayGroupNumber, null, setId);
             }).join('');
-            html += renderUnloadedPosterSets(group, setIds);
+            html += renderUnloadedPosterSets(group, setIds, inlineLoadedSetIds, seasonLists);
             return html;
         }
 
@@ -778,7 +786,7 @@ function renderPosterGroupsByGroup(groups, eligibleSeasons) {
             0
         );
 
-        if (!setCount) return renderUnloadedPosterSets(group, setIds);
+        if (!setCount) return renderUnloadedPosterSets(group, setIds, inlineLoadedSetIds, seasonLists);
 
         html += Array.from({ length: setCount }, (_, setIndex) => {
             const displayGroupNumber = groupNumber++;
@@ -794,19 +802,47 @@ function renderPosterGroupsByGroup(groups, eligibleSeasons) {
 
             return renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex, null);
         }).join('');
-        html += renderUnloadedPosterSets(group, setIds);
+        html += renderUnloadedPosterSets(group, setIds, inlineLoadedSetIds, seasonLists);
         return html;
     }).join('');
 }
 
-function renderUnloadedPosterSets(group, loadedSetIds = []) {
+function getInlineLoadedSetIds(group, loadedSetIds) {
+    const availableSetsById = new Map(
+        (group.available_sets || [])
+            .map(setInfo => [String(setInfo.set_id || ''), setInfo])
+            .filter(([setId]) => setId)
+    );
+
+    return new Set(
+        (loadedSetIds || [])
+            .map(setId => String(setId))
+            .filter(setId => manuallyLoadedPosterSetUrls.has(availableSetsById.get(setId)?.set_url))
+    );
+}
+
+function sortPosterSetIdsByAvailableSets(setIds, availableSets) {
+    const setOrder = new Map(
+        (availableSets || [])
+            .map((setInfo, index) => [String(setInfo.set_id || ''), index])
+            .filter(([setId]) => setId)
+    );
+
+    return [...setIds].sort((left, right) => {
+        const leftOrder = setOrder.has(String(left)) ? setOrder.get(String(left)) : Number.MAX_SAFE_INTEGER;
+        const rightOrder = setOrder.has(String(right)) ? setOrder.get(String(right)) : Number.MAX_SAFE_INTEGER;
+        return leftOrder - rightOrder;
+    });
+}
+
+function renderUnloadedPosterSets(group, loadedSetIds = [], inlineLoadedSetIds = new Set(), seasonLists = []) {
     const availableSets = group.available_sets || [];
     const loadedIds = new Set((loadedSetIds || []).map(String));
-    const unloadedSets = availableSets.filter(setInfo => {
-        if (!setInfo?.set_url) return false;
-        return !loadedIds.has(String(setInfo.set_id || ''));
+    const loadableSets = availableSets.filter(setInfo => {
+        const setId = String(setInfo?.set_id || '');
+        return setInfo?.set_url && (!loadedIds.has(setId) || inlineLoadedSetIds.has(setId));
     });
-    if (!unloadedSets.length) return '';
+    if (!loadableSets.length) return '';
 
     return `
         <section class="poster-group poster-set-browser mb-4">
@@ -815,8 +851,18 @@ function renderUnloadedPosterSets(group, loadedSetIds = []) {
                 <small class="text-muted">Load individual sets when you want to preview them.</small>
             </div>
             <div class="poster-set-browser-list">
-                ${unloadedSets.map(setInfo => {
+                ${loadableSets.map(setInfo => {
+                    const setId = String(setInfo.set_id || '');
+                    if (inlineLoadedSetIds.has(setId)) {
+                        const setPosters = getPosterEntriesForSet(group, setId, seasonLists);
+                        return setPosters.length
+                            ? renderPosterSetSection(group, setPosters, null, null, setId)
+                            : '';
+                    }
+
                     const isLoading = loadingPosterSetUrls.has(setInfo.set_url);
+                    const buttonIcon = isLoading ? 'fa-spinner fa-spin' : 'fa-plus';
+                    const buttonText = isLoading ? 'Loading' : 'Load set';
                     return `
                         <div class="poster-set-browser-row d-flex flex-wrap justify-content-between align-items-center gap-2">
                             <div>
@@ -830,7 +876,7 @@ function renderUnloadedPosterSets(group, loadedSetIds = []) {
                             <button type="button" class="btn btn-sm btn-outline-primary load-poster-set-btn"
                                 data-set-url="${escapeHtml(setInfo.set_url)}"
                                 ${isLoading ? 'disabled' : ''}>
-                                <i class="fas ${isLoading ? 'fa-spinner fa-spin' : 'fa-plus'} me-1"></i>${isLoading ? 'Loading' : 'Load set'}
+                                <i class="fas ${buttonIcon} me-1"></i>${buttonText}
                             </button>
                         </div>
                     `;
@@ -838,6 +884,21 @@ function renderUnloadedPosterSets(group, loadedSetIds = []) {
             </div>
         </section>
     `;
+}
+
+function getPosterEntriesForSet(group, setId, seasonLists) {
+    const setPosters = [];
+    const showPoster = (group.show_posters || []).find(poster => String(poster.set_id || '') === String(setId));
+    if (showPoster) {
+        setPosters.push({ poster: showPoster, targetType: 'show' });
+    }
+    (seasonLists || []).forEach(entry => {
+        const poster = entry.posters.find(currentPoster => String(currentPoster.set_id || '') === String(setId));
+        if (poster) {
+            setPosters.push({ poster, targetType: 'season' });
+        }
+    });
+    return setPosters;
 }
 
 function renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex = null, setId = null) {
@@ -968,6 +1029,7 @@ async function loadPosterSet(setUrl) {
         const data = await response.json();
         if (data.error) throw new Error(data.error);
         mergePosterGroups(data.poster_groups || []);
+        manuallyLoadedPosterSetUrls.add(setUrl);
         canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
         displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
         applyGroupedSelectionHighlight();

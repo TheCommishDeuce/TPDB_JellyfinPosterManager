@@ -482,6 +482,7 @@ def _extract_tpdb_card_metadata(poster_link):
     set_link = card.select_one('a[href*="/set/"]') if card else None
     uploader_link = card.select_one('.uploaded-by a') if card else None
     overlay = card.select_one('.overlay[data-poster-id]') if card else None
+    title_element = card.select_one('.poster-title-correction p') if card else None
     preview_source = card.select_one('source[srcset], img.tpdb-poster[src]') if card else None
     set_url = _tpdb_absolute_url(set_link.get('href')) if set_link else None
     preview_href = preview_source.get('srcset') or preview_source.get('src') if preview_source else None
@@ -501,8 +502,29 @@ def _extract_tpdb_card_metadata(poster_link):
         'uploader': uploader_link.get_text(strip=True) if uploader_link else 'Unknown',
         'tpdb_poster_id': overlay.get('data-poster-id') if overlay else None,
         'tpdb_poster_type': overlay.get('data-poster-type') if overlay else None,
+        'tpdb_title': format_title_year_spacing(title_element.get_text(strip=True)) if title_element else None,
         'preview_url': preview_url,
     }
+
+
+def _tpdb_card_matches_item(metadata, expected_title_norm, expected_year=None):
+    card_title = metadata.get('tpdb_title')
+    if not card_title:
+        return True
+
+    card_year = extract_title_year(card_title)
+    if expected_year and card_year and card_year != expected_year:
+        return False
+
+    card_title_norm = normalize_title_for_comparison(strip_title_year(card_title))
+    if not expected_title_norm or not card_title_norm:
+        return True
+
+    return (
+        card_title_norm == expected_title_norm or
+        card_title_norm.startswith(f"{expected_title_norm} season") or
+        card_title_norm.startswith(f"{expected_title_norm} specials")
+    )
 
 
 def _poster_dict(poster_id, poster_url, base64_image=None, target_type="series", season=None, group_id=None, metadata=None):
@@ -822,6 +844,8 @@ def search_tpdb_for_poster_groups(
 
                                     metadata = _extract_tpdb_card_metadata(poster_link)
                                     metadata['source_url'] = candidate['url']
+                                    if not _tpdb_card_matches_item(metadata, expected_title_norm, expected_year):
+                                        continue
                                     season_key = _extract_tpdb_season_key(poster_link)
                                     poster_type = (metadata.get('tpdb_poster_type') or '').lower()
                                     if season_key and season_key in season_by_key:

@@ -186,6 +186,8 @@ body {
 .poster-card-meta { border-top: 1px solid var(--border-color); color: var(--muted-color); font-size: 0.78rem; line-height: 1.35; padding: 0.5rem; }
 .poster-group { border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 1rem; background: var(--surface-muted); }
 .poster-group-header { border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; }
+.poster-group a { text-decoration: none; }
+.poster-group a:hover { text-decoration: none; }
 .poster-set-browser-list { display: grid; gap: 0.5rem; }
 .poster-set-browser-row { border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem; background: var(--surface); }
 .poster-target-label { padding: 0.35rem 0.5rem; font-size: 0.8rem; color: var(--muted-color); text-align: center; border-top: 1px solid var(--border-color); }
