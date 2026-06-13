@@ -188,6 +188,8 @@ body {
 .poster-group-header { border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; }
 .poster-group a { text-decoration: none; }
 .poster-group a:hover { text-decoration: none; }
+.tpdb-override-form { max-width: 640px; }
+#tpdbOverrideInput { min-width: 360px; }
 .poster-set-browser-list { display: grid; gap: 0.5rem; }
 .poster-set-browser-row { border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem; background: var(--surface); }
 .poster-set-browser-info { min-width: 0; }

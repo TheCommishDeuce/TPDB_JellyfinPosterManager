@@ -114,6 +114,7 @@ BATCH_DELAY_SEC = getattr(Config, 'TPDB_BATCH_DELAY_SEC', 1.5)
 FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR, 'failed.log'))
 RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_DIR, 'results.log'))
 PROTECTED_ITEMS_FILE = getattr(Config, 'PROTECTED_ITEMS_FILE', os.path.join(Config.LOG_DIR, 'protected_items.json'))
+TPDB_ITEM_MAP_FILE = getattr(Config, 'TPDB_ITEM_MAP_FILE', os.path.join(Config.LOG_DIR, 'tpdb_item_map.json'))
 auto_batch_jobs = {}
 auto_batch_jobs_lock = threading.Lock()
 latest_auto_batch_job_id = None
@@ -303,6 +304,60 @@ def _get_results_log_path():
 
 def _get_protected_items_path():
     return PROTECTED_ITEMS_FILE
+
+
+def _get_tpdb_item_map_path():
+    return TPDB_ITEM_MAP_FILE
+
+
+def _normalize_tpdb_item_url(value):
+    value = (value or '').strip()
+    if not value:
+        return ''
+    if value.isdigit():
+        return f"{Config.TPDB_BASE_URL}/posters/{value}"
+    match = re.search(r'(?:https?://theposterdb\.com)?/posters/(\d+)', value, re.IGNORECASE)
+    if match:
+        return f"{Config.TPDB_BASE_URL}/posters/{match.group(1)}"
+    return ''
+
+
+def _read_tpdb_item_map():
+    path = _get_tpdb_item_map_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as map_file:
+            data = json.load(map_file)
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logging.warning(f"Failed to read TPDb item map: {e}")
+        return {}
+
+
+def _write_tpdb_item_map(mapping):
+    os.makedirs(Config.LOG_DIR, exist_ok=True)
+    payload = {
+        str(item_id): _normalize_tpdb_item_url(url)
+        for item_id, url in (mapping or {}).items()
+        if item_id and _normalize_tpdb_item_url(url)
+    }
+    with open(_get_tpdb_item_map_path(), 'w', encoding='utf-8') as map_file:
+        json.dump(payload, map_file, ensure_ascii=False, indent=2)
+
+
+def _get_tpdb_item_map_url(item_id):
+    return _normalize_tpdb_item_url(_read_tpdb_item_map().get(str(item_id)))
+
+
+def _set_tpdb_item_map_url(item_id, tpdb_url):
+    tpdb_url = _normalize_tpdb_item_url(tpdb_url)
+    if not item_id or not tpdb_url:
+        return ''
+    mapping = _read_tpdb_item_map()
+    mapping[str(item_id)] = tpdb_url
+    _write_tpdb_item_map(mapping)
+    return tpdb_url
 
 
 def _read_protected_item_ids():
@@ -887,6 +942,8 @@ def get_item_posters(item_id):
         poster_set_limit = request.args.get('set_limit', default=3, type=int)
         poster_set_limit = max(1, min(poster_set_limit or 3, Config.MAX_POSTERS_PER_ITEM))
         requested_set_url = request.args.get('set_url')
+        override_tpdb_url = _normalize_tpdb_item_url(request.args.get('tpdb_url'))
+        mapped_tpdb_url = override_tpdb_url or _get_tpdb_item_map_url(item_id)
         search_result = search_tpdb_for_poster_groups(
             item['title'],
             item_year=item.get('year'),
@@ -895,7 +952,10 @@ def get_item_posters(item_id):
             eligible_seasons=eligible_seasons,
             max_posters=poster_set_limit if item.get('type') == 'Series' else Config.MAX_POSTERS_PER_ITEM,
             requested_set_urls=[requested_set_url] if requested_set_url else None,
+            tpdb_item_url=mapped_tpdb_url,
         )
+        best_group = search_result.get('best_group') or {}
+        resolved_tpdb_url = _set_tpdb_item_map_url(item_id, override_tpdb_url or best_group.get('url') or mapped_tpdb_url)
         return jsonify({
             'item': item,
             'posters': search_result.get('posters', []),
@@ -903,6 +963,7 @@ def get_item_posters(item_id):
             'eligible_seasons': eligible_seasons,
             'poster_set_limit': poster_set_limit,
             'can_browse_more_sets': item.get('type') == 'Series' and poster_set_limit < Config.MAX_POSTERS_PER_ITEM,
+            'tpdb_mapping_url': resolved_tpdb_url,
         })
     except TPDBRateLimited as e:
         logging.warning(f"TPDb challenge/rate-limit for {item_id}: {e}")

@@ -477,8 +477,10 @@ function stopPosterSearchProgress() {
     if (loadingSubtext) loadingSubtext.textContent = 'This may take a few moments';
 }
 
-async function fetchPostersForItem(itemId, setLimit = 3) {
-    const response = await fetch(`/item/${itemId}/posters?set_limit=${encodeURIComponent(setLimit)}`);
+async function fetchPostersForItem(itemId, setLimit = 3, tpdbUrl = '') {
+    const params = new URLSearchParams({ set_limit: String(setLimit) });
+    if (tpdbUrl) params.set('tpdb_url', tpdbUrl);
+    const response = await fetch(`/item/${itemId}/posters?${params.toString()}`);
     const data = await response.json();
     if (data.error) throw new Error(data.error);
     return data;
@@ -497,7 +499,7 @@ async function loadPosters(itemId, setLimit = 3) {
         if (loadingModal) loadingModal.hide();
         currentPosterSetLimit = data.poster_set_limit || setLimit;
         canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || []);
+        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || '');
     } catch (error) {
         console.error('Error loading posters:', error);
         if (loadingModal) loadingModal.hide();
@@ -555,7 +557,7 @@ function updatePosterSelectionFooter() {
 }
 
 // Display posters in modal (image-only, no author/download box)
-function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) {
+function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], tpdbMappingUrl = '') {
     const modalBody = document.getElementById('posterModalBody');
     const modalTitle = document.querySelector('#posterModal .modal-title');
     const modalFooter = document.getElementById('posterModalFooter');
@@ -574,16 +576,23 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
     updatePosterSelectionFooter();
 
     if (item.type === 'Series' && posterSearchGroups.length > 0) {
-        displayPosterGroups(item, posterSearchGroups, currentPosterEligibleSeasons);
+        displayPosterGroups(item, posterSearchGroups, currentPosterEligibleSeasons, tpdbMappingUrl);
         return;
     }
 
     if (!posters || posters.length === 0) {
         modalBody.innerHTML = `
+            <div class="mb-3">
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                    ${renderTpdbActions('', tpdbMappingUrl)}
+                </div>
+                ${renderTpdbOverrideControl(tpdbMappingUrl)}
+            </div>
             <div class="text-center py-5">
                 <i class="fas fa-search fa-3x text-muted mb-3"></i>
                 <h5 class="text-muted">No posters found</h5>
-                <p class="text-muted">No posters were found for "${item.title}"</p>
+                <p class="text-muted">No posters were found for "${escapeHtml(item.title)}"</p>
             </div>
         `;
     } else {
@@ -591,8 +600,9 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
             <div class="mb-3">
                 <div class="d-flex flex-wrap align-items-center gap-2">
                     <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
-                    ${renderTpdbPageLink(getPosterPickerTpdbPageUrl(posters, posterSearchGroups))}
+                    ${renderTpdbActions(getPosterPickerTpdbPageUrl(posters, posterSearchGroups), tpdbMappingUrl)}
                 </div>
+                ${renderTpdbOverrideControl(tpdbMappingUrl)}
                 <small class="text-muted">${escapeHtml(item.year || 'Unknown Year')} &bull; ${escapeHtml(item.type)}</small>
                 <small class="text-muted ms-3">
                     <i class="fas fa-images me-1"></i>
@@ -634,6 +644,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
     }
 
     if (posterModal) posterModal.show();
+    bindTpdbOverrideControl();
 }
 
 function getPosterPickerTpdbPageUrl(posters = [], groups = []) {
@@ -646,17 +657,84 @@ function getPosterPickerTpdbPageUrl(posters = [], groups = []) {
     return '';
 }
 
-function renderTpdbPageLink(url) {
-    if (!url) return '';
+function renderTpdbActions(pageUrl, currentUrl = '') {
     return `
-        <a class="btn btn-sm btn-outline-secondary tpdb-page-link"
-            href="${escapeHtml(url)}"
-            target="_blank"
-            rel="noopener"
-            onclick="event.stopPropagation()">
-            <i class="fas fa-external-link-alt me-1"></i>TPDb Page
-        </a>
+        <div class="btn-group btn-group-sm" role="group" aria-label="TPDb actions">
+            ${pageUrl ? `
+                <a class="btn btn-outline-secondary tpdb-page-link"
+                    href="${escapeHtml(pageUrl)}"
+                    target="_blank"
+                    rel="noopener"
+                    onclick="event.stopPropagation()">
+                    <i class="fas fa-external-link-alt me-1"></i>TPDb Page
+                </a>
+            ` : ''}
+            <button class="btn btn-outline-secondary tpdb-override-toggle"
+                type="button"
+                title="Change TPDb page"
+                aria-label="Change TPDb page"
+                data-current-url="${escapeHtml(currentUrl || '')}">
+                <i class="fas fa-link"></i>
+            </button>
+        </div>
     `;
+}
+
+function renderTpdbOverrideControl(currentUrl = '') {
+    return `
+        <form class="tpdb-override-form mt-2" id="tpdbOverrideForm" style="display: none;">
+            <div class="input-group input-group-sm">
+                <span class="input-group-text">TPDb</span>
+                <input class="form-control" id="tpdbOverrideInput"
+                    type="text"
+                    value="${escapeHtml(currentUrl || '')}"
+                    placeholder="TPDb URL or ID">
+                <button class="btn btn-outline-primary" type="submit">
+                    <i class="fas fa-sync-alt me-1"></i>Use
+                </button>
+            </div>
+        </form>
+    `;
+}
+
+function bindTpdbOverrideControl() {
+    const form = document.getElementById('tpdbOverrideForm');
+    const input = document.getElementById('tpdbOverrideInput');
+    if (!form || !input || !currentItemId) return;
+
+    document.querySelectorAll('.tpdb-override-toggle').forEach(button => {
+        button.addEventListener('click', () => {
+            form.style.display = form.style.display === 'none' ? '' : 'none';
+            if (form.style.display !== 'none') {
+                input.focus();
+                input.select();
+            }
+        });
+    });
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const tpdbUrl = input.value.trim();
+        if (!tpdbUrl) {
+            showAlert('Enter a TPDb page URL or ID first.', 'warning');
+            return;
+        }
+
+        startPosterSearchProgress(currentPosterSearchItem?.type || 'Series');
+        if (loadingModal) loadingModal.show();
+        try {
+            const data = await fetchPostersForItem(currentItemId, currentPosterSetLimit, tpdbUrl);
+            if (loadingModal) loadingModal.hide();
+            canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
+            displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || tpdbUrl);
+        } catch (error) {
+            console.error('TPDb override error:', error);
+            if (loadingModal) loadingModal.hide();
+            showAlert('Failed to load TPDb page: ' + error.message, 'danger');
+        } finally {
+            stopPosterSearchProgress();
+        }
+    });
 }
 
 function renderSinglePosterMetadata(poster) {
@@ -683,7 +761,7 @@ function renderSinglePosterMetadata(poster) {
     `;
 }
 
-function displayPosterGroups(item, groups, eligibleSeasons) {
+function displayPosterGroups(item, groups, eligibleSeasons, tpdbMappingUrl = '') {
     const modalBody = document.getElementById('posterModalBody');
     updatePosterSelectionFooter();
     let html = `
@@ -691,8 +769,9 @@ function displayPosterGroups(item, groups, eligibleSeasons) {
             <div>
                 <div class="d-flex flex-wrap align-items-center gap-2">
                     <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
-                    ${renderTpdbPageLink(getPosterPickerTpdbPageUrl([], groups))}
+                    ${renderTpdbActions(getPosterPickerTpdbPageUrl([], groups), tpdbMappingUrl)}
                 </div>
+                ${renderTpdbOverrideControl(tpdbMappingUrl)}
                 <small class="text-muted">${escapeHtml(item.year || 'Unknown Year')} &bull; ${escapeHtml(item.type)}</small>
                 <small class="text-muted ms-3">
                     <i class="fas fa-layer-group me-1"></i>
@@ -738,6 +817,7 @@ function displayPosterGroups(item, groups, eligibleSeasons) {
     });
 
     if (posterModal) posterModal.show();
+    bindTpdbOverrideControl();
 }
 
 function renderPosterGroupsByGroup(groups, eligibleSeasons) {
@@ -1924,7 +2004,7 @@ function showNextManualQueueResult() {
         preparePosterSearchForItem(itemId, data.poster_set_limit || 3);
         currentPosterSetLimit = data.poster_set_limit || 3;
         canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || []);
+        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || '');
         updateUploadAllButton();
         return;
     }

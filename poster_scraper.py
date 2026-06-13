@@ -630,6 +630,7 @@ def search_tpdb_for_poster_groups(
     max_groups=6,
     include_base64=True,
     requested_set_urls=None,
+    tpdb_item_url=None,
 ):
     """Return grouped TPDb poster candidates plus a flat show-poster list."""
     global selenium_driver
@@ -642,7 +643,11 @@ def search_tpdb_for_poster_groups(
     }
     search_query = _resolve_tpdb_search_query(item_title, item_type=item_type, tmdb_id=tmdb_id)
     search_url = _build_tpdb_search_url(search_query, item_type=item_type)
-    logging.info(f"TPDb search URL: {search_url}")
+    tpdb_item_url = _tpdb_absolute_url(tpdb_item_url) if tpdb_item_url else None
+    if tpdb_item_url:
+        logging.info(f"Using saved TPDb page for '{search_query}': {tpdb_item_url}")
+    else:
+        logging.info(f"TPDb search URL: {search_url}")
 
     try:
         groups = []
@@ -654,84 +659,95 @@ def search_tpdb_for_poster_groups(
                     if not selenium_driver:
                         setup_selenium_and_login()
 
-                    selenium_driver.get(search_url)
-                    current_url = selenium_driver.current_url
-                    if _is_login_url(current_url):
-                        logging.warning("TPDb session expired on search page for '%s' (%s).", item_title, current_url)
-                        raise TPDBSessionExpired("TPDb session expired while loading search page.")
-
-                    _raise_if_rate_limited(selenium_driver.page_source, current_url, "search_page")
-                    _wait_for_search_results_ready(selenium_driver, timeout=15)
-                    soup = BeautifulSoup(selenium_driver.page_source, 'html.parser')
-
-                    search_result_links = soup.select(SEARCH_RESULT_SELECTOR)
-                    if not search_result_links:
-                        logging.info(f"No TPDb search results for '{search_query}'.")
-                        return {'posters': [], 'groups': [], 'best_group': None, 'search_query': search_query}
-
                     expected_year = extract_title_year(search_query) or (str(item_year) if item_year else None)
                     expected_title = strip_title_year(search_query)
                     expected_title_norm = normalize_title_for_comparison(expected_title)
-                    candidate_links = []
-                    year_mismatch_count = 0
-                    for index, link in enumerate(search_result_links):
-                        try:
-                            title_element = link.find(class_="text-truncate") or link.find("span") or link
-                            result_title = title_element.get_text(strip=True) if title_element else link.get_text(strip=True)
-                            display_title = format_title_year_spacing(result_title)
-                            result_year = extract_title_year(result_title)
-                            result_title_norm = normalize_title_for_comparison(strip_title_year(result_title))
-                            exact_title_match = bool(expected_title_norm and expected_title_norm == result_title_norm)
-                            if expected_year and result_year and result_year != expected_year:
-                                year_mismatch_count += 1
-                                logging.debug("Skipping TPDb result for '%s' due to year mismatch: %s", search_query, display_title)
-                                continue
-                            item_page_path = link.get('href')
-                            target_item_page_url = item_page_path if item_page_path and item_page_path.startswith('http') else (
-                                Config.TPDB_BASE_URL + item_page_path if item_page_path and item_page_path.startswith('/') else None
-                            )
-                            if not target_item_page_url:
-                                continue
-                            candidate_links.append({
-                                'title': display_title,
-                                'year': result_year,
-                                'score': calculate_title_match_score(search_query, result_title),
-                                'exact_title_match': exact_title_match,
-                                'exact_year_match': exact_title_match and (not expected_year or result_year == expected_year),
-                                'url': target_item_page_url,
-                                'index': index,
-                            })
-                        except Exception:
-                            continue
+                    if tpdb_item_url:
+                        candidates_to_check = [{
+                            'title': search_query,
+                            'year': expected_year,
+                            'score': 1.0,
+                            'exact_title_match': True,
+                            'exact_year_match': True,
+                            'url': tpdb_item_url,
+                            'index': 0,
+                        }]
+                    else:
+                        selenium_driver.get(search_url)
+                        current_url = selenium_driver.current_url
+                        if _is_login_url(current_url):
+                            logging.warning("TPDb session expired on search page for '%s' (%s).", item_title, current_url)
+                            raise TPDBSessionExpired("TPDb session expired while loading search page.")
 
-                    if year_mismatch_count:
-                        logging.debug("Skipped %d TPDb result(s) for '%s' due to year mismatch.", year_mismatch_count, search_query)
+                        _raise_if_rate_limited(selenium_driver.page_source, current_url, "search_page")
+                        _wait_for_search_results_ready(selenium_driver, timeout=15)
+                        soup = BeautifulSoup(selenium_driver.page_source, 'html.parser')
 
-                    exact_matches = sorted(
-                        [candidate for candidate in candidate_links if candidate['exact_year_match']],
-                        key=lambda candidate: candidate['index'],
-                    )
-                    strong_matches = [candidate for candidate in candidate_links if candidate['score'] >= 0.8]
-                    fallback_matches = sorted(
-                        strong_matches or candidate_links,
-                        key=lambda candidate: (-candidate['score'], candidate['index'])
-                    )
-                    if exact_matches:
-                        logging.info(
-                            "Found %d exact TPDb result(s) for '%s'; checking exact matches first.",
-                            len(exact_matches),
-                            search_query,
+                        search_result_links = soup.select(SEARCH_RESULT_SELECTOR)
+                        if not search_result_links:
+                            logging.info(f"No TPDb search results for '{search_query}'.")
+                            return {'posters': [], 'groups': [], 'best_group': None, 'search_query': search_query}
+
+                        candidate_links = []
+                        year_mismatch_count = 0
+                        for index, link in enumerate(search_result_links):
+                            try:
+                                title_element = link.find(class_="text-truncate") or link.find("span") or link
+                                result_title = title_element.get_text(strip=True) if title_element else link.get_text(strip=True)
+                                display_title = format_title_year_spacing(result_title)
+                                result_year = extract_title_year(result_title)
+                                result_title_norm = normalize_title_for_comparison(strip_title_year(result_title))
+                                exact_title_match = bool(expected_title_norm and expected_title_norm == result_title_norm)
+                                if expected_year and result_year and result_year != expected_year:
+                                    year_mismatch_count += 1
+                                    logging.debug("Skipping TPDb result for '%s' due to year mismatch: %s", search_query, display_title)
+                                    continue
+                                item_page_path = link.get('href')
+                                target_item_page_url = item_page_path if item_page_path and item_page_path.startswith('http') else (
+                                    Config.TPDB_BASE_URL + item_page_path if item_page_path and item_page_path.startswith('/') else None
+                                )
+                                if not target_item_page_url:
+                                    continue
+                                candidate_links.append({
+                                    'title': display_title,
+                                    'year': result_year,
+                                    'score': calculate_title_match_score(search_query, result_title),
+                                    'exact_title_match': exact_title_match,
+                                    'exact_year_match': exact_title_match and (not expected_year or result_year == expected_year),
+                                    'url': target_item_page_url,
+                                    'index': index,
+                                })
+                            except Exception:
+                                continue
+
+                        if year_mismatch_count:
+                            logging.debug("Skipped %d TPDb result(s) for '%s' due to year mismatch.", year_mismatch_count, search_query)
+
+                        exact_matches = sorted(
+                            [candidate for candidate in candidate_links if candidate['exact_year_match']],
+                            key=lambda candidate: candidate['index'],
                         )
+                        strong_matches = [candidate for candidate in candidate_links if candidate['score'] >= 0.8]
+                        fallback_matches = sorted(
+                            strong_matches or candidate_links,
+                            key=lambda candidate: (-candidate['score'], candidate['index'])
+                        )
+                        if exact_matches:
+                            logging.info(
+                                "Found %d exact TPDb result(s) for '%s'; checking exact matches first.",
+                                len(exact_matches),
+                                search_query,
+                            )
 
-                    queued_candidate_indexes = set()
-                    candidates_to_check = []
-                    for candidate in exact_matches + fallback_matches:
-                        if candidate['index'] in queued_candidate_indexes:
-                            continue
-                        candidates_to_check.append(candidate)
-                        queued_candidate_indexes.add(candidate['index'])
-                        if len(candidates_to_check) >= max_groups:
-                            break
+                        queued_candidate_indexes = set()
+                        candidates_to_check = []
+                        for candidate in exact_matches + fallback_matches:
+                            if candidate['index'] in queued_candidate_indexes:
+                                continue
+                            candidates_to_check.append(candidate)
+                            queued_candidate_indexes.add(candidate['index'])
+                            if len(candidates_to_check) >= max_groups:
+                                break
 
                     for candidate in candidates_to_check:
                         logging.info(

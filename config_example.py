@@ -28,3 +28,4 @@ class Config:
     FAILED_LOG_FILE = os.path.join(LOG_DIR, "failed.log")
     RESULTS_LOG_FILE = os.path.join(LOG_DIR, "results.log")
     PROTECTED_ITEMS_FILE = os.path.join(LOG_DIR, "protected_items.json")
+    TPDB_ITEM_MAP_FILE = os.path.join(LOG_DIR, "tpdb_item_map.json")
