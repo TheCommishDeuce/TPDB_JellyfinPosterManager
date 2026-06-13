@@ -601,13 +601,18 @@ def _tpdb_url_with_query_params(url, **params):
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
-def _get_tpdb_preview_image(image_url, include_base64, preview_url=None):
+def _get_tpdb_preview_image(image_url, include_base64, preview_url=None, cache=None):
     if not include_base64:
         return None
     image_source = preview_url or image_url
+    if cache is not None and image_source in cache:
+        return cache[image_source]
     if image_source == image_url:
         time.sleep(TPDB_IMAGE_PREVIEW_DELAY_SEC)
-    return get_image_as_base64(image_source)
+    base64_image = get_image_as_base64(image_source)
+    if cache is not None:
+        cache[image_source] = base64_image
+    return base64_image
 
 
 def _open_tpdb_page_with_delay(url):
@@ -642,6 +647,7 @@ def search_tpdb_for_poster_groups(
     try:
         groups = []
         poster_id = 1
+        preview_image_cache = {}
         for attempt in range(3):
             try:
                 with selenium_lock:
@@ -775,11 +781,14 @@ def search_tpdb_for_poster_groups(
                             metadata['source_url'] = candidate['url']
                             set_url = metadata.get('set_url')
                             if set_url and set_url not in discovered_set_lookup:
-                                preview_base64 = _get_tpdb_preview_image(
-                                    poster_url,
-                                    include_base64,
-                                    metadata.get('preview_url'),
-                                )
+                                preview_base64 = None
+                                if not requested_set_urls:
+                                    preview_base64 = _get_tpdb_preview_image(
+                                        poster_url,
+                                        include_base64,
+                                        metadata.get('preview_url'),
+                                        preview_image_cache,
+                                    )
                                 discovered_set_order[set_url] = len(discovered_set_urls)
                                 discovered_set_urls.append(set_url)
                                 discovered_set_lookup[set_url] = {
@@ -793,7 +802,12 @@ def search_tpdb_for_poster_groups(
                                 continue
                             if not requested_set_urls and set_url and discovered_set_order.get(set_url, 0) >= max_posters:
                                 continue
-                            base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
+                            base64_image = _get_tpdb_preview_image(
+                                poster_url,
+                                include_base64,
+                                metadata.get('preview_url'),
+                                preview_image_cache,
+                            )
                             season_key = _extract_tpdb_season_key(poster_link)
                             if season_key and season_key in season_by_key:
                                 season = season_by_key[season_key]
@@ -856,7 +870,12 @@ def search_tpdb_for_poster_groups(
                                     poster_type = (metadata.get('tpdb_poster_type') or '').lower()
                                     if season_key and season_key in season_by_key:
                                         season = season_by_key[season_key]
-                                        base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
+                                        base64_image = _get_tpdb_preview_image(
+                                            poster_url,
+                                            include_base64,
+                                            metadata.get('preview_url'),
+                                            preview_image_cache,
+                                        )
                                         group['season_posters'].append(_poster_dict(
                                             poster_id,
                                             poster_url,
@@ -869,7 +888,12 @@ def search_tpdb_for_poster_groups(
                                         poster_id += 1
                                         seen_poster_urls.add(poster_url)
                                     elif poster_type == 'show':
-                                        base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
+                                        base64_image = _get_tpdb_preview_image(
+                                            poster_url,
+                                            include_base64,
+                                            metadata.get('preview_url'),
+                                            preview_image_cache,
+                                        )
                                         group['show_posters'].append(_poster_dict(
                                             poster_id,
                                             poster_url,
@@ -932,7 +956,12 @@ def search_tpdb_for_poster_groups(
 
                                 metadata = _extract_tpdb_card_metadata(poster_link)
                                 metadata['source_url'] = candidate['url']
-                                base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
+                                base64_image = _get_tpdb_preview_image(
+                                    poster_url,
+                                    include_base64,
+                                    metadata.get('preview_url'),
+                                    preview_image_cache,
+                                )
                                 group['season_posters'].append(_poster_dict(
                                     poster_id,
                                     poster_url,
