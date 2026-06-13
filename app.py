@@ -442,6 +442,48 @@ def _read_processed_items(limit=500):
     return latest_entries
 
 
+def _build_processed_history_job(limit=100):
+    entries = _read_processed_items(limit=limit)
+    if not entries:
+        return None
+
+    results = []
+    for entry in entries:
+        item_title = entry.get('item_title') or entry.get('item_id') or 'Unknown'
+        item_year = entry.get('item_year')
+        if item_year:
+            item_title = f"{item_title} ({item_year})"
+        results.append({
+            'item_id': entry.get('item_id'),
+            'item_title': item_title,
+            'success': True,
+            'error': None,
+            'poster_url': entry.get('poster_url'),
+            'season_results': entry.get('season_results') or [],
+            'operation': entry.get('operation'),
+            'timestamp': entry.get('timestamp'),
+        })
+
+    return {
+        'job_id': 'processed-history',
+        'status': 'completed',
+        'phase': 'history',
+        'message': f'Showing {len(results)} processed item(s) from results.log.',
+        'total_items': len(results),
+        'processed': len(results),
+        'remaining': 0,
+        'successful': len(results),
+        'failed': 0,
+        'results': results,
+        'done': True,
+        'success': True,
+        'error': None,
+        'created_at': entries[-1].get('timestamp'),
+        'updated_at': entries[0].get('timestamp'),
+        'source': 'results_log',
+    }
+
+
 def _clear_processed_items(item_ids=None):
     results_log_path = _get_results_log_path()
     os.makedirs(os.path.dirname(results_log_path), exist_ok=True)
@@ -1549,6 +1591,12 @@ def cancel_batch_auto_poster(job_id):
 @app.route('/batch-auto-poster/latest-results')
 def latest_batch_auto_poster_results():
     job = _get_latest_auto_batch_job()
+    history_job = _build_processed_history_job()
+    if history_job and (
+        not job or not job.get('results') or
+        (history_job.get('updated_at') or '') > (job.get('updated_at') or '')
+    ):
+        job = history_job
     return jsonify({'success': True, 'job': job})
 
 

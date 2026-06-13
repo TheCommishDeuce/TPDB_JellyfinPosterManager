@@ -1606,7 +1606,10 @@ function renderBatchResults(results, filter) {
 
     tbody.innerHTML = filteredResults.map(result => `
         <tr>
-            <td>${escapeHtml(result.item_title || result.item_id || 'Unknown')}</td>
+            <td>
+                ${escapeHtml(result.item_title || result.item_id || 'Unknown')}
+                ${renderBatchResultMeta(result)}
+            </td>
             <td>
                 ${result.success ?
                     '<span class="badge bg-success">Success</span>' :
@@ -1616,6 +1619,18 @@ function renderBatchResults(results, filter) {
             <td>${escapeHtml(result.error || '-')}</td>
         </tr>
     `).join('');
+}
+
+function renderBatchResultMeta(result) {
+    const details = [];
+    if (result.operation) details.push(formatOperationLabel(result.operation));
+    if (result.timestamp) details.push(formatLogTimestamp(result.timestamp));
+    if (result.season_results?.length) {
+        const successCount = result.season_results.filter(season => season.success).length;
+        details.push(`${successCount}/${result.season_results.length} seasons`);
+    }
+    if (!details.length) return '';
+    return `<div class="small text-muted">${details.map(escapeHtml).join(' &middot; ')}</div>`;
 }
 
 // Button enable state
@@ -2109,6 +2124,8 @@ async function clearProcessedItemsByScope(itemIds = null) {
         }
         applyProcessedItemMarkers(activeProcessedItemDetails, { refreshFilters: false });
         applyFailedItemMarkers(activeFailedItemIds);
+        latestAutoBatchJob = null;
+        await loadLatestAutoBatchResults();
         showAlert(isVisibleOnly ? 'Visible processed items cleared' : 'Processed items cleared', 'success');
     } catch (error) {
         console.error('Clear processed items error:', error);
