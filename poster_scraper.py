@@ -23,6 +23,11 @@ from config import Config
 import logging
 from requests.exceptions import ChunkedEncodingError, ConnectionError
 
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
+
 if Config.JELLYFIN_URL:
     Config.JELLYFIN_URL = Config.JELLYFIN_URL.rstrip('/')
 
@@ -35,6 +40,8 @@ ITEM_POSTER_SELECTOR = "a.bg-transparent.border-0.text-white"
 TPDB_PAGE_REQUEST_DELAY_SEC = 1.25
 TPDB_IMAGE_PREVIEW_DELAY_SEC = 0.75
 TPDB_IMAGE_PREVIEW_RETRY_DELAY_SEC = 3
+TPDB_SET_PREVIEW_MAX_SIZE = (160, 240)
+TPDB_SET_PREVIEW_QUALITY = 72
 RATE_LIMIT_MARKERS = (
     "rate limit",
     "too many requests",
@@ -366,7 +373,31 @@ def are_images_identical(item_id, image_path, image_type='Primary'):
         return False
     return jellyfin_hash == local_hash
 
-def get_image_as_base64(image_url):
+def _compress_image_preview(image_bytes, max_size=TPDB_SET_PREVIEW_MAX_SIZE, quality=TPDB_SET_PREVIEW_QUALITY):
+    if not Image:
+        return None
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            if image.mode not in ('RGB', 'RGBA'):
+                image = image.convert('RGB')
+
+            output = BytesIO()
+            try:
+                image.save(output, format='WEBP', quality=quality, method=4)
+                return 'image/webp', output.getvalue()
+            except Exception:
+                output = BytesIO()
+                if image.mode == 'RGBA':
+                    image = image.convert('RGB')
+                image.save(output, format='JPEG', quality=quality, optimize=True)
+                return 'image/jpeg', output.getvalue()
+    except Exception as e:
+        logging.debug(f"Failed to compress preview image: {e}")
+        return None
+
+
+def get_image_as_base64(image_url, max_size=None, quality=TPDB_SET_PREVIEW_QUALITY):
     """
     Download image and convert to base64 data URL for embedding in UI.
     """
@@ -388,8 +419,14 @@ def get_image_as_base64(image_url):
                     continue
                 response.raise_for_status()
 
-                image_data = base64.b64encode(response.content).decode('utf-8')
+                image_bytes = response.content
                 content_type = response.headers.get('content-type', 'image/jpeg')
+                if max_size:
+                    compressed = _compress_image_preview(image_bytes, max_size=max_size, quality=quality)
+                    if compressed:
+                        content_type, image_bytes = compressed
+
+                image_data = base64.b64encode(image_bytes).decode('utf-8')
                 return f"data:{content_type};base64,{image_data}"
         except Exception as e:
             logging.warning(f"Error converting image to base64: {e}")
@@ -601,17 +638,18 @@ def _tpdb_url_with_query_params(url, **params):
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
-def _get_tpdb_preview_image(image_url, include_base64, preview_url=None, cache=None):
+def _get_tpdb_preview_image(image_url, include_base64, preview_url=None, cache=None, max_size=None, quality=TPDB_SET_PREVIEW_QUALITY):
     if not include_base64:
         return None
     image_source = preview_url or image_url
-    if cache is not None and image_source in cache:
-        return cache[image_source]
+    cache_key = (image_source, max_size, quality)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
     if image_source == image_url:
         time.sleep(TPDB_IMAGE_PREVIEW_DELAY_SEC)
-    base64_image = get_image_as_base64(image_source)
+    base64_image = get_image_as_base64(image_source, max_size=max_size, quality=quality)
     if cache is not None:
-        cache[image_source] = base64_image
+        cache[cache_key] = base64_image
     return base64_image
 
 
@@ -631,11 +669,17 @@ def search_tpdb_for_poster_groups(
     include_base64=True,
     requested_set_urls=None,
     tpdb_item_url=None,
+    cached_available_sets=None,
 ):
     """Return grouped TPDb poster candidates plus a flat show-poster list."""
     global selenium_driver
     eligible_seasons = eligible_seasons or []
     requested_set_urls = set(requested_set_urls or [])
+    cached_sets_by_id = {
+        str(set_info.get('set_id') or ''): set_info
+        for set_info in (cached_available_sets or [])
+        if set_info.get('set_id')
+    }
     season_by_key = {
         _season_key_from_jellyfin(season): season
         for season in eligible_seasons
@@ -797,21 +841,26 @@ def search_tpdb_for_poster_groups(
                             metadata['source_url'] = candidate['url']
                             set_url = metadata.get('set_url')
                             if set_url and set_url not in discovered_set_lookup:
+                                cached_set = cached_sets_by_id.get(str(metadata.get('set_id') or ''))
                                 preview_base64 = None
-                                if not requested_set_urls:
+                                if cached_set and cached_set.get('preview_base64'):
+                                    preview_base64 = cached_set.get('preview_base64')
+                                elif not requested_set_urls:
                                     preview_base64 = _get_tpdb_preview_image(
                                         poster_url,
                                         include_base64,
                                         metadata.get('preview_url'),
                                         preview_image_cache,
+                                        max_size=TPDB_SET_PREVIEW_MAX_SIZE,
+                                        quality=TPDB_SET_PREVIEW_QUALITY,
                                     )
                                 discovered_set_order[set_url] = len(discovered_set_urls)
                                 discovered_set_urls.append(set_url)
                                 discovered_set_lookup[set_url] = {
                                     'set_id': metadata.get('set_id'),
                                     'set_url': set_url,
-                                    'set_poster_count': metadata.get('set_poster_count'),
-                                    'uploader': metadata.get('uploader') or 'Unknown',
+                                    'set_poster_count': metadata.get('set_poster_count') or (cached_set or {}).get('set_poster_count'),
+                                    'uploader': metadata.get('uploader') or (cached_set or {}).get('uploader') or 'Unknown',
                                     'preview_base64': preview_base64,
                                 }
                             if requested_set_urls and set_url not in requested_set_urls:

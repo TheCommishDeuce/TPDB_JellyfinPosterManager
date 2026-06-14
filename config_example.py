@@ -29,3 +29,5 @@ class Config:
     RESULTS_LOG_FILE = os.path.join(LOG_DIR, "results.log")
     PROTECTED_ITEMS_FILE = os.path.join(LOG_DIR, "protected_items.json")
     TPDB_ITEM_MAP_FILE = os.path.join(LOG_DIR, "tpdb_item_map.json")
+    TPDB_SET_CACHE_FILE = os.path.join(LOG_DIR, "tpdb_set_cache.json")
+    TPDB_SET_CACHE_MAX_AGE_DAYS = 14

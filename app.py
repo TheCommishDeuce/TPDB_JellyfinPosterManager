@@ -6,7 +6,7 @@ import logging
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from poster_scraper import *
 from config import Config
 import threading
@@ -115,6 +115,8 @@ FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR
 RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_DIR, 'results.log'))
 PROTECTED_ITEMS_FILE = getattr(Config, 'PROTECTED_ITEMS_FILE', os.path.join(Config.LOG_DIR, 'protected_items.json'))
 TPDB_ITEM_MAP_FILE = getattr(Config, 'TPDB_ITEM_MAP_FILE', os.path.join(Config.LOG_DIR, 'tpdb_item_map.json'))
+TPDB_SET_CACHE_FILE = getattr(Config, 'TPDB_SET_CACHE_FILE', os.path.join(Config.LOG_DIR, 'tpdb_set_cache.json'))
+TPDB_SET_CACHE_MAX_AGE_DAYS = getattr(Config, 'TPDB_SET_CACHE_MAX_AGE_DAYS', 14)
 auto_batch_jobs = {}
 auto_batch_jobs_lock = threading.Lock()
 latest_auto_batch_job_id = None
@@ -310,6 +312,10 @@ def _get_tpdb_item_map_path():
     return TPDB_ITEM_MAP_FILE
 
 
+def _get_tpdb_set_cache_path():
+    return TPDB_SET_CACHE_FILE
+
+
 def _normalize_tpdb_item_url(value):
     value = (value or '').strip()
     if not value:
@@ -320,6 +326,10 @@ def _normalize_tpdb_item_url(value):
     if match:
         return f"{Config.TPDB_BASE_URL}/posters/{match.group(1)}"
     return ''
+
+
+def _build_tpdb_set_url(set_id):
+    return f"{Config.TPDB_BASE_URL}/set/{set_id}" if set_id else ''
 
 
 def _read_tpdb_item_map():
@@ -358,6 +368,84 @@ def _set_tpdb_item_map_url(item_id, tpdb_url):
     mapping[str(item_id)] = tpdb_url
     _write_tpdb_item_map(mapping)
     return tpdb_url
+
+
+def _read_tpdb_set_cache():
+    path = _get_tpdb_set_cache_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as cache_file:
+            data = json.load(cache_file)
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logging.warning(f"Failed to read TPDb set cache: {e}")
+        return {}
+
+
+def _write_tpdb_set_cache(cache):
+    os.makedirs(Config.LOG_DIR, exist_ok=True)
+    with open(_get_tpdb_set_cache_path(), 'w', encoding='utf-8') as cache_file:
+        json.dump(cache or {}, cache_file, ensure_ascii=False, indent=2)
+
+
+def _is_tpdb_set_cache_fresh(entry):
+    updated_at = (entry or {}).get('updated_at')
+    if not updated_at:
+        return False
+    try:
+        updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00')).replace(tzinfo=None)
+    except ValueError:
+        return False
+    return datetime.utcnow() - updated <= timedelta(days=TPDB_SET_CACHE_MAX_AGE_DAYS)
+
+
+def _get_cached_tpdb_sets(tpdb_item_url):
+    tpdb_item_url = _normalize_tpdb_item_url(tpdb_item_url)
+    if not tpdb_item_url:
+        return []
+    entry = _read_tpdb_set_cache().get(tpdb_item_url)
+    if not _is_tpdb_set_cache_fresh(entry):
+        return []
+    sets = []
+    for set_info in entry.get('available_sets', []):
+        set_id = str(set_info.get('set_id') or '')
+        if not set_id:
+            continue
+        sets.append({
+            'set_id': set_id,
+            'set_url': _build_tpdb_set_url(set_id),
+            'set_poster_count': set_info.get('set_poster_count'),
+            'uploader': set_info.get('uploader') or 'Unknown',
+            'preview_base64': set_info.get('preview_base64'),
+        })
+    return sets
+
+
+def _cache_tpdb_sets_from_groups(groups):
+    cache = _read_tpdb_set_cache()
+    changed = False
+    for group in groups or []:
+        tpdb_item_url = _normalize_tpdb_item_url(group.get('url'))
+        available_sets = group.get('available_sets') or []
+        if not tpdb_item_url or not available_sets:
+            continue
+        cache[tpdb_item_url] = {
+            'updated_at': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'available_sets': [
+                {
+                    'set_id': str(set_info.get('set_id') or ''),
+                    'set_poster_count': set_info.get('set_poster_count'),
+                    'uploader': set_info.get('uploader') or 'Unknown',
+                    'preview_base64': set_info.get('preview_base64'),
+                }
+                for set_info in available_sets
+                if set_info.get('set_id')
+            ],
+        }
+        changed = True
+    if changed:
+        _write_tpdb_set_cache(cache)
 
 
 def _read_protected_item_ids():
@@ -944,6 +1032,7 @@ def get_item_posters(item_id):
         requested_set_url = request.args.get('set_url')
         override_tpdb_url = _normalize_tpdb_item_url(request.args.get('tpdb_url'))
         mapped_tpdb_url = override_tpdb_url or _get_tpdb_item_map_url(item_id)
+        cached_available_sets = _get_cached_tpdb_sets(mapped_tpdb_url)
         search_result = search_tpdb_for_poster_groups(
             item['title'],
             item_year=item.get('year'),
@@ -953,9 +1042,12 @@ def get_item_posters(item_id):
             max_posters=poster_set_limit if item.get('type') == 'Series' else Config.MAX_POSTERS_PER_ITEM,
             requested_set_urls=[requested_set_url] if requested_set_url else None,
             tpdb_item_url=mapped_tpdb_url,
+            cached_available_sets=cached_available_sets,
         )
         best_group = search_result.get('best_group') or {}
         resolved_tpdb_url = _set_tpdb_item_map_url(item_id, override_tpdb_url or best_group.get('url') or mapped_tpdb_url)
+        if not requested_set_url:
+            _cache_tpdb_sets_from_groups(search_result.get('groups', []))
         return jsonify({
             'item': item,
             'posters': search_result.get('posters', []),
