@@ -179,9 +179,12 @@ body {
 .poster-container { position: relative; aspect-ratio: 2 / 3; width: 100%; background-color: var(--surface-muted); border-radius: var(--border-radius-sm); overflow: hidden; display: flex; align-items: center; justify-content: center; border: 2px solid var(--border-color); }
 .poster-loading { position: absolute; inset: 0; background-color: var(--surface-muted); z-index: 2; display: flex !important; align-items: center; justify-content: center; color: var(--muted-color); }
 .poster-image { height: 100%; width: 100%; object-fit: cover; transition: transform 0.3s ease; position: relative; z-index: 3; border-radius: var(--border-radius-sm); }
+.poster-image-placeholder { filter: blur(10px); transform: scale(1.04); }
+.poster-preview-loading .poster-preview-spinner { background: rgba(0, 0, 0, 0.18); z-index: 4; }
 .poster-card { cursor: pointer; transition: var(--transition); border: 2px solid transparent; position: relative; height: 100%; background: var(--surface); }
 .poster-card:hover { transform: translateY(-5px); box-shadow: var(--box-shadow-hover); border-color: var(--primary-color); }
 .poster-card:hover .poster-image { transform: scale(1.03); }
+.poster-card:hover .poster-image-placeholder { transform: scale(1.07); }
 .poster-card.selected { border: 3px solid var(--success-color); box-shadow: 0 0 20px rgba(40, 167, 69, 0.3); }
 .poster-card-meta { border-top: 1px solid var(--border-color); color: var(--muted-color); font-size: 0.78rem; line-height: 1.35; padding: 0.5rem; }
 .poster-group { border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 1rem; background: var(--surface-muted); }
@@ -201,6 +204,10 @@ body {
     flex: 0 0 56px;
     height: 84px;
     object-fit: cover;
+}
+.poster-set-browser-preview-placeholder {
+    filter: blur(4px);
+    transform: scale(1.03);
 }
 .poster-set-browser-preview-empty {
     align-items: center;

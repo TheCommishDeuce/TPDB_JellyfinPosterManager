@@ -692,26 +692,10 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], 
         `;
 
         posters.forEach((poster, index) => {
-            const imageSource = poster.base64 || '';
             html += `
                 <div class="col-lg-2 col-md-3 col-sm-4 col-6 mb-3">
                     <div class="card poster-card h-100" data-poster-id="${poster.id}" onclick="selectPoster('${poster.url}', ${poster.id})">
-                        <div class="poster-container">
-                            ${!poster.base64 ? `
-                                <div class="poster-loading d-flex align-items-center justify-content-center">
-                                    <div class="text-center">
-                                        <i class="fas fa-exclamation-triangle text-warning mb-2"></i>
-                                        <br>
-                                        <small class="text-muted">Image failed to load</small>
-                                    </div>
-                                </div>
-                            ` : ''}
-                            <img src="${imageSource}"
-                                class="card-img-top poster-image"
-                                alt="Poster ${index + 1}"
-                                loading="lazy"
-                                style="${!poster.base64 ? 'display: none;' : ''}">
-                        </div>
+                        ${renderPosterImageFrame(poster, `Poster ${index + 1}`)}
                         ${renderSinglePosterMetadata(poster)}
                     </div>
                 </div>
@@ -724,6 +708,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], 
 
     if (posterModal) posterModal.show();
     bindTpdbOverrideControl();
+    hydratePosterPreviewImages(modalBody);
 }
 
 function renderPosterCacheIndicator(fromCache) {
@@ -733,6 +718,57 @@ function renderPosterCacheIndicator(fromCache) {
             <i class="fas fa-database me-1"></i>Cached
         </span>
     `;
+}
+
+function renderPosterImageFrame(poster, altText) {
+    const hasImage = Boolean(poster.base64);
+    const needsLoad = Boolean(poster.preview_needs_load && poster.url);
+    const imageClasses = ['card-img-top', 'poster-image'];
+    if (needsLoad) imageClasses.push('poster-image-placeholder');
+    const fullPreviewUrl = needsLoad ? `/thumbnail?url=${encodeURIComponent(poster.url)}` : '';
+
+    return `
+        <div class="poster-container ${needsLoad ? 'poster-preview-loading' : ''}">
+            ${needsLoad ? `
+                <div class="poster-loading poster-preview-spinner d-flex align-items-center justify-content-center">
+                    <div class="spinner-border spinner-border-sm text-light" role="status">
+                        <span class="visually-hidden">Loading poster preview</span>
+                    </div>
+                </div>
+            ` : !hasImage ? `
+                <div class="poster-loading d-flex align-items-center justify-content-center">
+                    <div class="text-center">
+                        <i class="fas fa-exclamation-triangle text-warning mb-2"></i>
+                        <br>
+                        <small class="text-muted">Image failed to load</small>
+                    </div>
+                </div>
+            ` : ''}
+            <img src="${hasImage ? poster.base64 : ''}"
+                class="${imageClasses.join(' ')}"
+                alt="${escapeHtml(altText)}"
+                loading="lazy"
+                ${fullPreviewUrl ? `data-full-src="${escapeHtml(fullPreviewUrl)}"` : ''}
+                style="${!hasImage ? 'display: none;' : ''}">
+        </div>
+    `;
+}
+
+function hydratePosterPreviewImages(root = document) {
+    root.querySelectorAll('img[data-full-src]').forEach(image => {
+        const fullSrc = image.dataset.fullSrc;
+        if (!fullSrc) return;
+        image.removeAttribute('data-full-src');
+        image.addEventListener('load', () => {
+            image.classList.remove('poster-image-placeholder');
+            image.classList.remove('poster-set-browser-preview-placeholder');
+            image.closest('.poster-container')?.classList.remove('poster-preview-loading');
+        }, { once: true });
+        image.addEventListener('error', () => {
+            image.closest('.poster-container')?.classList.remove('poster-preview-loading');
+        }, { once: true });
+        image.src = fullSrc;
+    });
 }
 
 function getPosterPickerTpdbPageUrl(posters = [], groups = []) {
@@ -917,6 +953,7 @@ function displayPosterGroups(item, groups, eligibleSeasons, tpdbMappingUrl = '',
 
     if (posterModal) posterModal.show();
     bindTpdbOverrideControl();
+    hydratePosterPreviewImages(modalBody);
 }
 
 function renderPosterGroupsByGroup(groups, eligibleSeasons) {
@@ -1043,12 +1080,14 @@ function renderUnloadedPosterSets(group, loadedSetIds = [], inlineLoadedSetIds =
                     const buttonIcon = isLoading ? 'fa-spinner fa-spin' : 'fa-plus';
                     const buttonText = isLoading ? 'Loading' : 'Load set';
                     const previewBase64 = setInfo.preview_base64 || '';
+                    const fullPreviewUrl = setInfo.preview_url ? `/thumbnail?url=${encodeURIComponent(setInfo.preview_url)}` : '';
                     return `
                         <div class="poster-set-browser-row d-flex flex-wrap justify-content-between align-items-center gap-2">
                             <div class="poster-set-browser-info d-flex align-items-center gap-3">
                                 ${previewBase64 ? `
-                                    <img class="poster-set-browser-preview"
+                                    <img class="poster-set-browser-preview ${fullPreviewUrl ? 'poster-set-browser-preview-placeholder' : ''}"
                                         src="${previewBase64}"
+                                        ${fullPreviewUrl ? `data-full-src="${escapeHtml(fullPreviewUrl)}"` : ''}
                                         alt="${escapeHtml(setInfo.uploader || 'TPDb set')} preview"
                                         loading="lazy">
                                 ` : `
@@ -1305,7 +1344,6 @@ function mergeSetsByUrl(existingSets, newSets) {
 }
 
 function renderGroupedPosterCard(poster, index, targetType, groupId) {
-    const imageSource = poster.base64 || '';
     const label = targetType === 'season' ? (poster.season_title || 'Season') : 'Series';
     return `
         <div class="col-lg-2 col-md-3 col-sm-4 col-6 mb-3">
@@ -1314,22 +1352,7 @@ function renderGroupedPosterCard(poster, index, targetType, groupId) {
                 data-group-id="${escapeHtml(groupId)}"
                 data-target-type="${escapeHtml(targetType)}"
                 data-season-id="${escapeHtml(poster.season_id || '')}">
-                <div class="poster-container">
-                    ${!poster.base64 ? `
-                        <div class="poster-loading d-flex align-items-center justify-content-center">
-                            <div class="text-center">
-                                <i class="fas fa-exclamation-triangle text-warning mb-2"></i>
-                                <br>
-                                <small class="text-muted">Image failed to load</small>
-                            </div>
-                        </div>
-                    ` : ''}
-                    <img src="${imageSource}"
-                        class="card-img-top poster-image"
-                        alt="${escapeHtml(label)} poster ${index + 1}"
-                        loading="lazy"
-                        style="${!poster.base64 ? 'display: none;' : ''}">
-                </div>
+                ${renderPosterImageFrame(poster, `${label} poster ${index + 1}`)}
                 <div class="poster-target-label">${escapeHtml(label)}</div>
             </div>
         </div>

@@ -864,6 +864,7 @@ def search_tpdb_for_poster_groups(
                                     'set_url': set_url,
                                     'set_poster_count': metadata.get('set_poster_count') or (cached_set or {}).get('set_poster_count'),
                                     'uploader': metadata.get('uploader') or (cached_set or {}).get('uploader') or 'Unknown',
+                                    'preview_url': metadata.get('preview_url') or (cached_set or {}).get('preview_url') or poster_url,
                                     'preview_base64': preview_base64,
                                 }
                             if requested_set_urls and set_url not in requested_set_urls:

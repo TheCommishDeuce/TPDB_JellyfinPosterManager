@@ -32,7 +32,13 @@ def _utc_timestamp():
     return _utc_now().isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 
-def _compress_base64_preview(data_url):
+TPDB_CACHE_PREVIEW_SIZE = (24, 36)
+TPDB_CACHE_PREVIEW_QUALITY = 25
+TPDB_SET_CACHE_PREVIEW_SIZE = (72, 108)
+TPDB_SET_CACHE_PREVIEW_QUALITY = 35
+
+
+def _compress_base64_preview(data_url, max_size=TPDB_PREVIEW_MAX_SIZE, quality=TPDB_PREVIEW_QUALITY):
     if not data_url or not isinstance(data_url, str) or not Image or not ImageOps:
         return data_url
     if not data_url.startswith('data:image/') or ';base64,' not in data_url:
@@ -42,25 +48,33 @@ def _compress_base64_preview(data_url):
         _, encoded = data_url.split(';base64,', 1)
         image_bytes = base64.b64decode(encoded)
         with Image.open(BytesIO(image_bytes)) as image:
-            image = ImageOps.fit(image, TPDB_PREVIEW_MAX_SIZE, Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+            image = ImageOps.fit(image, max_size, Image.Resampling.LANCZOS, centering=(0.5, 0.5))
             if image.mode not in ('RGB', 'RGBA'):
                 image = image.convert('RGB')
 
             output = BytesIO()
             try:
-                image.save(output, format='WEBP', quality=TPDB_PREVIEW_QUALITY, method=4)
+                image.save(output, format='WEBP', quality=quality, method=4)
                 content_type = 'image/webp'
             except Exception:
                 output = BytesIO()
                 if image.mode == 'RGBA':
                     image = image.convert('RGB')
-                image.save(output, format='JPEG', quality=TPDB_PREVIEW_QUALITY, optimize=True)
+                image.save(output, format='JPEG', quality=quality, optimize=True)
                 content_type = 'image/jpeg'
 
         return f"data:{content_type};base64,{base64.b64encode(output.getvalue()).decode('utf-8')}"
     except Exception as e:
         logging.debug(f"Failed to compress cached TPDb preview: {e}")
         return data_url
+
+
+def _tiny_cached_preview(data_url):
+    return _compress_base64_preview(data_url, max_size=TPDB_CACHE_PREVIEW_SIZE, quality=TPDB_CACHE_PREVIEW_QUALITY)
+
+
+def _set_cached_preview(data_url):
+    return _compress_base64_preview(data_url, max_size=TPDB_SET_CACHE_PREVIEW_SIZE, quality=TPDB_SET_CACHE_PREVIEW_QUALITY)
 
 class ConsoleFormatter(logging.Formatter):
     COLORS = {
@@ -481,6 +495,7 @@ def _get_cached_tpdb_sets(tpdb_item_url):
             'set_url': _build_tpdb_set_url(set_id),
             'set_poster_count': set_info.get('set_poster_count'),
             'uploader': set_info.get('uploader') or 'Unknown',
+            'preview_url': set_info.get('preview_url'),
             'preview_base64': set_info.get('preview_base64'),
         })
     return sets
@@ -501,7 +516,8 @@ def _cache_tpdb_sets_from_groups(groups):
                     'set_id': str(set_info.get('set_id') or ''),
                     'set_poster_count': set_info.get('set_poster_count'),
                     'uploader': set_info.get('uploader') or 'Unknown',
-                    'preview_base64': _compress_base64_preview(set_info.get('preview_base64')),
+                    'preview_url': set_info.get('preview_url'),
+                    'preview_base64': _set_cached_preview(set_info.get('preview_base64')),
                 }
                 for set_info in available_sets
                 if set_info.get('set_id')
@@ -680,7 +696,8 @@ def _compact_tpdb_poster(poster, group_id=None):
     compact = {
         'i': poster.get('id'),
         'u': poster.get('url'),
-        'b': _compress_base64_preview(poster.get('base64')),
+        'b': _tiny_cached_preview(poster.get('base64')),
+        'l': True if poster.get('base64') else None,
         't': poster.get('target_type'),
         'g': poster.get('group_id') if poster.get('group_id') != group_id else None,
         'sid': poster.get('set_id'),
@@ -701,6 +718,7 @@ def _hydrate_tpdb_poster(poster, group_id=None):
         'id': poster.get('i'),
         'url': poster.get('u'),
         'base64': poster.get('b'),
+        'preview_needs_load': bool(poster.get('l')),
         'title': 'Poster',
         'uploader': poster.get('up') or 'Unknown',
         'likes': 0,
@@ -729,7 +747,8 @@ def _compact_available_set(set_info):
         'i': str(set_info.get('set_id') or ''),
         'c': set_info.get('set_poster_count'),
         'u': set_info.get('uploader') if set_info.get('uploader') != 'Unknown' else None,
-        'p': _compress_base64_preview(set_info.get('preview_base64')),
+        'v': set_info.get('preview_url'),
+        'p': _set_cached_preview(set_info.get('preview_base64')),
     }
     return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
 
@@ -741,6 +760,7 @@ def _hydrate_available_set(set_info):
         'set_url': _build_tpdb_set_url(set_id),
         'set_poster_count': set_info.get('c'),
         'uploader': set_info.get('u') or 'Unknown',
+        'preview_url': set_info.get('v'),
         'preview_base64': set_info.get('p'),
     }
 
