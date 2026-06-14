@@ -536,7 +536,6 @@ def _extract_tpdb_card_metadata(poster_link):
     return {
         'set_id': set_id,
         'set_url': set_url,
-        'set_poster_count': set_link.get_text(strip=True) if set_link else None,
         'uploader': uploader_link.get_text(strip=True) if uploader_link else 'Unknown',
         'tpdb_poster_id': overlay.get('data-poster-id') if overlay else None,
         'tpdb_poster_type': overlay.get('data-poster-type') if overlay else None,
@@ -578,7 +577,6 @@ def _poster_dict(poster_id, poster_url, base64_image=None, target_type="series",
         'group_id': group_id,
         'set_id': metadata.get('set_id'),
         'set_url': metadata.get('set_url'),
-        'set_poster_count': metadata.get('set_poster_count'),
         'tpdb_poster_id': metadata.get('tpdb_poster_id'),
         'source_url': metadata.get('source_url'),
     }
@@ -862,7 +860,6 @@ def search_tpdb_for_poster_groups(
                                 discovered_set_lookup[set_url] = {
                                     'set_id': metadata.get('set_id'),
                                     'set_url': set_url,
-                                    'set_poster_count': metadata.get('set_poster_count') or (cached_set or {}).get('set_poster_count'),
                                     'uploader': metadata.get('uploader') or (cached_set or {}).get('uploader') or 'Unknown',
                                     'preview_url': metadata.get('preview_url') or (cached_set or {}).get('preview_url') or poster_url,
                                     'preview_base64': preview_base64,

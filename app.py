@@ -493,7 +493,6 @@ def _get_cached_tpdb_sets(tpdb_item_url):
         sets.append({
             'set_id': set_id,
             'set_url': _build_tpdb_set_url(set_id),
-            'set_poster_count': set_info.get('set_poster_count'),
             'uploader': set_info.get('uploader') or 'Unknown',
             'preview_url': set_info.get('preview_url'),
             'preview_base64': set_info.get('preview_base64'),
@@ -514,7 +513,6 @@ def _cache_tpdb_sets_from_groups(groups):
             'available_sets': [
                 {
                     'set_id': str(set_info.get('set_id') or ''),
-                    'set_poster_count': set_info.get('set_poster_count'),
                     'uploader': set_info.get('uploader') or 'Unknown',
                     'preview_url': set_info.get('preview_url'),
                     'preview_base64': _set_cached_preview(set_info.get('preview_base64')),
@@ -701,7 +699,6 @@ def _compact_tpdb_poster(poster, group_id=None):
         't': poster.get('target_type'),
         'g': poster.get('group_id') if poster.get('group_id') != group_id else None,
         'sid': poster.get('set_id'),
-        'spc': poster.get('set_poster_count'),
         'up': poster.get('uploader') if poster.get('uploader') != 'Unknown' else None,
         'pid': poster.get('tpdb_poster_id'),
         'src': poster.get('source_url'),
@@ -726,7 +723,6 @@ def _hydrate_tpdb_poster(poster, group_id=None):
         'group_id': poster.get('g') or group_id,
         'set_id': poster.get('sid'),
         'set_url': _build_tpdb_set_url(poster.get('sid')),
-        'set_poster_count': poster.get('spc'),
         'tpdb_poster_id': poster.get('pid'),
         'source_url': poster.get('src'),
     }
@@ -745,7 +741,6 @@ def _hydrate_tpdb_poster(poster, group_id=None):
 def _compact_available_set(set_info):
     compact = {
         'i': str(set_info.get('set_id') or ''),
-        'c': set_info.get('set_poster_count'),
         'u': set_info.get('uploader') if set_info.get('uploader') != 'Unknown' else None,
         'v': set_info.get('preview_url'),
         'p': _set_cached_preview(set_info.get('preview_base64')),
@@ -758,7 +753,6 @@ def _hydrate_available_set(set_info):
     return {
         'set_id': set_id,
         'set_url': _build_tpdb_set_url(set_id),
-        'set_poster_count': set_info.get('c'),
         'uploader': set_info.get('u') or 'Unknown',
         'preview_url': set_info.get('v'),
         'preview_base64': set_info.get('p'),

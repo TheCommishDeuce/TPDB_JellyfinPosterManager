@@ -873,21 +873,18 @@ function bindTpdbOverrideControl() {
 
 function renderSinglePosterMetadata(poster) {
     const uploader = poster.uploader || 'Unknown uploader';
-    const setCount = poster.set_poster_count;
     const setLink = poster.set_url
         ? `<a href="${escapeHtml(poster.set_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">TPDb Set</a>`
         : '';
-    if (!uploader && !setCount && !setLink) return '';
+    if (!uploader && !setLink) return '';
 
     return `
         <div class="poster-card-meta">
             <div class="text-truncate" title="${escapeHtml(uploader)}">
                 <i class="fas fa-user me-1"></i>${escapeHtml(uploader)}
             </div>
-            ${(setCount || setLink) ? `
+            ${setLink ? `
                 <small class="text-muted">
-                    ${setCount ? `<i class="fas fa-images me-1"></i>${escapeHtml(setCount)} poster${String(setCount) === '1' ? '' : 's'}` : ''}
-                    ${setCount && setLink ? ' &bull; ' : ''}
                     ${setLink}
                 </small>
             ` : ''}
@@ -1098,8 +1095,6 @@ function renderUnloadedPosterSets(group, loadedSetIds = [], inlineLoadedSetIds =
                                 <div>
                                     <div class="fw-semibold">${escapeHtml(setInfo.uploader || 'Unknown uploader')}</div>
                                     <small class="text-muted">
-                                        ${escapeHtml(setInfo.set_poster_count || '?')} poster${String(setInfo.set_poster_count || '') === '1' ? '' : 's'}
-                                        &bull;
                                         <a href="${escapeHtml(setInfo.set_url)}" target="_blank" rel="noopener">TPDb Set</a>
                                     </small>
                                 </div>
@@ -1142,7 +1137,6 @@ function renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex 
                 <div>
                     <small class="text-muted">
                         <i class="fas fa-user me-1"></i>${escapeHtml(metadata.uploader)}
-                        ${metadata.setPosterCount ? ` &bull; <i class="fas fa-images me-1"></i>${escapeHtml(metadata.setPosterCount)} poster${String(metadata.setPosterCount) === '1' ? '' : 's'}` : ''}
                         ${coverageText ? ` &bull; <i class="fas fa-layer-group me-1"></i>${escapeHtml(coverageText)}` : ''}
                         ${metadata.setUrl ? ` &bull; <a href="${escapeHtml(metadata.setUrl)}" target="_blank" rel="noopener">TPDb Set</a>` : ` &bull; ${escapeHtml(group.title || 'TPDb result')}`}
                     </small>
@@ -1229,10 +1223,9 @@ function getPosterSetMetadata(group, posters, setId = null) {
     const matchingAvailableSet = (group.available_sets || []).find(setInfo => {
         return setId && String(setInfo.set_id || '') === String(setId);
     });
-    const posterWithSet = posters.find(poster => poster.set_url || poster.set_poster_count || poster.uploader);
+    const posterWithSet = posters.find(poster => poster.set_url || poster.uploader);
     return {
         uploader: getPosterSetUploader(posters) || matchingAvailableSet?.uploader || 'Unknown uploader',
-        setPosterCount: posterWithSet?.set_poster_count || matchingAvailableSet?.set_poster_count || '',
         setUrl: posterWithSet?.set_url || matchingAvailableSet?.set_url || '',
     };
 }
