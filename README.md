@@ -17,8 +17,9 @@ A modern web application for automatically finding and uploading high-quality po
 ### 🔍 **Smart Poster Discovery**
 - Automatically searches ThePosterDB for high-quality movie and TV series posters
 - Uses Jellyfin and TMDB metadata to improve title, year, movie, and series matching
-- Groups TPDb poster sets and shows set metadata such as uploader and poster count
+- Groups TPDb poster sets and shows compact set metadata such as uploader and source links
 - Supports movie, series, and season poster discovery
+- Remembers corrected TPDb entry pages and can reuse cached picker/set results for faster repeat searches
 
 ### 🚀 **Batch Operations**
 - **Auto-Get Posters**: Automatically find and upload posters for multiple items
@@ -33,7 +34,8 @@ A modern web application for automatically finding and uploading high-quality po
 - High-quality preview images
 - Queue items for guided manual poster selection
 - Select posters for immediate upload or queue selections for bulk upload
-- Browse series seasons and matching TPDb poster sets when available
+- Browse series seasons, current season artwork, and matching TPDb poster sets when available
+- Override the TPDb entry page when a search result needs a manual correction
 
 ### 🛡️ **Protected Items**
 - Mark individual Jellyfin items as protected so Auto-Get will skip them
@@ -51,6 +53,7 @@ A modern web application for automatically finding and uploading high-quality po
 - Automatic image format conversion (WebP/AVIF → JPEG)
 - Smart error handling and retry logic
 - Structured processed, failed, and protected item storage
+- TPDb item mapping, set discovery cache, picker-result cache, and configurable cache cleanup
 - Comprehensive logging, colored console output, and TPDb challenge debugging
 
 ## 📋 Requirements
@@ -137,6 +140,10 @@ Visit `http://localhost:5001` in your web browser, or use your configured `WEB_P
 4. Choose **Select and Upload** for an immediate upload, or **Queue Upload** to stage the poster
 5. Click **Upload All Selected** to upload staged selections in one batch
 
+Use the **TPDb Page** action in the picker to open the matched TPDb entry. If the wrong entry was matched, use the adjacent override control to enter the correct TPDb poster page URL or ID. The app stores that mapping locally and can reuse it for later searches.
+
+Cached picker results can be enabled or disabled from the global settings menu. Cached results open faster and use small compressed previews first, then lazy-load higher-quality thumbnails as needed.
+
 ### Failed, Processed, and Protected Items
 
 - Failed poster operations appear in the **Failed** panel, where you can retry one item, retry all, refresh, or clear the list.
@@ -157,12 +164,16 @@ Visit `http://localhost:5001` in your web browser, or use your configured `WEB_P
 
 ### Logging Configuration
 
-Logs and local state are written to the configured `LOG_DIR`:
+Logs, cache files, and local app state are written to the configured directories:
 
 - `logs/app.log`: application log
 - `logs/failed.log`: structured failed operation history
 - `logs/results.log`: structured successful operation history
-- `logs/protected_items.json`: items protected from Auto-Get
+- `data/protected_items.json`: items protected from Auto-Get
+- `data/tpdb_item_map.json`: saved Jellyfin item → TPDb page mappings
+- `cache/tpdb_set_cache.json`: cached TPDb set discovery metadata
+- `cache/tpdb_picker_cache.json`: cached picker responses and compressed previews
+- `cache/temp_posters/`: temporary poster downloads used during upload
 
 You can adjust logging levels in code if needed:
 
