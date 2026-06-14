@@ -1130,17 +1130,21 @@ function renderPosterTargetSection(title, posters, targetType) {
         const key = poster.group_id || poster.id;
         if (!groups.has(key)) groups.set(key, poster);
     });
-    const metadataText = Array.from(groups.values()).slice(0, 3).map(poster => {
-        const sourceLink = poster.set_url
-            ? `<a href="${escapeHtml(poster.set_url)}" target="_blank" rel="noopener">TPDb Set</a>`
-            : '';
-        return `${escapeHtml(poster.uploader || 'Unknown uploader')}${poster.set_poster_count ? `, ${escapeHtml(poster.set_poster_count)} poster${String(poster.set_poster_count) === '1' ? '' : 's'}` : ''}${sourceLink ? `, ${sourceLink}` : ''}`;
-    }).join(' &bull; ');
+    const setCount = Array.from(groups.values()).filter(poster => poster.set_url || poster.set_id || poster.group_id).length;
+    const metadataParts = [
+        `${posters.length} poster${posters.length === 1 ? '' : 's'}`,
+    ];
+    if (setCount > 1) {
+        metadataParts.push(`${setCount} TPDb sets`);
+    } else if (setCount === 1) {
+        metadataParts.push('1 TPDb set');
+    }
+
     let html = `
         <section class="poster-group poster-target-section mb-4">
             <div class="poster-group-header mb-3">
                 <h6 class="mb-1">${escapeHtml(title)}</h6>
-                <small class="text-muted">${metadataText || `${posters.length} poster${posters.length === 1 ? '' : 's'}`}</small>
+                <small class="text-muted">${metadataParts.map(escapeHtml).join(' &bull; ')}</small>
             </div>
             <div class="row">
     `;
