@@ -76,6 +76,15 @@ def _tiny_cached_preview(data_url):
 def _set_cached_preview(data_url):
     return _compress_base64_preview(data_url, max_size=TPDB_SET_CACHE_PREVIEW_SIZE, quality=TPDB_SET_CACHE_PREVIEW_QUALITY)
 
+
+def _cached_compressed_preview(data_url, preview_cache, cache_key, compressor):
+    if not data_url:
+        return data_url
+    key = (cache_key, data_url)
+    if key not in preview_cache:
+        preview_cache[key] = compressor(data_url)
+    return preview_cache[key]
+
 class ConsoleFormatter(logging.Formatter):
     COLORS = {
         logging.DEBUG: "\033[90m",
@@ -503,6 +512,7 @@ def _get_cached_tpdb_sets(tpdb_item_url):
 def _cache_tpdb_sets_from_groups(groups):
     cache = _read_tpdb_set_cache()
     changed = False
+    preview_cache = {}
     for group in groups or []:
         tpdb_item_url = _normalize_tpdb_item_url(group.get('url'))
         available_sets = group.get('available_sets') or []
@@ -515,7 +525,7 @@ def _cache_tpdb_sets_from_groups(groups):
                     'set_id': str(set_info.get('set_id') or ''),
                     'uploader': set_info.get('uploader') or 'Unknown',
                     'preview_url': set_info.get('preview_url'),
-                    'preview_base64': _set_cached_preview(set_info.get('preview_base64')),
+                    'preview_base64': _cached_compressed_preview(set_info.get('preview_base64'), preview_cache, 'set', _set_cached_preview),
                 }
                 for set_info in available_sets
                 if set_info.get('set_id')
@@ -614,8 +624,9 @@ def _compact_tpdb_picker_cache_response(response):
     if not isinstance(response, dict):
         return response
 
-    compact_groups = [_compact_tpdb_group(group) for group in response.get('poster_groups', [])]
-    compact_posters = [_compact_tpdb_poster(poster) for poster in response.get('posters', [])]
+    preview_cache = {}
+    compact_groups = [_compact_tpdb_group(group, preview_cache=preview_cache) for group in response.get('poster_groups', [])]
+    compact_posters = [_compact_tpdb_poster(poster, preview_cache=preview_cache) for poster in response.get('posters', [])]
     first_group_posters = compact_groups[0].get('s', []) if compact_groups else []
 
     payload = {
@@ -654,7 +665,8 @@ def _hydrate_tpdb_picker_cache_response(response):
     }
 
 
-def _compact_tpdb_group(group):
+def _compact_tpdb_group(group, preview_cache=None):
+    preview_cache = preview_cache if preview_cache is not None else {}
     expected_group_id = f"group-{group.get('source_index')}"
     compact = {
         'i': group.get('id') if group.get('id') != expected_group_id else None,
@@ -662,12 +674,12 @@ def _compact_tpdb_group(group):
         'u': group.get('url'),
         'm': group.get('match_score'),
         'x': group.get('source_index'),
-        's': [_compact_tpdb_poster(poster, group_id=group.get('id')) for poster in group.get('show_posters', [])],
-        'p': [_compact_tpdb_poster(poster, group_id=group.get('id')) for poster in group.get('season_posters', [])],
+        's': [_compact_tpdb_poster(poster, group_id=group.get('id'), preview_cache=preview_cache) for poster in group.get('show_posters', [])],
+        'p': [_compact_tpdb_poster(poster, group_id=group.get('id'), preview_cache=preview_cache) for poster in group.get('season_posters', [])],
         'e': group.get('eligible_season_count'),
         'c': group.get('covered_season_count'),
         'k': group.get('covered_season_keys') or [],
-        'a': [_compact_available_set(set_info) for set_info in group.get('available_sets', [])],
+        'a': [_compact_available_set(set_info, preview_cache=preview_cache) for set_info in group.get('available_sets', [])],
     }
     return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
 
@@ -690,11 +702,12 @@ def _hydrate_tpdb_group(group):
     return hydrated
 
 
-def _compact_tpdb_poster(poster, group_id=None):
+def _compact_tpdb_poster(poster, group_id=None, preview_cache=None):
+    preview_cache = preview_cache if preview_cache is not None else {}
     compact = {
         'i': poster.get('id'),
         'u': poster.get('url'),
-        'b': _tiny_cached_preview(poster.get('base64')),
+        'b': _cached_compressed_preview(poster.get('base64'), preview_cache, 'poster', _tiny_cached_preview),
         'l': True if poster.get('base64') else None,
         't': poster.get('target_type'),
         'g': poster.get('group_id') if poster.get('group_id') != group_id else None,
@@ -738,12 +751,13 @@ def _hydrate_tpdb_poster(poster, group_id=None):
     return hydrated
 
 
-def _compact_available_set(set_info):
+def _compact_available_set(set_info, preview_cache=None):
+    preview_cache = preview_cache if preview_cache is not None else {}
     compact = {
         'i': str(set_info.get('set_id') or ''),
         'u': set_info.get('uploader') if set_info.get('uploader') != 'Unknown' else None,
         'v': set_info.get('preview_url'),
-        'p': _set_cached_preview(set_info.get('preview_base64')),
+        'p': _cached_compressed_preview(set_info.get('preview_base64'), preview_cache, 'set', _set_cached_preview),
     }
     return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
 

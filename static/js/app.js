@@ -563,9 +563,7 @@ async function loadPosters(itemId, setLimit = 3) {
         if (getTpdbPickerCachePreference()) {
             const cachedData = await fetchPostersForItem(itemId, setLimit, '', { cacheOnly: true });
             if (cachedData.from_cache) {
-                currentPosterSetLimit = cachedData.poster_set_limit || setLimit;
-                canBrowseMorePosterSets = Boolean(cachedData.can_browse_more_sets);
-                displayPosters(cachedData.item, cachedData.posters, cachedData.poster_groups || [], cachedData.eligible_seasons || [], cachedData.tpdb_mapping_url || '', true);
+                applyPosterSearchData(cachedData, setLimit, '', true);
                 return;
             }
         }
@@ -574,9 +572,7 @@ async function loadPosters(itemId, setLimit = 3) {
         const data = await fetchPostersForItem(itemId, setLimit);
 
         if (stopLoading) stopLoading();
-        currentPosterSetLimit = data.poster_set_limit || setLimit;
-        canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || '', Boolean(data.from_cache));
+        applyPosterSearchData(data, setLimit);
     } catch (error) {
         console.error('Error loading posters:', error);
         if (stopLoading) stopLoading();
@@ -584,13 +580,33 @@ async function loadPosters(itemId, setLimit = 3) {
     }
 }
 
+function applyPosterSearchData(data, fallbackSetLimit = 3, tpdbMappingFallback = '', fromCache = Boolean(data?.from_cache)) {
+    if (!data) return;
+    const posterGroups = Array.isArray(data.poster_groups) ? data.poster_groups : [];
+    const eligibleSeasons = Array.isArray(data.eligible_seasons) ? data.eligible_seasons : [];
+    currentPosterSetLimit = data.poster_set_limit || fallbackSetLimit;
+    canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
+    displayPosters(
+        data.item,
+        data.posters,
+        posterGroups,
+        eligibleSeasons,
+        data.tpdb_mapping_url || tpdbMappingFallback,
+        fromCache
+    );
+}
+
+function resetPosterSearchState() {
+    currentPosterSelection = null;
+    currentPosterSearchFromCache = false;
+    posterGroupDisplayMode = 'group';
+    loadingPosterSetUrls = new Set();
+    manuallyLoadedPosterSetUrls = new Set();
+}
+
 function preparePosterSearchForItem(itemId, setLimit = 3) {
     if (currentPosterSearchItem?.id !== itemId) {
-        currentPosterSelection = null;
-        currentPosterSearchFromCache = false;
-        posterGroupDisplayMode = 'group';
-        loadingPosterSetUrls = new Set();
-        manuallyLoadedPosterSetUrls = new Set();
+        resetPosterSearchState();
     }
     currentItemId = itemId;
     currentPosterSetLimit = setLimit;
@@ -642,10 +658,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], 
     if (modalFooter) modalFooter.style.display = '';
     posterSearchGroups = Array.isArray(posterGroups) ? posterGroups : [];
     if (previousItemId !== item.id) {
-        currentPosterSelection = null;
-        posterGroupDisplayMode = 'group';
-        loadingPosterSetUrls = new Set();
-        manuallyLoadedPosterSetUrls = new Set();
+        resetPosterSearchState();
     }
     currentPosterSearchItem = item;
     currentPosterEligibleSeasons = Array.isArray(eligibleSeasons) ? eligibleSeasons : [];
@@ -861,8 +874,7 @@ function bindTpdbOverrideControl() {
         try {
             const data = await fetchPostersForItem(currentItemId, currentPosterSetLimit, tpdbUrl);
             stopLoading();
-            canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-            displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || tpdbUrl, Boolean(data.from_cache));
+            applyPosterSearchData(data, currentPosterSetLimit, tpdbUrl);
         } catch (error) {
             console.error('TPDb override error:', error);
             stopLoading();
@@ -1259,12 +1271,9 @@ async function loadPosterSet(setUrl) {
         mergePosterGroups(data.poster_groups || []);
         manuallyLoadedPosterSetUrls.add(setUrl);
         canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-        displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
-        applyGroupedSelectionHighlight();
     } catch (error) {
         console.error('Error loading TPDb set:', error);
         showAlert('Failed to load TPDb set: ' + error.message, 'danger');
-        displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
     } finally {
         loadingPosterSetUrls.delete(setUrl);
         displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
@@ -2121,9 +2130,7 @@ function showNextManualQueueResult() {
         manualQueueCurrentItemId = itemId;
         setManualQueueItemQueued(itemId, false);
         preparePosterSearchForItem(itemId, data.poster_set_limit || 3);
-        currentPosterSetLimit = data.poster_set_limit || 3;
-        canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || '', Boolean(data.from_cache));
+        applyPosterSearchData(data, data.poster_set_limit || 3);
         updateUploadAllButton();
         return;
     }
