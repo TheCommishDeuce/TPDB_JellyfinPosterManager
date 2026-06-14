@@ -165,6 +165,7 @@ let currentPosterSetLimit = 3;
 let canBrowseMorePosterSets = false;
 let loadingPosterSetUrls = new Set();
 let manuallyLoadedPosterSetUrls = new Set();
+let posterPreviewObserver = null;
 const AUTO_BATCH_ESTIMATE_MIN_PROCESSED = 10;
 const ACTIVE_AUTO_BATCH_JOB_KEY = 'jpm_active_auto_batch_job_id';
 
@@ -767,20 +768,49 @@ function renderPosterImageFrame(poster, altText) {
     `;
 }
 
+function loadPosterPreviewImage(image) {
+    const fullSrc = image.dataset.fullSrc;
+    if (!fullSrc) return;
+
+    image.removeAttribute('data-full-src');
+    image.addEventListener('load', () => {
+        image.classList.remove('poster-image-placeholder');
+        image.classList.remove('poster-set-browser-preview-placeholder');
+        image.closest('.poster-container')?.classList.remove('poster-preview-loading');
+    }, { once: true });
+    image.addEventListener('error', () => {
+        image.closest('.poster-container')?.classList.remove('poster-preview-loading');
+    }, { once: true });
+    image.src = fullSrc;
+}
+
+function getPosterPreviewObserver() {
+    if (posterPreviewObserver || !('IntersectionObserver' in window)) {
+        return posterPreviewObserver;
+    }
+
+    posterPreviewObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            posterPreviewObserver.unobserve(entry.target);
+            loadPosterPreviewImage(entry.target);
+        });
+    }, {
+        root: document.getElementById('posterModalBody') || null,
+        rootMargin: '360px 0px'
+    });
+    return posterPreviewObserver;
+}
+
 function hydratePosterPreviewImages(root = document) {
-    root.querySelectorAll('img[data-full-src]').forEach(image => {
-        const fullSrc = image.dataset.fullSrc;
-        if (!fullSrc) return;
-        image.removeAttribute('data-full-src');
-        image.addEventListener('load', () => {
-            image.classList.remove('poster-image-placeholder');
-            image.classList.remove('poster-set-browser-preview-placeholder');
-            image.closest('.poster-container')?.classList.remove('poster-preview-loading');
-        }, { once: true });
-        image.addEventListener('error', () => {
-            image.closest('.poster-container')?.classList.remove('poster-preview-loading');
-        }, { once: true });
-        image.src = fullSrc;
+    const images = root.querySelectorAll('img[data-full-src]');
+    const observer = getPosterPreviewObserver();
+    images.forEach(image => {
+        if (observer) {
+            observer.observe(image);
+        } else {
+            loadPosterPreviewImage(image);
+        }
     });
 }
 

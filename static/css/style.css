@@ -194,7 +194,8 @@ body {
 .tpdb-override-form { max-width: 640px; }
 #tpdbOverrideInput { min-width: 360px; }
 .poster-set-browser-list { display: grid; gap: 0.5rem; }
-.poster-set-browser-row { border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem; background: var(--surface); }
+.poster-set-browser-row { border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem; background: var(--surface); transition: border-color 0.15s ease, background-color 0.15s ease; }
+.poster-set-browser-row:hover { border-color: rgba(13, 110, 253, 0.35); background: var(--surface-muted); }
 .poster-set-browser-info { min-width: 0; }
 .poster-set-browser-preview {
     aspect-ratio: 2 / 3;
@@ -208,7 +209,9 @@ body {
 .poster-set-browser-preview-placeholder {
     filter: blur(4px);
     transform: scale(1.03);
+    transition: filter 0.2s ease, transform 0.2s ease;
 }
+.poster-set-browser-row .load-poster-set-btn { white-space: nowrap; }
 .poster-set-browser-preview-empty {
     align-items: center;
     display: flex;
