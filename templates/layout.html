@@ -36,10 +36,21 @@
       </button>
       <div class="dropdown">
         <button id="appSettingsBtn" class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
-                data-bs-toggle="dropdown" aria-expanded="false">
+                data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
           <i class="fas fa-gear me-1"></i>Settings
         </button>
-        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="appSettingsBtn">
+        <ul class="dropdown-menu dropdown-menu-end p-2" aria-labelledby="appSettingsBtn">
+          <li class="px-2 py-1">
+            <div class="fw-semibold mb-2">Find Posters Cache</div>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" role="switch" id="useTpdbPickerCacheSetting">
+              <label class="form-check-label small" for="useTpdbPickerCacheSetting">Use cached picker results</label>
+            </div>
+            <button class="btn btn-outline-danger btn-sm w-100" type="button" onclick="clearTpdbCache()">
+              <i class="fas fa-trash me-1"></i>Clear TPDb cache
+            </button>
+          </li>
+          <li><hr class="dropdown-divider"></li>
           <li>
             <button class="dropdown-item text-danger" type="button" onclick="clearProcessedItems()">
               <i class="fas fa-eraser me-2"></i>Clear processed items

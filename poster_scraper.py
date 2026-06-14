@@ -24,9 +24,10 @@ import logging
 from requests.exceptions import ChunkedEncodingError, ConnectionError
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageOps
 except ImportError:
     Image = None
+    ImageOps = None
 
 if Config.JELLYFIN_URL:
     Config.JELLYFIN_URL = Config.JELLYFIN_URL.rstrip('/')
@@ -40,8 +41,8 @@ ITEM_POSTER_SELECTOR = "a.bg-transparent.border-0.text-white"
 TPDB_PAGE_REQUEST_DELAY_SEC = 1.25
 TPDB_IMAGE_PREVIEW_DELAY_SEC = 0.75
 TPDB_IMAGE_PREVIEW_RETRY_DELAY_SEC = 3
-TPDB_SET_PREVIEW_MAX_SIZE = (160, 240)
-TPDB_SET_PREVIEW_QUALITY = 72
+TPDB_PREVIEW_MAX_SIZE = (160, 242)
+TPDB_PREVIEW_QUALITY = 85
 RATE_LIMIT_MARKERS = (
     "rate limit",
     "too many requests",
@@ -373,12 +374,12 @@ def are_images_identical(item_id, image_path, image_type='Primary'):
         return False
     return jellyfin_hash == local_hash
 
-def _compress_image_preview(image_bytes, max_size=TPDB_SET_PREVIEW_MAX_SIZE, quality=TPDB_SET_PREVIEW_QUALITY):
-    if not Image:
+def _compress_image_preview(image_bytes, max_size=TPDB_PREVIEW_MAX_SIZE, quality=TPDB_PREVIEW_QUALITY):
+    if not Image or not ImageOps:
         return None
     try:
         with Image.open(BytesIO(image_bytes)) as image:
-            image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            image = ImageOps.fit(image, max_size, Image.Resampling.LANCZOS, centering=(0.5, 0.5))
             if image.mode not in ('RGB', 'RGBA'):
                 image = image.convert('RGB')
 
@@ -397,7 +398,7 @@ def _compress_image_preview(image_bytes, max_size=TPDB_SET_PREVIEW_MAX_SIZE, qua
         return None
 
 
-def get_image_as_base64(image_url, max_size=None, quality=TPDB_SET_PREVIEW_QUALITY):
+def get_image_as_base64(image_url, max_size=TPDB_PREVIEW_MAX_SIZE, quality=TPDB_PREVIEW_QUALITY):
     """
     Download image and convert to base64 data URL for embedding in UI.
     """
@@ -638,7 +639,7 @@ def _tpdb_url_with_query_params(url, **params):
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
-def _get_tpdb_preview_image(image_url, include_base64, preview_url=None, cache=None, max_size=None, quality=TPDB_SET_PREVIEW_QUALITY):
+def _get_tpdb_preview_image(image_url, include_base64, preview_url=None, cache=None, max_size=TPDB_PREVIEW_MAX_SIZE, quality=TPDB_PREVIEW_QUALITY):
     if not include_base64:
         return None
     image_source = preview_url or image_url
@@ -851,8 +852,8 @@ def search_tpdb_for_poster_groups(
                                         include_base64,
                                         metadata.get('preview_url'),
                                         preview_image_cache,
-                                        max_size=TPDB_SET_PREVIEW_MAX_SIZE,
-                                        quality=TPDB_SET_PREVIEW_QUALITY,
+                                        max_size=TPDB_PREVIEW_MAX_SIZE,
+                                        quality=TPDB_PREVIEW_QUALITY,
                                     )
                                 discovered_set_order[set_url] = len(discovered_set_urls)
                                 discovered_set_urls.append(set_url)

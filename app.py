@@ -4,6 +4,7 @@ import json
 import os
 import logging
 import re
+import hashlib
 import sys
 import time
 from datetime import datetime, timedelta
@@ -115,8 +116,11 @@ FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR
 RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_DIR, 'results.log'))
 PROTECTED_ITEMS_FILE = getattr(Config, 'PROTECTED_ITEMS_FILE', os.path.join(Config.LOG_DIR, 'protected_items.json'))
 TPDB_ITEM_MAP_FILE = getattr(Config, 'TPDB_ITEM_MAP_FILE', os.path.join(Config.LOG_DIR, 'tpdb_item_map.json'))
-TPDB_SET_CACHE_FILE = getattr(Config, 'TPDB_SET_CACHE_FILE', os.path.join(Config.LOG_DIR, 'tpdb_set_cache.json'))
+CACHE_DIR = getattr(Config, 'CACHE_DIR', 'cache')
+TPDB_SET_CACHE_FILE = getattr(Config, 'TPDB_SET_CACHE_FILE', os.path.join(CACHE_DIR, 'tpdb_set_cache.json'))
+TPDB_PICKER_CACHE_FILE = getattr(Config, 'TPDB_PICKER_CACHE_FILE', os.path.join(CACHE_DIR, 'tpdb_picker_cache.json'))
 TPDB_SET_CACHE_MAX_AGE_DAYS = getattr(Config, 'TPDB_SET_CACHE_MAX_AGE_DAYS', 14)
+TPDB_PICKER_CACHE_MAX_AGE_DAYS = getattr(Config, 'TPDB_PICKER_CACHE_MAX_AGE_DAYS', 7)
 auto_batch_jobs = {}
 auto_batch_jobs_lock = threading.Lock()
 latest_auto_batch_job_id = None
@@ -316,6 +320,10 @@ def _get_tpdb_set_cache_path():
     return TPDB_SET_CACHE_FILE
 
 
+def _get_tpdb_picker_cache_path():
+    return TPDB_PICKER_CACHE_FILE
+
+
 def _normalize_tpdb_item_url(value):
     value = (value or '').strip()
     if not value:
@@ -384,7 +392,7 @@ def _read_tpdb_set_cache():
 
 
 def _write_tpdb_set_cache(cache):
-    os.makedirs(Config.LOG_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(_get_tpdb_set_cache_path()) or '.', exist_ok=True)
     with open(_get_tpdb_set_cache_path(), 'w', encoding='utf-8') as cache_file:
         json.dump(cache or {}, cache_file, ensure_ascii=False, indent=2)
 
@@ -446,6 +454,260 @@ def _cache_tpdb_sets_from_groups(groups):
         changed = True
     if changed:
         _write_tpdb_set_cache(cache)
+
+
+def _read_tpdb_picker_cache():
+    path = _get_tpdb_picker_cache_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as cache_file:
+            data = json.load(cache_file)
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logging.warning(f"Failed to read TPDb picker cache: {e}")
+        return {}
+
+
+def _write_tpdb_picker_cache(cache):
+    os.makedirs(os.path.dirname(_get_tpdb_picker_cache_path()) or '.', exist_ok=True)
+    with open(_get_tpdb_picker_cache_path(), 'w', encoding='utf-8') as cache_file:
+        json.dump(cache or {}, cache_file, ensure_ascii=False, indent=2)
+
+
+def _is_tpdb_picker_cache_fresh(entry):
+    updated_at = (entry or {}).get('updated_at')
+    if not updated_at:
+        return False
+    try:
+        updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00')).replace(tzinfo=None)
+    except ValueError:
+        return False
+    return datetime.utcnow() - updated <= timedelta(days=TPDB_PICKER_CACHE_MAX_AGE_DAYS)
+
+
+def _tpdb_picker_cache_key(item, tpdb_url, poster_set_limit, eligible_seasons):
+    season_signature = [
+        {
+            'id': str(season.get('id') or ''),
+            'number': season.get('number'),
+            'has_poster': bool(season.get('has_poster')),
+        }
+        for season in (eligible_seasons or [])
+    ]
+    payload = {
+        'item_id': str(item.get('id') or ''),
+        'item_type': item.get('type') or '',
+        'item_year': item.get('year'),
+        'tpdb_url': _normalize_tpdb_item_url(tpdb_url),
+        'poster_set_limit': poster_set_limit,
+        'seasons': season_signature,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def _get_cached_tpdb_picker_response(cache_key):
+    entry = _read_tpdb_picker_cache().get(cache_key)
+    if not _is_tpdb_picker_cache_fresh(entry):
+        return None
+    response = _hydrate_tpdb_picker_cache_response(entry.get('response'))
+    return response if isinstance(response, dict) else None
+
+
+def _cache_tpdb_picker_response(cache_key, response_payload):
+    if not cache_key or not response_payload:
+        return
+    cache = _read_tpdb_picker_cache()
+    cache[cache_key] = {
+        'updated_at': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+        'response': _compact_tpdb_picker_cache_response(response_payload),
+    }
+    _write_tpdb_picker_cache(cache)
+
+
+def _clear_tpdb_cache():
+    cleared = []
+    for path in (_get_tpdb_set_cache_path(), _get_tpdb_picker_cache_path()):
+        try:
+            os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as cache_file:
+                json.dump({}, cache_file)
+            cleared.append(path)
+        except Exception as e:
+            logging.warning(f"Failed to clear TPDb cache file {path}: {e}")
+    return cleared
+
+
+def _compact_tpdb_picker_cache_response(response):
+    if not isinstance(response, dict):
+        return response
+
+    compact_groups = [_compact_tpdb_group(group) for group in response.get('poster_groups', [])]
+    compact_posters = [_compact_tpdb_poster(poster) for poster in response.get('posters', [])]
+    first_group_posters = compact_groups[0].get('s', []) if compact_groups else []
+
+    payload = {
+        'poster_groups': compact_groups,
+        'eligible_seasons': [_compact_eligible_season(season) for season in response.get('eligible_seasons', [])],
+        'poster_set_limit': response.get('poster_set_limit'),
+        'can_browse_more_sets': response.get('can_browse_more_sets'),
+        'tpdb_mapping_url': response.get('tpdb_mapping_url'),
+    }
+    if compact_posters != first_group_posters:
+        payload['posters'] = compact_posters
+
+    return {
+        key: value
+        for key, value in payload.items()
+        if value not in (None, '', [], {})
+    }
+
+
+def _hydrate_tpdb_picker_cache_response(response):
+    if not isinstance(response, dict):
+        return response
+
+    poster_groups = [_hydrate_tpdb_group(group) for group in response.get('poster_groups', [])]
+    posters = [_hydrate_tpdb_poster(poster) for poster in response.get('posters', [])]
+    if not posters and poster_groups:
+        posters = poster_groups[0].get('show_posters', [])
+
+    return {
+        'posters': posters,
+        'poster_groups': poster_groups,
+        'eligible_seasons': [_hydrate_eligible_season(season) for season in response.get('eligible_seasons', [])],
+        'poster_set_limit': response.get('poster_set_limit'),
+        'can_browse_more_sets': response.get('can_browse_more_sets'),
+        'tpdb_mapping_url': response.get('tpdb_mapping_url'),
+    }
+
+
+def _compact_tpdb_group(group):
+    expected_group_id = f"group-{group.get('source_index')}"
+    compact = {
+        'i': group.get('id') if group.get('id') != expected_group_id else None,
+        'n': group.get('title'),
+        'u': group.get('url'),
+        'm': group.get('match_score'),
+        'x': group.get('source_index'),
+        's': [_compact_tpdb_poster(poster, group_id=group.get('id')) for poster in group.get('show_posters', [])],
+        'p': [_compact_tpdb_poster(poster, group_id=group.get('id')) for poster in group.get('season_posters', [])],
+        'e': group.get('eligible_season_count'),
+        'c': group.get('covered_season_count'),
+        'k': group.get('covered_season_keys') or [],
+        'a': [_compact_available_set(set_info) for set_info in group.get('available_sets', [])],
+    }
+    return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
+
+
+def _hydrate_tpdb_group(group):
+    group_id = group.get('i') or f"group-{group.get('x', 0)}"
+    hydrated = {
+        'id': group_id,
+        'title': group.get('n'),
+        'url': group.get('u'),
+        'match_score': group.get('m'),
+        'source_index': group.get('x'),
+        'show_posters': [_hydrate_tpdb_poster(poster, group_id=group_id) for poster in group.get('s', [])],
+        'season_posters': [_hydrate_tpdb_poster(poster, group_id=group_id) for poster in group.get('p', [])],
+        'eligible_season_count': group.get('e', 0),
+        'covered_season_count': group.get('c', 0),
+        'covered_season_keys': group.get('k', []),
+        'available_sets': [_hydrate_available_set(set_info) for set_info in group.get('a', [])],
+    }
+    return hydrated
+
+
+def _compact_tpdb_poster(poster, group_id=None):
+    compact = {
+        'i': poster.get('id'),
+        'u': poster.get('url'),
+        'b': poster.get('base64'),
+        't': poster.get('target_type'),
+        'g': poster.get('group_id') if poster.get('group_id') != group_id else None,
+        'sid': poster.get('set_id'),
+        'spc': poster.get('set_poster_count'),
+        'up': poster.get('uploader') if poster.get('uploader') != 'Unknown' else None,
+        'pid': poster.get('tpdb_poster_id'),
+        'src': poster.get('source_url'),
+        'sn': poster.get('season_number'),
+        'st': poster.get('season_title'),
+        'si': poster.get('season_id'),
+        'hp': True if poster.get('season_has_poster') else None,
+    }
+    return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
+
+
+def _hydrate_tpdb_poster(poster, group_id=None):
+    hydrated = {
+        'id': poster.get('i'),
+        'url': poster.get('u'),
+        'base64': poster.get('b'),
+        'title': 'Poster',
+        'uploader': poster.get('up') or 'Unknown',
+        'likes': 0,
+        'target_type': poster.get('t'),
+        'group_id': poster.get('g') or group_id,
+        'set_id': poster.get('sid'),
+        'set_url': _build_tpdb_set_url(poster.get('sid')),
+        'set_poster_count': poster.get('spc'),
+        'tpdb_poster_id': poster.get('pid'),
+        'source_url': poster.get('src'),
+    }
+    if poster.get('si'):
+        season_number = poster.get('sn')
+        hydrated.update({
+            'season_id': poster.get('si'),
+            'season_number': season_number,
+            'season_title': poster.get('st'),
+            'is_special': season_number == 0,
+            'season_has_poster': bool(poster.get('hp')),
+        })
+    return hydrated
+
+
+def _compact_available_set(set_info):
+    compact = {
+        'i': str(set_info.get('set_id') or ''),
+        'c': set_info.get('set_poster_count'),
+        'u': set_info.get('uploader') if set_info.get('uploader') != 'Unknown' else None,
+        'p': set_info.get('preview_base64'),
+    }
+    return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
+
+
+def _hydrate_available_set(set_info):
+    set_id = set_info.get('i')
+    return {
+        'set_id': set_id,
+        'set_url': _build_tpdb_set_url(set_id),
+        'set_poster_count': set_info.get('c'),
+        'uploader': set_info.get('u') or 'Unknown',
+        'preview_base64': set_info.get('p'),
+    }
+
+
+def _compact_eligible_season(season):
+    compact = {
+        'i': season.get('id'),
+        't': season.get('title'),
+        'n': season.get('number'),
+        'h': True if season.get('has_poster') else None,
+        'u': season.get('thumbnail_url'),
+    }
+    return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
+
+
+def _hydrate_eligible_season(season):
+    number = season.get('n')
+    return {
+        'id': season.get('i'),
+        'title': season.get('t') or ('Specials' if number == 0 else f"Season {number}"),
+        'number': number,
+        'is_special': number == 0,
+        'has_poster': bool(season.get('h')),
+        'thumbnail_url': season.get('u'),
+    }
 
 
 def _read_protected_item_ids():
@@ -1031,8 +1293,18 @@ def get_item_posters(item_id):
         poster_set_limit = max(1, min(poster_set_limit or 3, Config.MAX_POSTERS_PER_ITEM))
         requested_set_url = request.args.get('set_url')
         override_tpdb_url = _normalize_tpdb_item_url(request.args.get('tpdb_url'))
-        mapped_tpdb_url = override_tpdb_url or _get_tpdb_item_map_url(item_id)
-        cached_available_sets = _get_cached_tpdb_sets(mapped_tpdb_url)
+        use_cache = request.args.get('use_cache', 'true').lower() != 'false'
+        mapped_tpdb_url = override_tpdb_url or (_get_tpdb_item_map_url(item_id) if use_cache else '')
+        cached_available_sets = _get_cached_tpdb_sets(mapped_tpdb_url) if use_cache else []
+        cache_key = None
+        if use_cache and not requested_set_url and not override_tpdb_url and mapped_tpdb_url:
+            cache_key = _tpdb_picker_cache_key(item, mapped_tpdb_url, poster_set_limit, eligible_seasons)
+            cached_response = _get_cached_tpdb_picker_response(cache_key)
+            if cached_response:
+                cached_response['item'] = item
+                cached_response['from_cache'] = True
+                return jsonify(cached_response)
+
         search_result = search_tpdb_for_poster_groups(
             item['title'],
             item_year=item.get('year'),
@@ -1048,7 +1320,7 @@ def get_item_posters(item_id):
         resolved_tpdb_url = _set_tpdb_item_map_url(item_id, override_tpdb_url or best_group.get('url') or mapped_tpdb_url)
         if not requested_set_url:
             _cache_tpdb_sets_from_groups(search_result.get('groups', []))
-        return jsonify({
+        response_payload = {
             'item': item,
             'posters': search_result.get('posters', []),
             'poster_groups': search_result.get('groups', []),
@@ -1056,7 +1328,13 @@ def get_item_posters(item_id):
             'poster_set_limit': poster_set_limit,
             'can_browse_more_sets': item.get('type') == 'Series' and poster_set_limit < Config.MAX_POSTERS_PER_ITEM,
             'tpdb_mapping_url': resolved_tpdb_url,
-        })
+            'from_cache': False,
+        }
+        if use_cache and not requested_set_url and resolved_tpdb_url and not cache_key:
+            cache_key = _tpdb_picker_cache_key(item, resolved_tpdb_url, poster_set_limit, eligible_seasons)
+        if cache_key:
+            _cache_tpdb_picker_response(cache_key, response_payload)
+        return jsonify(response_payload)
     except TPDBRateLimited as e:
         logging.warning(f"TPDb challenge/rate-limit for {item_id}: {e}")
         return jsonify({'error': str(e), 'error_type': 'tpdb_rate_limited'}), 429
@@ -1988,6 +2266,17 @@ def clear_processed_items():
         return jsonify({'success': True, 'removed_count': removed_count})
     except Exception as e:
         logging.error(f"Error clearing processed items log: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/tpdb-cache', methods=['DELETE'])
+def clear_tpdb_cache():
+    """Clear cached TPDb picker and set preview data without removing item URL mappings."""
+    try:
+        cleared_files = _clear_tpdb_cache()
+        return jsonify({'success': True, 'cleared_files': cleared_files})
+    except Exception as e:
+        logging.error(f"Error clearing TPDb cache: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

@@ -173,6 +173,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const themeBtn = document.getElementById('themeToggle');
     if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
     initAutoBatchSeasonSettings();
+    initTpdbPickerCacheSettings();
     initSeriesSeasonCounts();
 
     // Modals
@@ -477,35 +478,96 @@ function stopPosterSearchProgress() {
     if (loadingSubtext) loadingSubtext.textContent = 'This may take a few moments';
 }
 
+function startDelayedPosterSearchLoading(itemType, delayMs = 350) {
+    let shown = false;
+    const timer = setTimeout(() => {
+        shown = true;
+        startPosterSearchProgress(itemType);
+        if (loadingModal) loadingModal.show();
+    }, delayMs);
+
+    return () => {
+        clearTimeout(timer);
+        if (shown && loadingModal) loadingModal.hide();
+        stopPosterSearchProgress();
+    };
+}
+
 async function fetchPostersForItem(itemId, setLimit = 3, tpdbUrl = '') {
     const params = new URLSearchParams({ set_limit: String(setLimit) });
     if (tpdbUrl) params.set('tpdb_url', tpdbUrl);
+    params.set('use_cache', getTpdbPickerCachePreference() ? 'true' : 'false');
     const response = await fetch(`/item/${itemId}/posters?${params.toString()}`);
     const data = await response.json();
     if (data.error) throw new Error(data.error);
     return data;
 }
 
+function getTpdbPickerCachePreference() {
+    return localStorage.getItem('jpm_use_tpdb_picker_cache') !== 'false';
+}
+
+function setTpdbPickerCachePreference(enabled) {
+    localStorage.setItem('jpm_use_tpdb_picker_cache', enabled ? 'true' : 'false');
+}
+
+function syncTpdbPickerCacheInputs(enabled = getTpdbPickerCachePreference()) {
+    document.querySelectorAll('#useTpdbPickerCacheSetting, #tpdbPickerCacheToggle').forEach(input => {
+        input.checked = enabled;
+    });
+}
+
+function initTpdbPickerCacheSettings() {
+    syncTpdbPickerCacheInputs();
+    const setting = document.getElementById('useTpdbPickerCacheSetting');
+    if (!setting) return;
+
+    setting.addEventListener('change', () => {
+        setTpdbPickerCachePreference(setting.checked);
+        syncTpdbPickerCacheInputs(setting.checked);
+    });
+}
+
+async function clearTpdbCache() {
+    const confirmed = await showConfirmDialog({
+        title: 'Clear TPDb cache?',
+        message: 'Clear cached Find Posters results and TPDb set previews?',
+        details: 'Saved TPDb page overrides will be kept.',
+        confirmText: 'Clear cache',
+        variant: 'danger',
+    });
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/tpdb-cache', { method: 'DELETE' });
+        const data = await response.json();
+        if (!response.ok || data.error || data.success === false) {
+            throw new Error(data.error || 'Could not clear TPDb cache');
+        }
+        showAlert('TPDb cache cleared.', 'success');
+    } catch (error) {
+        console.error('Clear TPDb cache error:', error);
+        showAlert('Failed to clear TPDb cache: ' + error.message, 'danger');
+    }
+}
+
 // Load posters for item
 async function loadPosters(itemId, setLimit = 3) {
     preparePosterSearchForItem(itemId, setLimit);
     const itemType = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`)?.getAttribute('data-type') === 'series' ? 'Series' : 'Movie';
-    startPosterSearchProgress(itemType);
-    if (loadingModal) loadingModal.show();
+    const stopLoading = startDelayedPosterSearchLoading(itemType);
 
     try {
         const data = await fetchPostersForItem(itemId, setLimit);
 
-        if (loadingModal) loadingModal.hide();
+        stopLoading();
         currentPosterSetLimit = data.poster_set_limit || setLimit;
         canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
         displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || '');
     } catch (error) {
         console.error('Error loading posters:', error);
-        if (loadingModal) loadingModal.hide();
+        stopLoading();
         showAlert('Failed to load posters: ' + error.message, 'danger');
-    } finally {
-        stopPosterSearchProgress();
     }
 }
 
@@ -693,6 +755,10 @@ function renderTpdbOverrideControl(currentUrl = '') {
                     <i class="fas fa-sync-alt me-1"></i>Use
                 </button>
             </div>
+            <div class="form-check form-switch mt-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="tpdbPickerCacheToggle" ${getTpdbPickerCachePreference() ? 'checked' : ''}>
+                <label class="form-check-label small text-muted" for="tpdbPickerCacheToggle">Use cached picker results</label>
+            </div>
         </form>
     `;
 }
@@ -700,7 +766,16 @@ function renderTpdbOverrideControl(currentUrl = '') {
 function bindTpdbOverrideControl() {
     const form = document.getElementById('tpdbOverrideForm');
     const input = document.getElementById('tpdbOverrideInput');
+    const cacheToggle = document.getElementById('tpdbPickerCacheToggle');
     if (!form || !input || !currentItemId) return;
+
+    if (cacheToggle) {
+        syncTpdbPickerCacheInputs();
+        cacheToggle.addEventListener('change', () => {
+            setTpdbPickerCachePreference(cacheToggle.checked);
+            syncTpdbPickerCacheInputs(cacheToggle.checked);
+        });
+    }
 
     document.querySelectorAll('.tpdb-override-toggle').forEach(button => {
         button.addEventListener('click', () => {
@@ -720,19 +795,16 @@ function bindTpdbOverrideControl() {
             return;
         }
 
-        startPosterSearchProgress(currentPosterSearchItem?.type || 'Series');
-        if (loadingModal) loadingModal.show();
+        const stopLoading = startDelayedPosterSearchLoading(currentPosterSearchItem?.type || 'Series');
         try {
             const data = await fetchPostersForItem(currentItemId, currentPosterSetLimit, tpdbUrl);
-            if (loadingModal) loadingModal.hide();
+            stopLoading();
             canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
             displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || tpdbUrl);
         } catch (error) {
             console.error('TPDb override error:', error);
-            if (loadingModal) loadingModal.hide();
+            stopLoading();
             showAlert('Failed to load TPDb page: ' + error.message, 'danger');
-        } finally {
-            stopPosterSearchProgress();
         }
     });
 }

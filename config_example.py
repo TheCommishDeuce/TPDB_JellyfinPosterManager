@@ -25,9 +25,12 @@ class Config:
     TPDB_DEBUG_SNAPSHOTS = False
     TEMP_POSTER_DIR = "temp_posters"
     LOG_DIR = "logs"
+    CACHE_DIR = "cache"
     FAILED_LOG_FILE = os.path.join(LOG_DIR, "failed.log")
     RESULTS_LOG_FILE = os.path.join(LOG_DIR, "results.log")
     PROTECTED_ITEMS_FILE = os.path.join(LOG_DIR, "protected_items.json")
     TPDB_ITEM_MAP_FILE = os.path.join(LOG_DIR, "tpdb_item_map.json")
-    TPDB_SET_CACHE_FILE = os.path.join(LOG_DIR, "tpdb_set_cache.json")
+    TPDB_SET_CACHE_FILE = os.path.join(CACHE_DIR, "tpdb_set_cache.json")
+    TPDB_PICKER_CACHE_FILE = os.path.join(CACHE_DIR, "tpdb_picker_cache.json")
     TPDB_SET_CACHE_MAX_AGE_DAYS = 14
+    TPDB_PICKER_CACHE_MAX_AGE_DAYS = 7
