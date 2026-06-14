@@ -698,6 +698,10 @@ def search_tpdb_for_poster_groups(
         groups = []
         poster_id = 1
         preview_image_cache = {}
+        set_discovery_limit = max(
+            max_posters,
+            int(getattr(Config, "MAX_TPDB_SETS_PER_ITEM", Config.MAX_POSTERS_PER_ITEM))
+        )
         for attempt in range(3):
             try:
                 with selenium_lock:
@@ -832,7 +836,7 @@ def search_tpdb_for_poster_groups(
                         discovered_set_lookup = {}
                         discovered_set_order = {}
 
-                        for poster_link in item_soup.select(ITEM_POSTER_SELECTOR)[:Config.MAX_POSTERS_PER_ITEM]:
+                        for poster_link in item_soup.select(ITEM_POSTER_SELECTOR)[:set_discovery_limit]:
                             href = poster_link.get('href')
                             poster_url = _tpdb_absolute_url(href)
                             if not poster_url:

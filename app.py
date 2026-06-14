@@ -595,6 +595,7 @@ def _tpdb_picker_cache_key(item, tpdb_url, poster_set_limit, eligible_seasons):
         'item_year': item.get('year'),
         'tpdb_url': _normalize_tpdb_item_url(tpdb_url),
         'poster_set_limit': poster_set_limit,
+        'set_discovery_limit': int(getattr(Config, 'MAX_TPDB_SETS_PER_ITEM', Config.MAX_POSTERS_PER_ITEM)),
         'seasons': season_signature,
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode('utf-8')).hexdigest()
@@ -1366,7 +1367,7 @@ def get_item_posters(item_id):
             max_posters=poster_set_limit if item.get('type') == 'Series' else Config.MAX_POSTERS_PER_ITEM,
             requested_set_urls=[requested_set_url] if requested_set_url else None,
             tpdb_item_url=mapped_tpdb_url,
-            cached_available_sets=[],
+            cached_available_sets=_get_cached_tpdb_sets(mapped_tpdb_url) if mapped_tpdb_url else [],
             preview_max_size=None,
         )
         best_group = search_result.get('best_group') or {}

@@ -21,6 +21,7 @@ class Config:
     # Application Settings
     WEB_PORT = 5001
     MAX_POSTERS_PER_ITEM = 18
+    MAX_TPDB_SETS_PER_ITEM = 30
     TPDB_BATCH_DELAY_SEC = 1.5
     TPDB_DEBUG_SNAPSHOTS = False
     LOG_DIR = "logs"
