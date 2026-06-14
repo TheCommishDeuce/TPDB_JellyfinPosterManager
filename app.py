@@ -5,12 +5,20 @@ import os
 import logging
 import re
 import hashlib
+import base64
 import sys
 import time
+from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from poster_scraper import *
 from config import Config
 import threading
+
+try:
+    from PIL import Image, ImageOps
+except ImportError:
+    Image = None
+    ImageOps = None
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -22,6 +30,37 @@ def _utc_now():
 
 def _utc_timestamp():
     return _utc_now().isoformat(timespec='seconds').replace('+00:00', 'Z')
+
+
+def _compress_base64_preview(data_url):
+    if not data_url or not isinstance(data_url, str) or not Image or not ImageOps:
+        return data_url
+    if not data_url.startswith('data:image/') or ';base64,' not in data_url:
+        return data_url
+
+    try:
+        _, encoded = data_url.split(';base64,', 1)
+        image_bytes = base64.b64decode(encoded)
+        with Image.open(BytesIO(image_bytes)) as image:
+            image = ImageOps.fit(image, TPDB_PREVIEW_MAX_SIZE, Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+            if image.mode not in ('RGB', 'RGBA'):
+                image = image.convert('RGB')
+
+            output = BytesIO()
+            try:
+                image.save(output, format='WEBP', quality=TPDB_PREVIEW_QUALITY, method=4)
+                content_type = 'image/webp'
+            except Exception:
+                output = BytesIO()
+                if image.mode == 'RGBA':
+                    image = image.convert('RGB')
+                image.save(output, format='JPEG', quality=TPDB_PREVIEW_QUALITY, optimize=True)
+                content_type = 'image/jpeg'
+
+        return f"data:{content_type};base64,{base64.b64encode(output.getvalue()).decode('utf-8')}"
+    except Exception as e:
+        logging.debug(f"Failed to compress cached TPDb preview: {e}")
+        return data_url
 
 class ConsoleFormatter(logging.Formatter):
     COLORS = {
@@ -455,7 +494,7 @@ def _cache_tpdb_sets_from_groups(groups):
                     'set_id': str(set_info.get('set_id') or ''),
                     'set_poster_count': set_info.get('set_poster_count'),
                     'uploader': set_info.get('uploader') or 'Unknown',
-                    'preview_base64': set_info.get('preview_base64'),
+                    'preview_base64': _compress_base64_preview(set_info.get('preview_base64')),
                 }
                 for set_info in available_sets
                 if set_info.get('set_id')
@@ -634,7 +673,7 @@ def _compact_tpdb_poster(poster, group_id=None):
     compact = {
         'i': poster.get('id'),
         'u': poster.get('url'),
-        'b': poster.get('base64'),
+        'b': _compress_base64_preview(poster.get('base64')),
         't': poster.get('target_type'),
         'g': poster.get('group_id') if poster.get('group_id') != group_id else None,
         'sid': poster.get('set_id'),
@@ -683,7 +722,7 @@ def _compact_available_set(set_info):
         'i': str(set_info.get('set_id') or ''),
         'c': set_info.get('set_poster_count'),
         'u': set_info.get('uploader') if set_info.get('uploader') != 'Unknown' else None,
-        'p': set_info.get('preview_base64'),
+        'p': _compress_base64_preview(set_info.get('preview_base64')),
     }
     return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
 
@@ -1307,7 +1346,6 @@ def get_item_posters(item_id):
         override_tpdb_url = _normalize_tpdb_item_url(request.args.get('tpdb_url'))
         use_cache = request.args.get('use_cache', 'true').lower() != 'false'
         mapped_tpdb_url = override_tpdb_url or (_get_tpdb_item_map_url(item_id) if use_cache else '')
-        cached_available_sets = _get_cached_tpdb_sets(mapped_tpdb_url) if use_cache else []
         cache_key = None
         if use_cache and not requested_set_url and not override_tpdb_url and mapped_tpdb_url:
             cache_key = _tpdb_picker_cache_key(item, mapped_tpdb_url, poster_set_limit, eligible_seasons)
@@ -1326,7 +1364,8 @@ def get_item_posters(item_id):
             max_posters=poster_set_limit if item.get('type') == 'Series' else Config.MAX_POSTERS_PER_ITEM,
             requested_set_urls=[requested_set_url] if requested_set_url else None,
             tpdb_item_url=mapped_tpdb_url,
-            cached_available_sets=cached_available_sets,
+            cached_available_sets=[],
+            preview_max_size=None,
         )
         best_group = search_result.get('best_group') or {}
         resolved_tpdb_url = _set_tpdb_item_map_url(item_id, override_tpdb_url or best_group.get('url') or mapped_tpdb_url)

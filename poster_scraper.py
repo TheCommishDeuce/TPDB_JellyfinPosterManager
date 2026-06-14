@@ -671,6 +671,8 @@ def search_tpdb_for_poster_groups(
     requested_set_urls=None,
     tpdb_item_url=None,
     cached_available_sets=None,
+    preview_max_size=TPDB_PREVIEW_MAX_SIZE,
+    preview_quality=TPDB_PREVIEW_QUALITY,
 ):
     """Return grouped TPDb poster candidates plus a flat show-poster list."""
     global selenium_driver
@@ -852,8 +854,8 @@ def search_tpdb_for_poster_groups(
                                         include_base64,
                                         metadata.get('preview_url'),
                                         preview_image_cache,
-                                        max_size=TPDB_PREVIEW_MAX_SIZE,
-                                        quality=TPDB_PREVIEW_QUALITY,
+                                        max_size=preview_max_size,
+                                        quality=preview_quality,
                                     )
                                 discovered_set_order[set_url] = len(discovered_set_urls)
                                 discovered_set_urls.append(set_url)
@@ -873,6 +875,8 @@ def search_tpdb_for_poster_groups(
                                 include_base64,
                                 metadata.get('preview_url'),
                                 preview_image_cache,
+                                max_size=preview_max_size,
+                                quality=preview_quality,
                             )
                             season_key = _extract_tpdb_season_key(poster_link)
                             if season_key and season_key in season_by_key:
@@ -941,6 +945,8 @@ def search_tpdb_for_poster_groups(
                                             include_base64,
                                             metadata.get('preview_url'),
                                             preview_image_cache,
+                                            max_size=preview_max_size,
+                                            quality=preview_quality,
                                         )
                                         group['season_posters'].append(_poster_dict(
                                             poster_id,
@@ -959,6 +965,8 @@ def search_tpdb_for_poster_groups(
                                             include_base64,
                                             metadata.get('preview_url'),
                                             preview_image_cache,
+                                            max_size=preview_max_size,
+                                            quality=preview_quality,
                                         )
                                         group['show_posters'].append(_poster_dict(
                                             poster_id,
@@ -1027,6 +1035,8 @@ def search_tpdb_for_poster_groups(
                                     include_base64,
                                     metadata.get('preview_url'),
                                     preview_image_cache,
+                                    max_size=preview_max_size,
+                                    quality=preview_quality,
                                 )
                                 group['season_posters'].append(_poster_dict(
                                     poster_id,
