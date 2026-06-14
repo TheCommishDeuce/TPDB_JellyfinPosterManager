@@ -7,13 +7,21 @@ import re
 import hashlib
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from poster_scraper import *
 from config import Config
 import threading
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+
+def _utc_timestamp():
+    return _utc_now().isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 class ConsoleFormatter(logging.Formatter):
     COLORS = {
@@ -188,7 +196,7 @@ def _sweep_stale_temp_posters(max_age_sec=3600):
 
 def _create_auto_batch_job(target_filter, skip_processed=False, include_season_posters=False, replace_existing_season_posters=False, item_ids=None):
     job_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+    now = _utc_timestamp()
     job = {
         'job_id': job_id,
         'filter': target_filter,
@@ -226,7 +234,7 @@ def _create_auto_batch_job(target_filter, skip_processed=False, include_season_p
 
 def _update_auto_batch_job(job_id, **updates):
     global latest_auto_batch_job_id
-    updates['updated_at'] = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+    updates['updated_at'] = _utc_timestamp()
     with auto_batch_jobs_lock:
         job = auto_batch_jobs.get(job_id)
         if not job:
@@ -277,7 +285,7 @@ def _cancel_auto_batch_job(job_id):
         job['status'] = 'cancelling'
         job['phase'] = 'cancelling'
         job['message'] = 'Cancelling after the current step...'
-        job['updated_at'] = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+        job['updated_at'] = _utc_timestamp()
         return dict(job)
 
 
@@ -402,10 +410,12 @@ def _is_tpdb_set_cache_fresh(entry):
     if not updated_at:
         return False
     try:
-        updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00')).replace(tzinfo=None)
+        updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
     except ValueError:
         return False
-    return datetime.utcnow() - updated <= timedelta(days=TPDB_SET_CACHE_MAX_AGE_DAYS)
+    return _utc_now() - updated <= timedelta(days=TPDB_SET_CACHE_MAX_AGE_DAYS)
 
 
 def _get_cached_tpdb_sets(tpdb_item_url):
@@ -439,7 +449,7 @@ def _cache_tpdb_sets_from_groups(groups):
         if not tpdb_item_url or not available_sets:
             continue
         cache[tpdb_item_url] = {
-            'updated_at': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'updated_at': _utc_timestamp(),
             'available_sets': [
                 {
                     'set_id': str(set_info.get('set_id') or ''),
@@ -480,10 +490,12 @@ def _is_tpdb_picker_cache_fresh(entry):
     if not updated_at:
         return False
     try:
-        updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00')).replace(tzinfo=None)
+        updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
     except ValueError:
         return False
-    return datetime.utcnow() - updated <= timedelta(days=TPDB_PICKER_CACHE_MAX_AGE_DAYS)
+    return _utc_now() - updated <= timedelta(days=TPDB_PICKER_CACHE_MAX_AGE_DAYS)
 
 
 def _tpdb_picker_cache_key(item, tpdb_url, poster_set_limit, eligible_seasons):
@@ -519,7 +531,7 @@ def _cache_tpdb_picker_response(cache_key, response_payload):
         return
     cache = _read_tpdb_picker_cache()
     cache[cache_key] = {
-        'updated_at': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+        'updated_at': _utc_timestamp(),
         'response': _compact_tpdb_picker_cache_response(response_payload),
     }
     _write_tpdb_picker_cache(cache)
@@ -729,7 +741,7 @@ def _read_protected_item_ids():
 def _write_protected_item_ids(item_ids):
     os.makedirs(Config.LOG_DIR, exist_ok=True)
     payload = {
-        'updated_at': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+        'updated_at': _utc_timestamp(),
         'items': sorted(str(item_id) for item_id in item_ids if item_id),
     }
     with open(_get_protected_items_path(), 'w', encoding='utf-8') as protected_file:
@@ -769,7 +781,7 @@ def _log_processed_item(item=None, operation='auto-poster', poster_url=None, ite
         resolved_item_year = item_year if item_year is not None else (item or {}).get('year')
         entry = {
             'id': str(uuid.uuid4()),
-            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'timestamp': _utc_timestamp(),
             'status': 'success',
             'operation': operation,
             'item_id': resolved_item_id,
@@ -933,7 +945,7 @@ def _log_failed_item(item=None, error=None, operation='poster', poster_url=None,
     try:
         entry = {
             'id': str(uuid.uuid4()),
-            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'timestamp': _utc_timestamp(),
             'status': 'failed',
             'operation': operation,
             'item_id': item_id or (item or {}).get('id'),
@@ -953,7 +965,7 @@ def _log_resolved_item(item=None, operation='retry-auto-poster', poster_url=None
     try:
         entry = {
             'id': str(uuid.uuid4()),
-            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'timestamp': _utc_timestamp(),
             'status': 'resolved',
             'operation': operation,
             'item_id': item_id or (item or {}).get('id'),
