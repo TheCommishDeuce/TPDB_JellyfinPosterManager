@@ -494,9 +494,10 @@ function startDelayedPosterSearchLoading(itemType, delayMs = 350) {
     };
 }
 
-async function fetchPostersForItem(itemId, setLimit = 3, tpdbUrl = '') {
+async function fetchPostersForItem(itemId, setLimit = 3, tpdbUrl = '', options = {}) {
     const params = new URLSearchParams({ set_limit: String(setLimit) });
     if (tpdbUrl) params.set('tpdb_url', tpdbUrl);
+    if (options.cacheOnly) params.set('cache_only', 'true');
     params.set('use_cache', getTpdbPickerCachePreference() ? 'true' : 'false');
     const response = await fetch(`/item/${itemId}/posters?${params.toString()}`);
     const data = await response.json();
@@ -556,18 +557,29 @@ async function clearTpdbCache() {
 async function loadPosters(itemId, setLimit = 3) {
     preparePosterSearchForItem(itemId, setLimit);
     const itemType = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`)?.getAttribute('data-type') === 'series' ? 'Series' : 'Movie';
-    const stopLoading = startDelayedPosterSearchLoading(itemType);
+    let stopLoading = null;
 
     try {
+        if (getTpdbPickerCachePreference()) {
+            const cachedData = await fetchPostersForItem(itemId, setLimit, '', { cacheOnly: true });
+            if (cachedData.from_cache) {
+                currentPosterSetLimit = cachedData.poster_set_limit || setLimit;
+                canBrowseMorePosterSets = Boolean(cachedData.can_browse_more_sets);
+                displayPosters(cachedData.item, cachedData.posters, cachedData.poster_groups || [], cachedData.eligible_seasons || [], cachedData.tpdb_mapping_url || '', true);
+                return;
+            }
+        }
+
+        stopLoading = startDelayedPosterSearchLoading(itemType);
         const data = await fetchPostersForItem(itemId, setLimit);
 
-        stopLoading();
+        if (stopLoading) stopLoading();
         currentPosterSetLimit = data.poster_set_limit || setLimit;
         canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
         displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || '', Boolean(data.from_cache));
     } catch (error) {
         console.error('Error loading posters:', error);
-        stopLoading();
+        if (stopLoading) stopLoading();
         showAlert('Failed to load posters: ' + error.message, 'danger');
     }
 }

@@ -1330,10 +1330,6 @@ def index():
 @app.route('/item/<item_id>/posters')
 def get_item_posters(item_id):
     """Get posters for a specific item"""
-    if not selenium_ready_event.wait(timeout=30):
-        logging.error("Selenium not ready in time for /item/<item_id>/posters")
-        return jsonify({'error': 'Backend service (Selenium) is not ready. Please try again in a moment.'}), 503
-
     session_id = session.get('session_id')
     if not session_id or session_id not in user_sessions:
         return jsonify({'error': 'Session not found'}), 400
@@ -1352,6 +1348,7 @@ def get_item_posters(item_id):
         requested_set_url = request.args.get('set_url')
         override_tpdb_url = _normalize_tpdb_item_url(request.args.get('tpdb_url'))
         use_cache = request.args.get('use_cache', 'true').lower() != 'false'
+        cache_only = request.args.get('cache_only', 'false').lower() == 'true'
         mapped_tpdb_url = override_tpdb_url or (_get_tpdb_item_map_url(item_id) if use_cache else '')
         cache_key = None
         if use_cache and not requested_set_url and not override_tpdb_url and mapped_tpdb_url:
@@ -1361,6 +1358,13 @@ def get_item_posters(item_id):
                 cached_response['item'] = item
                 cached_response['from_cache'] = True
                 return jsonify(cached_response)
+
+        if cache_only:
+            return jsonify({'cache_miss': True, 'from_cache': False})
+
+        if not selenium_ready_event.wait(timeout=30):
+            logging.error("Selenium not ready in time for /item/<item_id>/posters")
+            return jsonify({'error': 'Backend service (Selenium) is not ready. Please try again in a moment.'}), 503
 
         search_result = search_tpdb_for_poster_groups(
             item['title'],
