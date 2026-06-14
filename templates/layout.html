@@ -29,11 +29,40 @@
 <body>
   <div class="container mt-4">
     <!-- Theme toggle row (top-right) -->
-    <div class="d-flex justify-content-end mb-3">
+    <div class="d-flex justify-content-end gap-2 mb-3">
       <button id="themeToggle" class="btn btn-outline-secondary btn-sm" type="button" aria-label="Toggle dark mode">
         <i id="themeToggleIcon" class="fas fa-moon me-1"></i>
         <span id="themeToggleText">Dark</span>
       </button>
+      <div class="dropdown">
+        <button id="appSettingsBtn" class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
+                data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+          <i class="fas fa-gear me-1"></i>Settings
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end p-2" aria-labelledby="appSettingsBtn">
+          <li class="px-2 py-1">
+            <div class="fw-semibold mb-2">Find Posters Cache</div>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" role="switch" id="useTpdbPickerCacheSetting">
+              <label class="form-check-label small" for="useTpdbPickerCacheSetting">Use cached picker results</label>
+            </div>
+            <button class="btn btn-outline-danger btn-sm w-100" type="button" onclick="clearTpdbCache()">
+              <i class="fas fa-trash me-1"></i>Clear TPDb cache
+            </button>
+          </li>
+          <li><hr class="dropdown-divider"></li>
+          <li>
+            <button class="dropdown-item text-danger" type="button" onclick="clearProcessedItems()">
+              <i class="fas fa-eraser me-2"></i>Clear processed items
+            </button>
+          </li>
+          <li>
+            <button class="dropdown-item text-danger" type="button" onclick="clearProcessedItemsForVisibleItems()">
+              <i class="fas fa-eye-slash me-2"></i>Clear processed for visible items
+            </button>
+          </li>
+        </ul>
+      </div>
     </div>
 
     {% if error %}

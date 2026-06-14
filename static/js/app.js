@@ -132,24 +132,42 @@ let currentItemId = null;
 let selectedPosters = {};
 let loadingModal = null;
 let posterModal = null;
+let seasonPostersModal = null;
 let resultsModal = null;
+let confirmModal = null;
 let failedItemsPanelVisible = false;
 let activeFailedItemIds = new Set();
 let activeFailedItemDetails = new Map();
 let activeProcessedItemDetails = new Map();
+let protectedItemIds = new Set();
 let autoBatchPollTimer = null;
 let currentAutoBatchJobId = null;
 let autoBatchStartedAt = null;
-let manualSelectionVisible = false;
+let latestAutoBatchJob = null;
+let activeGridStatusFilters = new Set();
+let manualQueueIds = new Set();
+let manualQueueOrder = [];
+let manualQueueResults = new Map();
+let manualQueueErrors = new Map();
+let manualQueuePresentedIds = new Set();
+let manualQueueSelectionIds = new Set();
+let manualQueueActive = false;
+let manualQueueWorkerRunning = false;
+let manualQueueCurrentItemId = null;
 let posterSearchProgressTimer = null;
 let posterSearchGroups = [];
 let currentPosterSelection = null;
 let currentPosterSearchItem = null;
 let currentPosterEligibleSeasons = [];
+let currentPosterSearchFromCache = false;
 let posterGroupDisplayMode = 'group';
 let currentPosterSetLimit = 3;
 let canBrowseMorePosterSets = false;
 let loadingPosterSetUrls = new Set();
+let manuallyLoadedPosterSetUrls = new Set();
+let posterPreviewObserver = null;
+const AUTO_BATCH_ESTIMATE_MIN_PROCESSED = 10;
+const ACTIVE_AUTO_BATCH_JOB_KEY = 'jpm_active_auto_batch_job_id';
 
 document.addEventListener('DOMContentLoaded', function() {
     // Theme first
@@ -157,75 +175,58 @@ document.addEventListener('DOMContentLoaded', function() {
     const themeBtn = document.getElementById('themeToggle');
     if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
     initAutoBatchSeasonSettings();
+    initTpdbPickerCacheSettings();
     initSeriesSeasonCounts();
 
     // Modals
     const lm = document.getElementById('loadingModal');
     const pm = document.getElementById('posterModal');
+    const sm = document.getElementById('seasonPostersModal');
     const rm = document.getElementById('resultsModal');
+    const cm = document.getElementById('confirmModal');
     if (lm && bootstrap?.Modal) loadingModal = new bootstrap.Modal(lm);
-    if (pm && bootstrap?.Modal) posterModal = new bootstrap.Modal(pm);
+    if (pm && bootstrap?.Modal) {
+        posterModal = new bootstrap.Modal(pm);
+        pm.addEventListener('hidden.bs.modal', () => {
+            if (!manualQueueActive || !manualQueueCurrentItemId) return;
+            manualQueuePresentedIds.add(manualQueueCurrentItemId);
+            manualQueueCurrentItemId = null;
+            setTimeout(showNextManualQueueResult, 150);
+        });
+    }
+    if (sm && bootstrap?.Modal) seasonPostersModal = new bootstrap.Modal(sm);
     if (rm && bootstrap?.Modal) {
         resultsModal = new bootstrap.Modal(rm);
         rm.addEventListener('hidden.bs.modal', () => loadFailedItems({ autoExpand: true }));
     }
+    if (cm && bootstrap?.Modal) confirmModal = new bootstrap.Modal(cm);
 
     // Initialize counters/buttons
     updateUploadAllButton();
+    initManualQueueControls();
+    initProtectedItemButtons();
+    loadProtectedItems();
     loadFailedItems();
     loadProcessedItems();
+    loadLatestAutoBatchResults();
 
     const urlParams = new URLSearchParams(window.location.search);
     const libraryFilter = document.getElementById('libraryFilter');
     if (libraryFilter) libraryFilter.value = urlParams.get('library') || '';
     filterContent(urlParams.get('type') || 'all', false);
+    resumeAutoBatchProgressOnLoad();
 
     console.log('Jellyfin Poster Manager initialized');
 });
 
 // Filter and Sort Functions
 function filterContent(type, updateUrl = true) {
-    let domType = type;
-    if (type === 'movies') domType = 'movie';
-    if (type === 'series') domType = 'series';
-
-    const items = document.querySelectorAll('.item-card-wrapper');
-    const selectedLibrary = document.getElementById('libraryFilter')?.value || '';
-    let visibleCount = 0;
-
-    items.forEach(item => {
-        const itemType = item.getAttribute('data-type');
-        const itemLibrary = item.getAttribute('data-library-id') || '';
-        const matchesType = type === 'all' || itemType === domType;
-        const matchesLibrary = !selectedLibrary || itemLibrary === selectedLibrary;
-        if (matchesType && matchesLibrary) {
-            item.classList.remove('hidden');
-            visibleCount++;
-        } else {
-            item.classList.add('hidden');
-        }
-    });
-
-    document.querySelectorAll('.library-group-header').forEach(header => {
-        const headerLibrary = header.getAttribute('data-library-id') || '';
-        const hasVisibleItems = Array.from(items).some(item =>
-            !item.classList.contains('hidden') && (item.getAttribute('data-library-id') || '') === headerLibrary
-        );
-        header.classList.toggle('hidden', !hasVisibleItems);
-    });
-
-    const visibleItemCount = document.getElementById('visibleItemCount');
-    if (visibleItemCount) visibleItemCount.textContent = visibleCount;
-
-    const itemCountTotalText = document.getElementById('itemCountTotalText');
-    const allItemCount = Number(document.getElementById('allItemCount')?.dataset.count || items.length);
-    if (itemCountTotalText) {
-        itemCountTotalText.innerHTML = type === 'all' && !selectedLibrary ? '' : ` of <strong>${allItemCount}</strong>`;
-    }
-
     const filterId = type === 'movies' ? 'filterMovies' : type === 'series' ? 'filterSeries' : 'filterAll';
     const filterInput = document.getElementById(filterId);
     if (filterInput) filterInput.checked = true;
+
+    const selectedLibrary = updateLibraryFilterOptions(type);
+    applyGridFilters(type, selectedLibrary);
 
     if (!updateUrl) return;
 
@@ -242,14 +243,192 @@ function filterContent(type, updateUrl = true) {
     }
     url.hash = '';
     window.history.pushState({}, '', url);
-    applyProcessedItemMarkers(activeProcessedItemDetails);
-    applyFailedItemMarkers(activeFailedItemIds);
+}
+
+function updateLibraryFilterOptions(type = getCurrentContentFilter()) {
+    const libraryFilter = document.getElementById('libraryFilter');
+    if (!libraryFilter) return '';
+
+    let domType = type;
+    if (type === 'movies') domType = 'movie';
+    if (type === 'series') domType = 'series';
+
+    const matchingLibraryIds = new Set(
+        Array.from(document.querySelectorAll('.item-card-wrapper'))
+            .filter(item => type === 'all' || item.getAttribute('data-type') === domType)
+            .map(item => item.getAttribute('data-library-id') || '')
+            .filter(Boolean)
+    );
+
+    Array.from(libraryFilter.options).forEach(option => {
+        if (!option.value) {
+            option.textContent = type === 'movies'
+                ? 'All Movie Libraries'
+                : type === 'series'
+                    ? 'All Series Libraries'
+                    : 'All Libraries';
+            option.hidden = false;
+            option.disabled = false;
+            return;
+        }
+
+        const hasMatchingItems = type === 'all' || matchingLibraryIds.has(option.value);
+        option.hidden = !hasMatchingItems;
+        option.disabled = !hasMatchingItems;
+    });
+
+    if (libraryFilter.value && libraryFilter.selectedOptions[0]?.disabled) {
+        libraryFilter.value = '';
+    }
+
+    return libraryFilter.value || '';
+}
+
+function applyGridFilters(type = getCurrentContentFilter(), selectedLibrary = document.getElementById('libraryFilter')?.value || '') {
+    let domType = type;
+    if (type === 'movies') domType = 'movie';
+    if (type === 'series') domType = 'series';
+
+    const items = document.querySelectorAll('.item-card-wrapper');
+    const visibleLibraryIds = new Set();
+    let visibleCount = 0;
+
+    items.forEach(item => {
+        const itemType = item.getAttribute('data-type');
+        const itemLibrary = item.getAttribute('data-library-id') || '';
+        const matchesType = type === 'all' || itemType === domType;
+        const matchesLibrary = !selectedLibrary || itemLibrary === selectedLibrary;
+        const matchesStatus = matchesGridStatusFilters(item);
+        const isVisible = matchesType && matchesLibrary && matchesStatus;
+        item.classList.toggle('hidden', !isVisible);
+        if (isVisible) {
+            visibleCount++;
+            visibleLibraryIds.add(itemLibrary);
+        }
+    });
+
+    document.querySelectorAll('.library-group-header').forEach(header => {
+        const headerLibrary = header.getAttribute('data-library-id') || '';
+        header.classList.toggle('hidden', !visibleLibraryIds.has(headerLibrary));
+    });
+
+    const visibleItemCount = document.getElementById('visibleItemCount');
+    if (visibleItemCount) visibleItemCount.textContent = visibleCount;
+
+    const itemCountTotalText = document.getElementById('itemCountTotalText');
+    const allItemCount = Number(document.getElementById('allItemCount')?.dataset.count || items.length);
+    if (itemCountTotalText) {
+        itemCountTotalText.innerHTML = type === 'all' && !selectedLibrary && activeGridStatusFilters.size === 0 ? '' : ` of <strong>${allItemCount}</strong>`;
+    }
+
+    updateFilterToolbarState();
+}
+
+function getCurrentContentFilter() {
+    const currentType = document.querySelector('input[name="contentFilter"]:checked')?.id;
+    return currentType === 'filterMovies' ? 'movies' : currentType === 'filterSeries' ? 'series' : 'all';
+}
+
+function matchesGridStatusFilters(item) {
+    if (activeGridStatusFilters.size === 0) return true;
+
+    const itemId = item.getAttribute('data-item-id');
+    const card = item.querySelector('.item-card');
+    const states = {
+        processed: card?.classList.contains('processed-item'),
+        failed: card?.classList.contains('failed-item'),
+        queued: item.classList.contains('manual-queued') || Boolean(selectedPosters[itemId]) || manualQueueSelectionIds.has(itemId),
+        locked: card?.classList.contains('protected-item') || protectedItemIds.has(itemId),
+    };
+
+    for (const filter of activeGridStatusFilters) {
+        if (states[filter]) return true;
+    }
+    return false;
+}
+
+function setGridStatusFilter(checkbox) {
+    if (checkbox.checked) activeGridStatusFilters.add(checkbox.value);
+    else activeGridStatusFilters.delete(checkbox.value);
+    applyGridFilters();
+}
+
+function clearGridStatusFilters() {
+    activeGridStatusFilters.clear();
+    document.querySelectorAll('.grid-status-filter').forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    applyGridFilters();
+}
+
+function updateFilterToolbarState() {
+    const filterBtn = document.getElementById('filterDropdownBtn');
+    if (filterBtn) filterBtn.classList.toggle('active', activeGridStatusFilters.size > 0);
 }
 
 function filterLibrary() {
-    const currentType = document.querySelector('input[name="contentFilter"]:checked')?.id;
-    const type = currentType === 'filterMovies' ? 'movies' : currentType === 'filterSeries' ? 'series' : 'all';
-    filterContent(type);
+    filterContent(getCurrentContentFilter());
+}
+
+async function showSeasonPosters(itemId) {
+    const titleElement = document.getElementById('seasonPostersModalTitle');
+    const bodyElement = document.getElementById('seasonPostersModalBody');
+    if (!itemId || !bodyElement) return;
+
+    bodyElement.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary mb-3" role="status"></div>
+            <div class="text-muted">Loading season posters...</div>
+        </div>
+    `;
+    if (seasonPostersModal) seasonPostersModal.show();
+
+    try {
+        const response = await fetch(`/item/${encodeURIComponent(itemId)}/seasons`);
+        const data = await response.json();
+        if (!response.ok || data.error) throw new Error(data.error || 'Failed to load season posters');
+
+        const item = data.item || {};
+        const seasons = data.seasons || [];
+        if (titleElement) {
+            titleElement.innerHTML = `<i class="fas fa-layer-group me-2"></i>${escapeHtml(item.title || 'Season Posters')}`;
+        }
+
+        if (!seasons.length) {
+            bodyElement.innerHTML = '<div class="text-muted text-center py-4">No eligible seasons found.</div>';
+            return;
+        }
+
+        bodyElement.innerHTML = `
+            <div class="season-poster-grid">
+                ${seasons.map(season => renderSeasonPosterCard(season)).join('')}
+            </div>
+        `;
+    } catch (error) {
+        console.error('Season posters error:', error);
+        bodyElement.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function renderSeasonPosterCard(season) {
+    const defaultLabel = season.is_special ? 'Specials' : `Season ${season.number ?? '-'}`;
+    const title = season.title || defaultLabel;
+    const showDefaultLabel = defaultLabel.trim().toLowerCase() !== title.trim().toLowerCase();
+    const posterHtml = season.thumbnail_url
+        ? `<img src="/jellyfin-image?url=${encodeURIComponent(season.thumbnail_url)}" alt="${escapeHtml(title)} poster">`
+        : '<div class="text-center px-2"><i class="fas fa-image fa-2x mb-2 d-block"></i><small>No poster</small></div>';
+    const statusClass = season.has_poster ? 'bg-success' : 'bg-secondary';
+    const statusText = season.has_poster ? 'Has poster' : 'Missing poster';
+    return `
+        <article class="season-poster-card">
+            <div class="season-poster-frame">${posterHtml}</div>
+            <div class="season-poster-meta">
+                <div class="fw-semibold text-truncate" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+                ${showDefaultLabel ? `<small class="text-muted d-block">${escapeHtml(defaultLabel)}</small>` : ''}
+                <span class="badge ${statusClass} mt-2">${statusText}</span>
+            </div>
+        </article>
+    `;
 }
 
 function sortContent(sortBy) {
@@ -258,19 +437,26 @@ function sortContent(sortBy) {
     window.location.href = url.toString();
 }
 
-function startPosterSearchProgress() {
+function startPosterSearchProgress(itemType = '') {
     stopPosterSearchProgress();
 
     const loadingText = document.getElementById('loadingText');
     const loadingSubtext = document.getElementById('loadingSubtext');
     const startedAt = Date.now();
-    const steps = [
-        { at: 0, text: 'Searching TPDB for matching entries...' },
+    const isSeries = itemType === 'Series';
+    const steps = isSeries ? [
+        { at: 0, text: 'Searching TPDb for matching entries...' },
         { at: 5, text: 'Opening the best match and reading posters...' },
         { at: 10, text: 'Checking linked sets for matching season posters...' },
         { at: 18, text: 'Checking season-specific poster pages...' },
         { at: 25, text: 'Downloading poster previews...' },
-        { at: 40, text: 'Still working. TPDB is being checked gently to avoid rate limits...' }
+        { at: 40, text: 'Still working. TPDb is being checked gently to avoid rate limits...' }
+    ] : [
+        { at: 0, text: 'Searching TPDb for matching entries...' },
+        { at: 5, text: 'Opening the best match and reading movie posters...' },
+        { at: 10, text: 'Reading poster details from the result page...' },
+        { at: 18, text: 'Downloading poster previews...' },
+        { at: 35, text: 'Still working. TPDb is being checked gently to avoid rate limits...' }
     ];
 
     const update = () => {
@@ -294,74 +480,230 @@ function stopPosterSearchProgress() {
     if (loadingSubtext) loadingSubtext.textContent = 'This may take a few moments';
 }
 
+function startDelayedPosterSearchLoading(itemType, delayMs = 350) {
+    let shown = false;
+    const timer = setTimeout(() => {
+        shown = true;
+        startPosterSearchProgress(itemType);
+        if (loadingModal) loadingModal.show();
+    }, delayMs);
+
+    return () => {
+        clearTimeout(timer);
+        if (shown && loadingModal) loadingModal.hide();
+        stopPosterSearchProgress();
+    };
+}
+
+async function fetchPostersForItem(itemId, setLimit = 3, tpdbUrl = '', options = {}) {
+    const params = new URLSearchParams({ set_limit: String(setLimit) });
+    if (tpdbUrl) params.set('tpdb_url', tpdbUrl);
+    if (options.cacheOnly) params.set('cache_only', 'true');
+    params.set('use_cache', getTpdbPickerCachePreference() ? 'true' : 'false');
+    const response = await fetch(`/item/${itemId}/posters?${params.toString()}`);
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+}
+
+function getTpdbPickerCachePreference() {
+    return localStorage.getItem('jpm_use_tpdb_picker_cache') !== 'false';
+}
+
+function setTpdbPickerCachePreference(enabled) {
+    localStorage.setItem('jpm_use_tpdb_picker_cache', enabled ? 'true' : 'false');
+}
+
+function syncTpdbPickerCacheInputs(enabled = getTpdbPickerCachePreference()) {
+    document.querySelectorAll('#useTpdbPickerCacheSetting, #tpdbPickerCacheToggle').forEach(input => {
+        input.checked = enabled;
+    });
+}
+
+function initTpdbPickerCacheSettings() {
+    syncTpdbPickerCacheInputs();
+    const setting = document.getElementById('useTpdbPickerCacheSetting');
+    if (!setting) return;
+
+    setting.addEventListener('change', () => {
+        setTpdbPickerCachePreference(setting.checked);
+        syncTpdbPickerCacheInputs(setting.checked);
+    });
+}
+
+async function clearTpdbCache() {
+    const confirmed = await showConfirmDialog({
+        title: 'Clear TPDb cache?',
+        message: 'Clear cached Find Posters results and TPDb set previews?',
+        details: 'Saved TPDb page overrides will be kept.',
+        confirmText: 'Clear cache',
+        variant: 'danger',
+    });
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/tpdb-cache', { method: 'DELETE' });
+        const data = await response.json();
+        if (!response.ok || data.error || data.success === false) {
+            throw new Error(data.error || 'Could not clear TPDb cache');
+        }
+        showAlert('TPDb cache cleared.', 'success');
+    } catch (error) {
+        console.error('Clear TPDb cache error:', error);
+        showAlert('Failed to clear TPDb cache: ' + error.message, 'danger');
+    }
+}
+
 // Load posters for item
 async function loadPosters(itemId, setLimit = 3) {
+    preparePosterSearchForItem(itemId, setLimit);
+    const itemType = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`)?.getAttribute('data-type') === 'series' ? 'Series' : 'Movie';
+    let stopLoading = null;
+
+    try {
+        if (getTpdbPickerCachePreference()) {
+            const cachedData = await fetchPostersForItem(itemId, setLimit, '', { cacheOnly: true });
+            if (cachedData.from_cache) {
+                applyPosterSearchData(cachedData, setLimit, '', true);
+                return;
+            }
+        }
+
+        stopLoading = startDelayedPosterSearchLoading(itemType);
+        const data = await fetchPostersForItem(itemId, setLimit);
+
+        if (stopLoading) stopLoading();
+        applyPosterSearchData(data, setLimit);
+    } catch (error) {
+        console.error('Error loading posters:', error);
+        if (stopLoading) stopLoading();
+        showAlert('Failed to load posters: ' + error.message, 'danger');
+    }
+}
+
+function applyPosterSearchData(data, fallbackSetLimit = 3, tpdbMappingFallback = '', fromCache = Boolean(data?.from_cache)) {
+    if (!data) return;
+    const posterGroups = Array.isArray(data.poster_groups) ? data.poster_groups : [];
+    const eligibleSeasons = Array.isArray(data.eligible_seasons) ? data.eligible_seasons : [];
+    currentPosterSetLimit = data.poster_set_limit || fallbackSetLimit;
+    canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
+    displayPosters(
+        data.item,
+        data.posters,
+        posterGroups,
+        eligibleSeasons,
+        data.tpdb_mapping_url || tpdbMappingFallback,
+        fromCache
+    );
+}
+
+function resetPosterSearchState() {
+    currentPosterSelection = null;
+    currentPosterSearchFromCache = false;
+    posterGroupDisplayMode = 'group';
+    loadingPosterSetUrls = new Set();
+    manuallyLoadedPosterSetUrls = new Set();
+}
+
+function preparePosterSearchForItem(itemId, setLimit = 3) {
     if (currentPosterSearchItem?.id !== itemId) {
-        currentPosterSelection = null;
-        posterGroupDisplayMode = 'group';
-        loadingPosterSetUrls = new Set();
+        resetPosterSearchState();
     }
     currentItemId = itemId;
     currentPosterSetLimit = setLimit;
-    startPosterSearchProgress();
-    if (loadingModal) loadingModal.show();
+}
 
-    try {
-        const response = await fetch(`/item/${itemId}/posters?set_limit=${encodeURIComponent(setLimit)}`);
-        const data = await response.json();
+function isCurrentManualQueueModal() {
+    return manualQueueActive && manualQueueCurrentItemId === currentItemId;
+}
 
-        if (data.error) {
-            throw new Error(data.error);
+function bindAll(root, selector, eventName, handler) {
+    if (!root) return;
+    root.querySelectorAll(selector).forEach(element => {
+        element.addEventListener(eventName, () => handler(element));
+    });
+}
+
+function updatePosterSelectionFooter() {
+    const modalFooter = document.getElementById('posterModalFooter');
+    const queueBtn = document.getElementById('queuePosterSelectionBtn');
+    const uploadBtn = document.getElementById('uploadPosterSelectionBtn');
+    const selectionHint = document.getElementById('posterSelectionHint');
+    const hasSelection = hasCurrentPosterSelection();
+    const fromQueue = isCurrentManualQueueModal();
+
+    if (modalFooter) modalFooter.style.display = '';
+    if (queueBtn) {
+        queueBtn.disabled = !hasSelection;
+        queueBtn.innerHTML = fromQueue
+            ? '<i class="fas fa-check me-1"></i>Save Queued Selection'
+            : '<i class="fas fa-list-check me-1"></i>Queue Upload';
+    }
+    if (uploadBtn) {
+        uploadBtn.disabled = !hasSelection || fromQueue;
+        uploadBtn.style.display = fromQueue ? 'none' : '';
+    }
+    if (selectionHint) {
+        if (fromQueue) {
+            selectionHint.textContent = hasSelection
+                ? 'Save this selection, then the next queued item will open.'
+                : 'Choose a poster for this queued item.';
+        } else {
+            selectionHint.textContent = hasSelection
+                ? 'Queue this poster for later, or upload it now.'
+                : 'Choose a poster, then queue it or upload it now.';
         }
-
-        if (loadingModal) loadingModal.hide();
-        currentPosterSetLimit = data.poster_set_limit || setLimit;
-        canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || []);
-    } catch (error) {
-        console.error('Error loading posters:', error);
-        if (loadingModal) loadingModal.hide();
-        showAlert('Failed to load posters: ' + error.message, 'danger');
-    } finally {
-        stopPosterSearchProgress();
     }
 }
 
 // Display posters in modal (image-only, no author/download box)
-function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) {
+function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], tpdbMappingUrl = '', fromCache = false) {
     const modalBody = document.getElementById('posterModalBody');
     const modalTitle = document.querySelector('#posterModal .modal-title');
     const modalFooter = document.getElementById('posterModalFooter');
     const previousItemId = currentPosterSearchItem?.id;
-    if (modalTitle) modalTitle.innerHTML = `<i class="fas fa-images me-2"></i>Choose Poster for ${item.title}`;
-    if (modalFooter) modalFooter.style.display = 'none';
+    if (modalTitle) modalTitle.innerHTML = `<i class="fas fa-images me-2"></i>Choose Poster for ${escapeHtml(item.title)}`;
+    if (modalFooter) modalFooter.style.display = '';
     posterSearchGroups = Array.isArray(posterGroups) ? posterGroups : [];
     if (previousItemId !== item.id) {
-        currentPosterSelection = null;
-        posterGroupDisplayMode = 'group';
-        loadingPosterSetUrls = new Set();
+        resetPosterSearchState();
     }
     currentPosterSearchItem = item;
     currentPosterEligibleSeasons = Array.isArray(eligibleSeasons) ? eligibleSeasons : [];
+    currentPosterSearchFromCache = Boolean(fromCache);
+    updatePosterSelectionFooter();
 
     if (item.type === 'Series' && posterSearchGroups.length > 0) {
-        displayPosterGroups(item, posterSearchGroups, currentPosterEligibleSeasons);
+        displayPosterGroups(item, posterSearchGroups, currentPosterEligibleSeasons, tpdbMappingUrl, fromCache);
         return;
     }
 
     if (!posters || posters.length === 0) {
         modalBody.innerHTML = `
+            <div class="mb-3">
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                    ${renderPosterCacheIndicator(fromCache)}
+                    ${renderTpdbActions('', tpdbMappingUrl)}
+                </div>
+                ${renderTpdbOverrideControl(tpdbMappingUrl)}
+            </div>
             <div class="text-center py-5">
                 <i class="fas fa-search fa-3x text-muted mb-3"></i>
                 <h5 class="text-muted">No posters found</h5>
-                <p class="text-muted">No posters were found for "${item.title}"</p>
+                <p class="text-muted">No posters were found for "${escapeHtml(item.title)}"</p>
             </div>
         `;
     } else {
         let html = `
             <div class="mb-3">
-                <h6><i class="fas fa-film me-2"></i>${item.title}</h6>
-                <small class="text-muted">${item.year || 'Unknown Year'} • ${item.type}</small>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                    ${renderPosterCacheIndicator(fromCache)}
+                    ${renderTpdbActions(getPosterPickerTpdbPageUrl(posters, posterSearchGroups), tpdbMappingUrl)}
+                </div>
+                ${renderTpdbOverrideControl(tpdbMappingUrl)}
+                <small class="text-muted">${escapeHtml(item.year || 'Unknown Year')} &bull; ${escapeHtml(item.type)}</small>
                 <small class="text-muted ms-3">
                     <i class="fas fa-images me-1"></i>
                     Found ${posters.length} poster${posters.length !== 1 ? 's' : ''}
@@ -371,26 +713,11 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
         `;
 
         posters.forEach((poster, index) => {
-            const imageSource = poster.base64 || '';
             html += `
                 <div class="col-lg-2 col-md-3 col-sm-4 col-6 mb-3">
                     <div class="card poster-card h-100" data-poster-id="${poster.id}" onclick="selectPoster('${poster.url}', ${poster.id})">
-                        <div class="poster-container">
-                            ${!poster.base64 ? `
-                                <div class="poster-loading d-flex align-items-center justify-content-center">
-                                    <div class="text-center">
-                                        <i class="fas fa-exclamation-triangle text-warning mb-2"></i>
-                                        <br>
-                                        <small class="text-muted">Image failed to load</small>
-                                    </div>
-                                </div>
-                            ` : ''}
-                            <img src="${imageSource}"
-                                class="card-img-top poster-image"
-                                alt="Poster ${index + 1}"
-                                loading="lazy"
-                                style="${!poster.base64 ? 'display: none;' : ''}">
-                        </div>
+                        ${renderPosterImageFrame(poster, `Poster ${index + 1}`)}
+                        ${renderSinglePosterMetadata(poster)}
                     </div>
                 </div>
             `;
@@ -401,28 +728,235 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = []) 
     }
 
     if (posterModal) posterModal.show();
+    bindTpdbOverrideControl();
+    hydratePosterPreviewImages(modalBody);
 }
 
-function displayPosterGroups(item, groups, eligibleSeasons) {
-    const modalBody = document.getElementById('posterModalBody');
-    const modalFooter = document.getElementById('posterModalFooter');
-    const saveBtn = document.getElementById('savePosterSelectionBtn');
-    const selectionHint = document.getElementById('posterSelectionHint');
-    if (modalFooter) modalFooter.style.display = '';
-    if (saveBtn) saveBtn.disabled = !currentPosterSelection;
-    if (selectionHint) {
-        selectionHint.textContent = currentPosterSelection
-            ? 'Selection saved. Upload it from the item card when you are ready.'
-            : 'Choose posters individually, or use Select Set to pick a whole set.';
+function renderPosterCacheIndicator(fromCache) {
+    if (!fromCache) return '';
+    return `
+        <span class="badge rounded-pill poster-cache-indicator" title="Loaded from TPDb picker cache">
+            <i class="fas fa-database me-1"></i>Cached
+        </span>
+    `;
+}
+
+function renderPosterImageFrame(poster, altText) {
+    const hasImage = Boolean(poster.base64);
+    const needsLoad = Boolean(poster.preview_needs_load && poster.url);
+    const imageClasses = ['card-img-top', 'poster-image'];
+    if (needsLoad) imageClasses.push('poster-image-placeholder');
+    const fullPreviewUrl = needsLoad ? `/thumbnail?url=${encodeURIComponent(poster.url)}` : '';
+
+    return `
+        <div class="poster-container ${needsLoad ? 'poster-preview-loading' : ''}">
+            ${needsLoad ? `
+                <div class="poster-loading poster-preview-spinner d-flex align-items-center justify-content-center">
+                    <div class="spinner-border spinner-border-sm text-light" role="status">
+                        <span class="visually-hidden">Loading poster preview</span>
+                    </div>
+                </div>
+            ` : !hasImage ? `
+                <div class="poster-loading d-flex align-items-center justify-content-center">
+                    <div class="text-center">
+                        <i class="fas fa-exclamation-triangle text-warning mb-2"></i>
+                        <br>
+                        <small class="text-muted">Image failed to load</small>
+                    </div>
+                </div>
+            ` : ''}
+            <img src="${hasImage ? poster.base64 : ''}"
+                class="${imageClasses.join(' ')}"
+                alt="${escapeHtml(altText)}"
+                loading="lazy"
+                ${fullPreviewUrl ? `data-full-src="${escapeHtml(fullPreviewUrl)}"` : ''}
+                style="${!hasImage ? 'display: none;' : ''}">
+        </div>
+    `;
+}
+
+function loadPosterPreviewImage(image) {
+    const fullSrc = image.dataset.fullSrc;
+    if (!fullSrc) return;
+
+    image.removeAttribute('data-full-src');
+    image.addEventListener('load', () => {
+        image.classList.remove('poster-image-placeholder');
+        image.classList.remove('poster-set-browser-preview-placeholder');
+        image.closest('.poster-container')?.classList.remove('poster-preview-loading');
+    }, { once: true });
+    image.addEventListener('error', () => {
+        image.closest('.poster-container')?.classList.remove('poster-preview-loading');
+    }, { once: true });
+    image.src = fullSrc;
+}
+
+function getPosterPreviewObserver() {
+    if (posterPreviewObserver || !('IntersectionObserver' in window)) {
+        return posterPreviewObserver;
     }
+
+    posterPreviewObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            posterPreviewObserver.unobserve(entry.target);
+            loadPosterPreviewImage(entry.target);
+        });
+    }, {
+        root: document.getElementById('posterModalBody') || null,
+        rootMargin: '360px 0px'
+    });
+    return posterPreviewObserver;
+}
+
+function hydratePosterPreviewImages(root = document) {
+    const images = root.querySelectorAll('img[data-full-src]');
+    const observer = getPosterPreviewObserver();
+    images.forEach(image => {
+        if (observer) {
+            observer.observe(image);
+        } else {
+            loadPosterPreviewImage(image);
+        }
+    });
+}
+
+function getPosterPickerTpdbPageUrl(posters = [], groups = []) {
+    const groupUrl = (groups || []).find(group => group?.url)?.url;
+    if (groupUrl) return groupUrl;
+
+    const sourceUrl = (posters || []).find(poster => poster?.source_url)?.source_url;
+    if (sourceUrl) return sourceUrl;
+
+    return '';
+}
+
+function renderTpdbActions(pageUrl, currentUrl = '') {
+    return `
+        <div class="btn-group btn-group-sm" role="group" aria-label="TPDb actions">
+            ${pageUrl ? `
+                <a class="btn btn-outline-secondary tpdb-page-link"
+                    href="${escapeHtml(pageUrl)}"
+                    target="_blank"
+                    rel="noopener"
+                    onclick="event.stopPropagation()">
+                    <i class="fas fa-external-link-alt me-1"></i>TPDb Page
+                </a>
+            ` : ''}
+            <button class="btn btn-outline-secondary tpdb-override-toggle"
+                type="button"
+                title="Change TPDb page"
+                aria-label="Change TPDb page"
+                data-current-url="${escapeHtml(currentUrl || '')}">
+                <i class="fas fa-link"></i>
+            </button>
+        </div>
+    `;
+}
+
+function renderTpdbOverrideControl(currentUrl = '') {
+    return `
+        <form class="tpdb-override-form mt-2" id="tpdbOverrideForm" style="display: none;">
+            <div class="input-group input-group-sm">
+                <span class="input-group-text">TPDb</span>
+                <input class="form-control" id="tpdbOverrideInput"
+                    type="text"
+                    value="${escapeHtml(currentUrl || '')}"
+                    placeholder="TPDb URL or ID">
+                <button class="btn btn-outline-primary" type="submit">
+                    <i class="fas fa-sync-alt me-1"></i>Use
+                </button>
+            </div>
+            <div class="form-check form-switch mt-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="tpdbPickerCacheToggle" ${getTpdbPickerCachePreference() ? 'checked' : ''}>
+                <label class="form-check-label small text-muted" for="tpdbPickerCacheToggle">Use cached picker results</label>
+            </div>
+        </form>
+    `;
+}
+
+function bindTpdbOverrideControl() {
+    const form = document.getElementById('tpdbOverrideForm');
+    const input = document.getElementById('tpdbOverrideInput');
+    const cacheToggle = document.getElementById('tpdbPickerCacheToggle');
+    if (!form || !input || !currentItemId) return;
+
+    if (cacheToggle) {
+        syncTpdbPickerCacheInputs();
+        cacheToggle.addEventListener('change', () => {
+            setTpdbPickerCachePreference(cacheToggle.checked);
+            syncTpdbPickerCacheInputs(cacheToggle.checked);
+        });
+    }
+
+    document.querySelectorAll('.tpdb-override-toggle').forEach(button => {
+        button.addEventListener('click', () => {
+            form.style.display = form.style.display === 'none' ? '' : 'none';
+            if (form.style.display !== 'none') {
+                input.focus();
+                input.select();
+            }
+        });
+    });
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const tpdbUrl = input.value.trim();
+        if (!tpdbUrl) {
+            showAlert('Enter a TPDb page URL or ID first.', 'warning');
+            return;
+        }
+
+        const stopLoading = startDelayedPosterSearchLoading(currentPosterSearchItem?.type || 'Series');
+        try {
+            const data = await fetchPostersForItem(currentItemId, currentPosterSetLimit, tpdbUrl);
+            stopLoading();
+            applyPosterSearchData(data, currentPosterSetLimit, tpdbUrl);
+        } catch (error) {
+            console.error('TPDb override error:', error);
+            stopLoading();
+            showAlert('Failed to load TPDb page: ' + error.message, 'danger');
+        }
+    });
+}
+
+function renderSinglePosterMetadata(poster) {
+    const uploader = poster.uploader || 'Unknown uploader';
+    const setLink = poster.set_url
+        ? `<a href="${escapeHtml(poster.set_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">TPDb Set</a>`
+        : '';
+    if (!uploader && !setLink) return '';
+
+    return `
+        <div class="poster-card-meta">
+            <div class="text-truncate" title="${escapeHtml(uploader)}">
+                <i class="fas fa-user me-1"></i>${escapeHtml(uploader)}
+            </div>
+            ${setLink ? `
+                <small class="text-muted">
+                    ${setLink}
+                </small>
+            ` : ''}
+        </div>
+    `;
+}
+
+function displayPosterGroups(item, groups, eligibleSeasons, tpdbMappingUrl = '', fromCache = currentPosterSearchFromCache) {
+    const modalBody = document.getElementById('posterModalBody');
+    updatePosterSelectionFooter();
     let html = `
         <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
             <div>
-                <h6><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                    ${renderPosterCacheIndicator(fromCache)}
+                    ${renderTpdbActions(getPosterPickerTpdbPageUrl([], groups), tpdbMappingUrl)}
+                </div>
+                ${renderTpdbOverrideControl(tpdbMappingUrl)}
                 <small class="text-muted">${escapeHtml(item.year || 'Unknown Year')} &bull; ${escapeHtml(item.type)}</small>
                 <small class="text-muted ms-3">
                     <i class="fas fa-layer-group me-1"></i>
-                    Found ${groups.length} TPDB result${groups.length !== 1 ? 's' : ''}
+                    Found ${groups.length} TPDb result${groups.length !== 1 ? 's' : ''}
                 </small>
             </div>
             <div class="btn-group btn-group-sm" role="group" aria-label="Poster display mode">
@@ -441,29 +975,23 @@ function displayPosterGroups(item, groups, eligibleSeasons) {
         : renderPosterGroupsByTarget(groups, eligibleSeasons);
 
     modalBody.innerHTML = html;
-    modalBody.querySelectorAll('.poster-group-view-btn').forEach(button => {
-        button.addEventListener('click', () => setPosterGroupDisplayMode(button.dataset.mode));
+    bindAll(modalBody, '.poster-group-view-btn', 'click', button => setPosterGroupDisplayMode(button.dataset.mode));
+    bindAll(modalBody, '.load-poster-set-btn', 'click', button => loadPosterSet(button.dataset.setUrl));
+    bindAll(modalBody, '.select-poster-group-btn', 'click', button => selectPosterGroup(button.dataset.groupId));
+    bindAll(modalBody, '.select-poster-set-btn', 'click', button => {
+        selectPosterSet(button.dataset.groupId, Number(button.dataset.setIndex || 0), button.dataset.setId || null);
     });
-    modalBody.querySelectorAll('.load-poster-set-btn').forEach(button => {
-        button.addEventListener('click', () => loadPosterSet(button.dataset.setUrl));
-    });
-    modalBody.querySelectorAll('.select-poster-group-btn').forEach(button => {
-        button.addEventListener('click', () => selectPosterGroup(button.dataset.groupId));
-    });
-    modalBody.querySelectorAll('.select-poster-set-btn').forEach(button => {
-        button.addEventListener('click', () => selectPosterSet(button.dataset.groupId, Number(button.dataset.setIndex || 0), button.dataset.setId || null));
-    });
-    modalBody.querySelectorAll('.grouped-poster-option').forEach(card => {
-        card.addEventListener('click', () => {
-            if (card.dataset.targetType === 'season') {
-                selectGroupedSeasonPoster(card.dataset.groupId, card.dataset.seasonId, card.dataset.posterId);
-            } else {
-                selectGroupedShowPoster(card.dataset.groupId, card.dataset.posterId);
-            }
-        });
+    bindAll(modalBody, '.grouped-poster-option', 'click', card => {
+        if (card.dataset.targetType === 'season') {
+            selectGroupedSeasonPoster(card.dataset.groupId, card.dataset.seasonId, card.dataset.posterId);
+        } else {
+            selectGroupedShowPoster(card.dataset.groupId, card.dataset.posterId);
+        }
     });
 
     if (posterModal) posterModal.show();
+    bindTpdbOverrideControl();
+    hydratePosterPreviewImages(modalBody);
 }
 
 function renderPosterGroupsByGroup(groups, eligibleSeasons) {
@@ -478,10 +1006,15 @@ function renderPosterGroupsByGroup(groups, eligibleSeasons) {
             ...showPosters,
             ...seasonLists.flatMap(entry => entry.posters)
         ];
-        const setIds = [...new Set(allPosters.map(poster => poster.set_id).filter(Boolean))];
+        const setIds = sortPosterSetIdsByAvailableSets(
+            [...new Set(allPosters.map(poster => poster.set_id).filter(Boolean))],
+            group.available_sets || []
+        );
+        const inlineLoadedSetIds = getInlineLoadedSetIds(group, setIds);
+        const mainSetIds = setIds.filter(setId => !inlineLoadedSetIds.has(String(setId)));
         let html = '';
-        if (setIds.length) {
-            html += setIds.map(setId => {
+        if (mainSetIds.length) {
+            html += mainSetIds.map(setId => {
                 const displayGroupNumber = groupNumber++;
                 const setPosters = [];
                 const showPoster = showPosters.find(poster => poster.set_id === setId);
@@ -497,7 +1030,7 @@ function renderPosterGroupsByGroup(groups, eligibleSeasons) {
 
                 return renderPosterSetSection(group, setPosters, displayGroupNumber, null, setId);
             }).join('');
-            html += renderUnloadedPosterSets(group, setIds);
+            html += renderUnloadedPosterSets(group, setIds, inlineLoadedSetIds, seasonLists);
             return html;
         }
 
@@ -507,7 +1040,7 @@ function renderPosterGroupsByGroup(groups, eligibleSeasons) {
             0
         );
 
-        if (!setCount) return renderUnloadedPosterSets(group, setIds);
+        if (!setCount) return renderUnloadedPosterSets(group, setIds, inlineLoadedSetIds, seasonLists);
 
         html += Array.from({ length: setCount }, (_, setIndex) => {
             const displayGroupNumber = groupNumber++;
@@ -523,43 +1056,94 @@ function renderPosterGroupsByGroup(groups, eligibleSeasons) {
 
             return renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex, null);
         }).join('');
-        html += renderUnloadedPosterSets(group, setIds);
+        html += renderUnloadedPosterSets(group, setIds, inlineLoadedSetIds, seasonLists);
         return html;
     }).join('');
 }
 
-function renderUnloadedPosterSets(group, loadedSetIds = []) {
+function getInlineLoadedSetIds(group, loadedSetIds) {
+    const availableSetsById = new Map(
+        (group.available_sets || [])
+            .map(setInfo => [String(setInfo.set_id || ''), setInfo])
+            .filter(([setId]) => setId)
+    );
+
+    return new Set(
+        (loadedSetIds || [])
+            .map(setId => String(setId))
+            .filter(setId => manuallyLoadedPosterSetUrls.has(availableSetsById.get(setId)?.set_url))
+    );
+}
+
+function sortPosterSetIdsByAvailableSets(setIds, availableSets) {
+    const setOrder = new Map(
+        (availableSets || [])
+            .map((setInfo, index) => [String(setInfo.set_id || ''), index])
+            .filter(([setId]) => setId)
+    );
+
+    return [...setIds].sort((left, right) => {
+        const leftOrder = setOrder.has(String(left)) ? setOrder.get(String(left)) : Number.MAX_SAFE_INTEGER;
+        const rightOrder = setOrder.has(String(right)) ? setOrder.get(String(right)) : Number.MAX_SAFE_INTEGER;
+        return leftOrder - rightOrder;
+    });
+}
+
+function renderUnloadedPosterSets(group, loadedSetIds = [], inlineLoadedSetIds = new Set(), seasonLists = []) {
     const availableSets = group.available_sets || [];
     const loadedIds = new Set((loadedSetIds || []).map(String));
-    const unloadedSets = availableSets.filter(setInfo => {
-        if (!setInfo?.set_url) return false;
-        return !loadedIds.has(String(setInfo.set_id || ''));
+    const loadableSets = availableSets.filter(setInfo => {
+        const setId = String(setInfo?.set_id || '');
+        return setInfo?.set_url && (!loadedIds.has(setId) || inlineLoadedSetIds.has(setId));
     });
-    if (!unloadedSets.length) return '';
+    if (!loadableSets.length) return '';
 
     return `
         <section class="poster-group poster-set-browser mb-4">
             <div class="poster-group-header mb-3">
-                <h6 class="mb-1">More TPDB Sets</h6>
+                <h6 class="mb-1">More TPDb Sets</h6>
                 <small class="text-muted">Load individual sets when you want to preview them.</small>
             </div>
             <div class="poster-set-browser-list">
-                ${unloadedSets.map(setInfo => {
+                ${loadableSets.map(setInfo => {
+                    const setId = String(setInfo.set_id || '');
+                    if (inlineLoadedSetIds.has(setId)) {
+                        const setPosters = getPosterEntriesForSet(group, setId, seasonLists);
+                        return setPosters.length
+                            ? renderPosterSetSection(group, setPosters, null, null, setId, true)
+                            : '';
+                    }
+
                     const isLoading = loadingPosterSetUrls.has(setInfo.set_url);
+                    const buttonIcon = isLoading ? 'fa-spinner fa-spin' : 'fa-plus';
+                    const buttonText = isLoading ? 'Loading' : 'Load set';
+                    const previewBase64 = setInfo.preview_base64 || '';
+                    const fullPreviewUrl = setInfo.preview_url ? `/thumbnail?url=${encodeURIComponent(setInfo.preview_url)}` : '';
                     return `
                         <div class="poster-set-browser-row d-flex flex-wrap justify-content-between align-items-center gap-2">
-                            <div>
-                                <div class="fw-semibold">${escapeHtml(setInfo.uploader || 'Unknown uploader')}</div>
-                                <small class="text-muted">
-                                    ${escapeHtml(setInfo.set_poster_count || '?')} poster${String(setInfo.set_poster_count || '') === '1' ? '' : 's'}
-                                    &bull;
-                                    <a href="${escapeHtml(setInfo.set_url)}" target="_blank" rel="noopener">TPDB Set</a>
-                                </small>
+                            <div class="poster-set-browser-info d-flex align-items-center gap-3">
+                                ${previewBase64 ? `
+                                    <img class="poster-set-browser-preview ${fullPreviewUrl ? 'poster-set-browser-preview-placeholder' : ''}"
+                                        src="${previewBase64}"
+                                        ${fullPreviewUrl ? `data-full-src="${escapeHtml(fullPreviewUrl)}"` : ''}
+                                        alt="${escapeHtml(setInfo.uploader || 'TPDb set')} preview"
+                                        loading="lazy">
+                                ` : `
+                                    <div class="poster-set-browser-preview poster-set-browser-preview-empty">
+                                        <i class="fas fa-image text-muted"></i>
+                                    </div>
+                                `}
+                                <div>
+                                    <div class="fw-semibold">${escapeHtml(setInfo.uploader || 'Unknown uploader')}</div>
+                                    <small class="text-muted">
+                                        <a href="${escapeHtml(setInfo.set_url)}" target="_blank" rel="noopener">TPDb Set</a>
+                                    </small>
+                                </div>
                             </div>
                             <button type="button" class="btn btn-sm btn-outline-primary load-poster-set-btn"
                                 data-set-url="${escapeHtml(setInfo.set_url)}"
                                 ${isLoading ? 'disabled' : ''}>
-                                <i class="fas ${isLoading ? 'fa-spinner fa-spin' : 'fa-plus'} me-1"></i>${isLoading ? 'Loading' : 'Load set'}
+                                <i class="fas ${buttonIcon} me-1"></i>${buttonText}
                             </button>
                         </div>
                     `;
@@ -569,16 +1153,34 @@ function renderUnloadedPosterSets(group, loadedSetIds = []) {
     `;
 }
 
-function renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex = null, setId = null) {
+function getPosterEntriesForSet(group, setId, seasonLists) {
+    const setPosters = [];
+    const showPoster = (group.show_posters || []).find(poster => String(poster.set_id || '') === String(setId));
+    if (showPoster) {
+        setPosters.push({ poster: showPoster, targetType: 'show' });
+    }
+    (seasonLists || []).forEach(entry => {
+        const poster = entry.posters.find(currentPoster => String(currentPoster.set_id || '') === String(setId));
+        if (poster) {
+            setPosters.push({ poster, targetType: 'season' });
+        }
+    });
+    return setPosters;
+}
+
+function renderPosterSetSection(group, setPosters, displayGroupNumber, setIndex = null, setId = null, compact = false) {
     const posters = setPosters.map(entry => entry.poster);
-    const uploader = getPosterSetUploader(posters);
-    const setUrl = posters.find(poster => poster.set_url)?.set_url;
+    const metadata = getPosterSetMetadata(group, posters, setId);
+    const coverageText = getPosterSetCoverageText(setPosters, group);
     let html = `
-        <section class="poster-group poster-set-group mb-4">
+        <section class="poster-group poster-set-group ${compact ? 'poster-set-group-compact' : ''} mb-4">
             <div class="poster-group-header d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                 <div>
-                    <h6 class="mb-1">Set ${displayGroupNumber}${uploader ? ` <span class="text-muted">(uploader: ${escapeHtml(uploader)})</span>` : ''}</h6>
-                    <small class="text-muted">${setUrl ? `<a href="${escapeHtml(setUrl)}" target="_blank" rel="noopener">TPDB Set</a>` : escapeHtml(group.title || 'TPDB result')}</small>
+                    <small class="text-muted">
+                        <i class="fas fa-user me-1"></i>${escapeHtml(metadata.uploader)}
+                        ${coverageText ? ` &bull; <i class="fas fa-layer-group me-1"></i>${escapeHtml(coverageText)}` : ''}
+                        ${metadata.setUrl ? ` &bull; <a href="${escapeHtml(metadata.setUrl)}" target="_blank" rel="noopener">TPDb Set</a>` : ` &bull; ${escapeHtml(group.title || 'TPDb result')}`}
+                    </small>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-success select-poster-set-btn"
                     data-group-id="${escapeHtml(group.id)}"
@@ -624,10 +1226,26 @@ function renderPosterGroupsByTarget(groups, eligibleSeasons) {
 
 function renderPosterTargetSection(title, posters, targetType) {
     if (!posters.length) return '';
+    const groups = new Map();
+    posters.forEach(poster => {
+        const key = poster.group_id || poster.id;
+        if (!groups.has(key)) groups.set(key, poster);
+    });
+    const setCount = Array.from(groups.values()).filter(poster => poster.set_url || poster.set_id || poster.group_id).length;
+    const metadataParts = [
+        `${posters.length} poster${posters.length === 1 ? '' : 's'}`,
+    ];
+    if (setCount > 1) {
+        metadataParts.push(`${setCount} TPDb sets`);
+    } else if (setCount === 1) {
+        metadataParts.push('1 TPDb set');
+    }
+
     let html = `
         <section class="poster-group poster-target-section mb-4">
             <div class="poster-group-header mb-3">
-                <h6 class="mb-0">${escapeHtml(title)}</h6>
+                <h6 class="mb-1">${escapeHtml(title)}</h6>
+                <small class="text-muted">${metadataParts.map(escapeHtml).join(' &bull; ')}</small>
             </div>
             <div class="row">
     `;
@@ -640,6 +1258,28 @@ function renderPosterTargetSection(title, posters, targetType) {
 function getPosterSetUploader(posters) {
     const posterWithUploader = posters.find(poster => poster.uploader && poster.uploader !== 'Unknown');
     return posterWithUploader?.uploader || '';
+}
+
+function getPosterSetMetadata(group, posters, setId = null) {
+    const matchingAvailableSet = (group.available_sets || []).find(setInfo => {
+        return setId && String(setInfo.set_id || '') === String(setId);
+    });
+    const posterWithSet = posters.find(poster => poster.set_url || poster.uploader);
+    return {
+        uploader: getPosterSetUploader(posters) || matchingAvailableSet?.uploader || 'Unknown uploader',
+        setUrl: posterWithSet?.set_url || matchingAvailableSet?.set_url || '',
+    };
+}
+
+function getPosterSetCoverageText(setPosters, group) {
+    const seasonTargets = new Set(
+        setPosters
+            .filter(entry => entry.targetType === 'season' && entry.poster?.season_id)
+            .map(entry => entry.poster.season_id)
+    );
+    const eligibleCount = Number(group.eligible_season_count || currentPosterEligibleSeasons.length || 0);
+    if (!eligibleCount) return '';
+    return `${seasonTargets.size}/${eligibleCount} seasons`;
 }
 
 function setPosterGroupDisplayMode(mode) {
@@ -658,13 +1298,11 @@ async function loadPosterSet(setUrl) {
         const data = await response.json();
         if (data.error) throw new Error(data.error);
         mergePosterGroups(data.poster_groups || []);
+        manuallyLoadedPosterSetUrls.add(setUrl);
         canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-        displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
-        applyGroupedSelectionHighlight();
     } catch (error) {
-        console.error('Error loading TPDB set:', error);
-        showAlert('Failed to load TPDB set: ' + error.message, 'danger');
-        displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
+        console.error('Error loading TPDb set:', error);
+        showAlert('Failed to load TPDb set: ' + error.message, 'danger');
     } finally {
         loadingPosterSetUrls.delete(setUrl);
         displayPosterGroups(currentPosterSearchItem, posterSearchGroups, currentPosterEligibleSeasons);
@@ -673,6 +1311,9 @@ async function loadPosterSet(setUrl) {
 }
 
 function mergePosterGroups(newGroups) {
+    const nextPosterId = getHighestPosterId(posterSearchGroups) + 1;
+    reassignPosterIds(newGroups || [], nextPosterId);
+
     (newGroups || []).forEach(newGroup => {
         const existingGroup = findPosterGroup(newGroup.id);
         if (!existingGroup) {
@@ -686,6 +1327,27 @@ function mergePosterGroups(newGroups) {
         existingGroup.covered_season_count = Math.max(existingGroup.covered_season_count || 0, newGroup.covered_season_count || 0);
         existingGroup.covered_season_keys = [...new Set([...(existingGroup.covered_season_keys || []), ...(newGroup.covered_season_keys || [])])];
     });
+}
+
+function getHighestPosterId(groups) {
+    let highestId = 0;
+    (groups || []).forEach(group => {
+        [...(group.show_posters || []), ...(group.season_posters || [])].forEach(poster => {
+            const numericId = Number(poster?.id);
+            if (Number.isFinite(numericId)) highestId = Math.max(highestId, numericId);
+        });
+    });
+    return highestId;
+}
+
+function reassignPosterIds(groups, nextPosterId) {
+    (groups || []).forEach(group => {
+        [...(group.show_posters || []), ...(group.season_posters || [])].forEach(poster => {
+            poster.id = nextPosterId;
+            nextPosterId += 1;
+        });
+    });
+    return nextPosterId;
 }
 
 function mergePostersByUrl(existingPosters, newPosters) {
@@ -713,7 +1375,6 @@ function mergeSetsByUrl(existingSets, newSets) {
 }
 
 function renderGroupedPosterCard(poster, index, targetType, groupId) {
-    const imageSource = poster.base64 || '';
     const label = targetType === 'season' ? (poster.season_title || 'Season') : 'Series';
     return `
         <div class="col-lg-2 col-md-3 col-sm-4 col-6 mb-3">
@@ -722,22 +1383,7 @@ function renderGroupedPosterCard(poster, index, targetType, groupId) {
                 data-group-id="${escapeHtml(groupId)}"
                 data-target-type="${escapeHtml(targetType)}"
                 data-season-id="${escapeHtml(poster.season_id || '')}">
-                <div class="poster-container">
-                    ${!poster.base64 ? `
-                        <div class="poster-loading d-flex align-items-center justify-content-center">
-                            <div class="text-center">
-                                <i class="fas fa-exclamation-triangle text-warning mb-2"></i>
-                                <br>
-                                <small class="text-muted">Image failed to load</small>
-                            </div>
-                        </div>
-                    ` : ''}
-                    <img src="${imageSource}"
-                        class="card-img-top poster-image"
-                        alt="${escapeHtml(label)} poster ${index + 1}"
-                        loading="lazy"
-                        style="${!poster.base64 ? 'display: none;' : ''}">
-                </div>
+                ${renderPosterImageFrame(poster, `${label} poster ${index + 1}`)}
                 <div class="poster-target-label">${escapeHtml(label)}</div>
             </div>
         </div>
@@ -762,6 +1408,7 @@ function createEmptySeriesPosterSelection() {
 }
 
 function hasCurrentPosterSelection() {
+    if (typeof currentPosterSelection === 'string') return currentPosterSelection.length > 0;
     return Boolean(
         currentPosterSelection?.series_poster_url ||
         Object.keys(currentPosterSelection?.season_posters || {}).length > 0
@@ -830,30 +1477,43 @@ function buildSelectionFromPosterSet(group, setIndex, setId = null) {
     return selection;
 }
 
-async function saveCurrentPosterSelection() {
+async function saveCurrentPosterSelection(options = {}) {
     if (!hasCurrentPosterSelection()) {
         await clearCurrentPosterSelection();
         return;
     }
 
+    const body = typeof currentPosterSelection === 'string'
+        ? { poster_url: currentPosterSelection }
+        : { selection: currentPosterSelection };
     const response = await fetch(`/item/${currentItemId}/select`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ selection: currentPosterSelection })
+        body: JSON.stringify(body)
     });
     const data = await response.json();
     if (!data.success) throw new Error(data.error || 'Failed to select poster');
 
     selectedPosters[currentItemId] = currentPosterSelection;
+    if (options.fromQueue) {
+        manualQueueSelectionIds.add(currentItemId);
+    } else {
+        manualQueueSelectionIds.delete(currentItemId);
+    }
     updateItemStatus(currentItemId, 'selected');
     updateUploadAllButton();
-    document.getElementById('savePosterSelectionBtn')?.removeAttribute('disabled');
-    const selectionHint = document.getElementById('posterSelectionHint');
-    if (selectionHint) selectionHint.textContent = 'Selection saved. Upload it from the item card when you are ready.';
+    updatePosterSelectionFooter();
 }
 
 async function clearCurrentPosterSelection() {
-    const response = await fetch(`/item/${currentItemId}/select`, {
+    await clearPosterSelectionForItem(currentItemId);
+
+    currentPosterSelection = null;
+    updatePosterSelectionFooter();
+}
+
+async function clearPosterSelectionForItem(itemId) {
+    const response = await fetch(`/item/${itemId}/select`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clear_selection: true })
@@ -861,16 +1521,14 @@ async function clearCurrentPosterSelection() {
     const data = await response.json();
     if (!data.success) throw new Error(data.error || 'Failed to clear poster selection');
 
-    currentPosterSelection = null;
-    delete selectedPosters[currentItemId];
-    const statusElement = document.getElementById(`status-${currentItemId}`);
-    const itemCard = document.querySelector(`[data-item-id="${currentItemId}"]`);
+    delete selectedPosters[itemId];
+    manualQueueSelectionIds.delete(itemId);
+    const statusElement = document.getElementById(`status-${itemId}`);
+    const itemCard = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`);
     if (statusElement) statusElement.innerHTML = '';
     if (itemCard) itemCard.classList.remove('selected');
+    setManualQueueUploadState(itemId, false);
     updateUploadAllButton();
-    document.getElementById('savePosterSelectionBtn')?.setAttribute('disabled', 'disabled');
-    const selectionHint = document.getElementById('posterSelectionHint');
-    if (selectionHint) selectionHint.textContent = 'Choose posters individually, or use Select Set to pick a whole set.';
 }
 
 async function selectPosterGroup(groupId) {
@@ -879,8 +1537,8 @@ async function selectPosterGroup(groupId) {
 
     try {
         currentPosterSelection = buildSelectionFromGroup(group);
-        await saveCurrentPosterSelection();
         applyGroupedSelectionHighlight();
+        updatePosterSelectionFooter();
     } catch (error) {
         console.error('Error selecting poster set:', error);
         showAlert('Failed to select poster set: ' + error.message, 'danger');
@@ -893,8 +1551,8 @@ async function selectPosterSet(groupId, setIndex, setId = null) {
 
     try {
         currentPosterSelection = buildSelectionFromPosterSet(group, setIndex, setId);
-        await saveCurrentPosterSelection();
         applyGroupedSelectionHighlight();
+        updatePosterSelectionFooter();
     } catch (error) {
         console.error('Error selecting poster set:', error);
         showAlert('Failed to select poster set: ' + error.message, 'danger');
@@ -910,8 +1568,8 @@ async function selectGroupedShowPoster(groupId, posterId) {
         currentPosterSelection = currentPosterSelection || createEmptySeriesPosterSelection();
         currentPosterSelection.series_poster_url =
             currentPosterSelection.series_poster_url === poster.url ? null : poster.url;
-        await saveCurrentPosterSelection();
         applyGroupedSelectionHighlight();
+        updatePosterSelectionFooter();
     } catch (error) {
         console.error('Error selecting series poster:', error);
         showAlert('Failed to select series poster: ' + error.message, 'danger');
@@ -933,8 +1591,8 @@ async function selectGroupedSeasonPoster(groupId, seasonId, posterId) {
                 title: poster.season_title || 'Season'
             };
         }
-        await saveCurrentPosterSelection();
         applyGroupedSelectionHighlight();
+        updatePosterSelectionFooter();
     } catch (error) {
         console.error('Error selecting season poster:', error);
         showAlert('Failed to select season poster: ' + error.message, 'danger');
@@ -955,15 +1613,53 @@ function applyGroupedSelectionHighlight() {
     });
 }
 
-function finishPosterSelection() {
+function setManualQueueUploadState(itemId, queuedForUpload) {
+    const checkbox = document.querySelector(`.manual-queue-checkbox[data-item-id="${cssEscapeValue(itemId)}"]`);
+    const label = checkbox?.nextElementSibling;
+    if (!label?.classList.contains('manual-queue-label')) return;
+
+    label.classList.toggle('queued-for-upload', queuedForUpload);
+    label.innerHTML = queuedForUpload
+        ? '<i class="fas fa-clock me-1"></i>Queued for Upload'
+        : '<i class="fas fa-list-check me-1"></i>Queue';
+    applyGridFilters();
+}
+
+async function queueCurrentPosterSelection() {
     if (!currentPosterSelection) {
         showAlert('Choose a poster before saving.', 'warning');
         return;
     }
+    try {
+        await saveCurrentPosterSelection({ fromQueue: true });
+        showAlert(isCurrentManualQueueModal() ? 'Queued selection saved' : 'Poster queued for upload', 'success');
+        if (posterModal) posterModal.hide();
+    } catch (error) {
+        console.error('Error queueing poster selection:', error);
+        showAlert('Failed to queue poster: ' + error.message, 'danger');
+    }
+}
+
+async function uploadCurrentPosterSelection() {
+    if (!currentPosterSelection) {
+        showAlert('Choose a poster before uploading.', 'warning');
+        return;
+    }
+    try {
+        await saveCurrentPosterSelection({ fromQueue: false });
+        if (posterModal) posterModal.hide();
+        await uploadPoster(currentItemId);
+    } catch (error) {
+        console.error('Error uploading poster selection:', error);
+        showAlert('Failed to upload poster: ' + error.message, 'danger');
+    }
+}
+
+function finishPosterSelection() {
     if (posterModal) posterModal.hide();
 }
 
-// Select a poster (store selection server-side; no immediate upload)
+// Select a poster in the modal; footer buttons decide queue vs upload.
 async function selectPoster(posterUrl, posterId) {
     try {
         // Visual feedback
@@ -971,27 +1667,8 @@ async function selectPoster(posterUrl, posterId) {
         const selectedCard = document.querySelector(`[data-poster-id="${posterId}"]`);
         if (selectedCard) selectedCard.classList.add('selected');
 
-        const response = await fetch(`/item/${currentItemId}/select`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ poster_url: posterUrl })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            selectedPosters[currentItemId] = posterUrl;
-            updateItemStatus(currentItemId, 'selected');
-
-            // Close modal after short delay
-            setTimeout(() => {
-                if (posterModal) posterModal.hide();
-            }, 400);
-
-            updateUploadAllButton();
-        } else {
-            throw new Error(data.error || 'Failed to select poster');
-        }
+        currentPosterSelection = posterUrl;
+        updatePosterSelectionFooter();
     } catch (error) {
         console.error('Error selecting poster:', error);
         showAlert('Failed to select poster: ' + error.message, 'danger');
@@ -1007,15 +1684,9 @@ function updateItemStatus(itemId, status) {
 
     switch (status) {
         case 'selected':
-            statusElement.innerHTML = `
-                <span class="badge status-selected">
-                    <i class="fas fa-check me-1"></i>Selected
-                </span>
-                <button class="btn btn-warning btn-sm mt-1 w-100" onclick="uploadPoster('${itemId}')">
-                    <i class="fas fa-cloud-upload-alt me-1"></i>Upload Now
-                </button>
-            `;
+            statusElement.innerHTML = '';
             itemCard.classList.add('selected');
+            setManualQueueUploadState(itemId, true);
             break;
 
         case 'uploading':
@@ -1034,6 +1705,8 @@ function updateItemStatus(itemId, status) {
             `;
             itemCard.classList.remove('selected');
             delete selectedPosters[itemId];
+            manualQueueSelectionIds.delete(itemId);
+            setManualQueueUploadState(itemId, false);
             updateUploadAllButton();
             break;
 
@@ -1082,9 +1755,13 @@ async function uploadAllSelected() {
         return;
     }
 
-    if (!confirm(`Upload ${selectedCount} selected poster(s)?`)) {
-        return;
-    }
+    const confirmed = await showConfirmDialog({
+        title: 'Upload selected posters?',
+        message: `Upload ${selectedCount} selected poster(s)?`,
+        confirmText: 'Upload',
+        variant: 'primary'
+    });
+    if (!confirmed) return;
 
     const progressContainer = document.getElementById('progressContainer');
     const progressBar = document.getElementById('progressBar');
@@ -1097,6 +1774,7 @@ async function uploadAllSelected() {
     const uploadBtn = document.getElementById('uploadAllBtn');
     if (uploadBtn) {
         uploadBtn.disabled = true;
+        uploadBtn.classList.add('is-expanded');
         uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading...';
     }
 
@@ -1136,6 +1814,7 @@ async function uploadAllSelected() {
     } finally {
         if (uploadBtn) {
             uploadBtn.disabled = false;
+            uploadBtn.classList.remove('is-expanded');
             uploadBtn.innerHTML = '<i class="fas fa-cloud-upload-alt me-2"></i>Upload All Selected';
         }
         updateUploadAllButton();
@@ -1209,6 +1888,40 @@ function showBatchResults(results) {
     if (resultsModal) resultsModal.show();
 }
 
+function updateLastResultsButton() {
+    const button = document.getElementById('lastAutoBatchResultsBtn');
+    if (!button) return;
+
+    const hasResults = Boolean(latestAutoBatchJob?.results?.length);
+    button.disabled = !hasResults;
+}
+
+async function loadLatestAutoBatchResults() {
+    try {
+        const response = await fetch('/batch-auto-poster/latest-results');
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load latest results');
+
+        latestAutoBatchJob = data.job || null;
+        updateLastResultsButton();
+    } catch (error) {
+        console.error('Latest results error:', error);
+    }
+}
+
+async function showLastAutoBatchResults() {
+    if (!latestAutoBatchJob) {
+        await loadLatestAutoBatchResults();
+    }
+
+    if (!latestAutoBatchJob?.results?.length) {
+        showAlert('No previous Auto-Get results are available.', 'info');
+        return;
+    }
+
+    showBatchResults(latestAutoBatchJob.results);
+}
+
 function renderBatchResults(results, filter) {
     const tbody = document.getElementById('batchResultsBody');
     if (!tbody) return;
@@ -1236,7 +1949,10 @@ function renderBatchResults(results, filter) {
 
     tbody.innerHTML = filteredResults.map(result => `
         <tr>
-            <td>${escapeHtml(result.item_title || result.item_id || 'Unknown')}</td>
+            <td>
+                ${escapeHtml(result.item_title || result.item_id || 'Unknown')}
+                ${renderBatchResultMeta(result)}
+            </td>
             <td>
                 ${result.success ?
                     '<span class="badge bg-success">Success</span>' :
@@ -1248,24 +1964,50 @@ function renderBatchResults(results, filter) {
     `).join('');
 }
 
+function renderBatchResultMeta(result) {
+    const details = [];
+    if (result.operation) details.push(formatOperationLabel(result.operation));
+    if (result.timestamp) details.push(formatLogTimestamp(result.timestamp));
+    if (result.season_results?.length) {
+        const successCount = result.season_results.filter(season => season.success).length;
+        details.push(`${successCount}/${result.season_results.length} seasons`);
+    }
+    if (!details.length) return '';
+    return `<div class="small text-muted">${details.map(escapeHtml).join(' &middot; ')}</div>`;
+}
+
 // Button enable state
 function updateUploadAllButton() {
     const uploadBtn = document.getElementById('uploadAllBtn');
+    const queueBtn = document.getElementById('manualQueueStartBtn');
+    const queueActionCount = document.getElementById('manualQueueActionCount');
+    const uploadActionCount = document.getElementById('manualUploadActionCount');
+    const queueCountSpan = document.getElementById('manualQueueCount');
     const selectedCountSpan = document.getElementById('selectedCount');
-    const toolbarCount = document.getElementById('manualSelectionToolbarCount');
     const selectedCount = Object.keys(selectedPosters).length;
+    const queuedCount = manualQueueIds.size;
 
+    if (queueCountSpan) queueCountSpan.textContent = queuedCount;
+    if (queueActionCount) queueActionCount.textContent = queuedCount;
     if (selectedCountSpan) selectedCountSpan.textContent = selectedCount;
-    if (toolbarCount) toolbarCount.textContent = selectedCount;
+    if (uploadActionCount) uploadActionCount.textContent = selectedCount;
+
+    if (queueBtn) {
+        queueBtn.disabled = queuedCount === 0 && !manualQueueActive;
+        if (manualQueueWorkerRunning) {
+            queueBtn.innerHTML = `<i class="fas fa-spinner fa-spin me-1"></i>Set Posters for Queued<span class="badge bg-primary ms-2" id="manualQueueActionCount">${queuedCount}</span>`;
+        } else {
+            queueBtn.innerHTML = `<i class="fas fa-search me-1"></i>Set Posters for Queued<span class="badge bg-primary ms-2" id="manualQueueActionCount">${queuedCount}</span>`;
+        }
+    }
 
     if (uploadBtn) {
         if (selectedCount > 0) {
             uploadBtn.disabled = false;
-            uploadBtn.innerHTML = `<i class="fas fa-cloud-upload-alt me-2"></i>Upload All Selected (${selectedCount})`;
         } else {
             uploadBtn.disabled = true;
-            uploadBtn.innerHTML = '<i class="fas fa-cloud-upload-alt me-2"></i>Upload All Selected';
         }
+        uploadBtn.innerHTML = `<i class="fas fa-cloud-upload-alt"></i><span class="badge bg-light text-dark ms-2" id="manualUploadActionCount">${selectedCount}</span>`;
     }
 
     updateManualSelectionVisibility();
@@ -1273,38 +2015,249 @@ function updateUploadAllButton() {
 
 function updateManualSelectionVisibility() {
     const manualRow = document.getElementById('manualSelectionRow');
-    const toolbarBtn = document.getElementById('manualSelectionToolbarBtn');
-    const selectedCount = Object.keys(selectedPosters).length;
-    const shouldShow = selectedCount > 0 || manualSelectionVisible;
 
-    if (manualRow) manualRow.style.display = shouldShow ? '' : 'none';
-    if (toolbarBtn) {
-        toolbarBtn.classList.toggle('active', shouldShow);
-        toolbarBtn.setAttribute('aria-expanded', shouldShow ? 'true' : 'false');
+    if (manualRow) manualRow.style.display = '';
+}
+
+function initManualQueueControls() {
+    document.querySelectorAll('.manual-queue-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', () => toggleManualQueueItem(checkbox));
+    });
+}
+
+async function toggleManualQueueItem(checkbox) {
+    const itemId = checkbox.getAttribute('data-item-id');
+    if (!itemId) return;
+
+    const wrapper = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`);
+    const hasQueuedUpload = Boolean(selectedPosters[itemId]) || manualQueueSelectionIds.has(itemId);
+
+    if (hasQueuedUpload && checkbox.checked) {
+        checkbox.checked = false;
+        const confirmed = await showConfirmDialog({
+            title: 'Discard queued upload?',
+            message: 'This item already has a selected poster queued for upload.',
+            details: 'Discard the selected poster and queue this item for manual selection instead?',
+            confirmText: 'Discard and Queue',
+            cancelText: 'Keep Queued Upload',
+            variant: 'warning'
+        });
+
+        if (!confirmed) {
+            updateUploadAllButton();
+            return;
+        }
+
+        try {
+            await clearPosterSelectionForItem(itemId);
+        } catch (error) {
+            console.error('Error clearing queued poster:', error);
+            showAlert('Failed to discard queued poster: ' + error.message, 'danger');
+            updateUploadAllButton();
+            return;
+        }
+
+        checkbox.checked = true;
+    }
+
+    if (checkbox.checked) {
+        manualQueueIds.add(itemId);
+        wrapper?.classList.add('manual-queued');
+    } else {
+        manualQueueIds.delete(itemId);
+        wrapper?.classList.remove('manual-queued');
+    }
+
+    updateUploadAllButton();
+    applyGridFilters();
+}
+
+function setManualQueueItemQueued(itemId, queued) {
+    const checkbox = document.querySelector(`.manual-queue-checkbox[data-item-id="${cssEscapeValue(itemId)}"]`);
+    const wrapper = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`);
+    if (checkbox) checkbox.checked = queued;
+    wrapper?.classList.toggle('manual-queued', queued);
+    if (queued) manualQueueIds.add(itemId);
+    else manualQueueIds.delete(itemId);
+    applyGridFilters();
+}
+
+function isPosterModalOpen() {
+    return document.getElementById('posterModal')?.classList.contains('show');
+}
+
+async function startManualPosterQueue() {
+    if (manualQueueIds.size === 0 && !manualQueueActive) {
+        showAlert('Choose one or more items to queue first.', 'warning');
+        return;
+    }
+
+    if (!manualQueueActive) {
+        manualQueueActive = true;
+        manualQueueOrder = Array.from(document.querySelectorAll('.manual-queue-checkbox:checked'))
+            .map(checkbox => checkbox.getAttribute('data-item-id'))
+            .filter(Boolean);
+        manualQueueResults = new Map();
+        manualQueueErrors = new Map();
+        manualQueuePresentedIds = new Set();
+    }
+
+    updateUploadAllButton();
+    startManualQueueWorker();
+    showNextManualQueueResult();
+}
+
+async function startManualQueueWorker() {
+    if (manualQueueWorkerRunning) return;
+    manualQueueWorkerRunning = true;
+    updateUploadAllButton();
+
+    try {
+        for (const itemId of manualQueueOrder) {
+            if (!manualQueueActive || manualQueueResults.has(itemId) || manualQueueErrors.has(itemId)) continue;
+            if (!manualQueueIds.has(itemId)) {
+                manualQueuePresentedIds.add(itemId);
+                continue;
+            }
+
+            try {
+                const data = await fetchPostersForItem(itemId, 3);
+                manualQueueResults.set(itemId, data);
+            } catch (error) {
+                manualQueueErrors.set(itemId, error.message);
+                showAlert(`Failed to load queued posters: ${error.message}`, 'danger');
+            }
+
+            showNextManualQueueResult();
+        }
+    } finally {
+        manualQueueWorkerRunning = false;
+        updateUploadAllButton();
+        showNextManualQueueResult();
     }
 }
 
-function toggleManualSelectionPanel() {
-    manualSelectionVisible = !manualSelectionVisible;
-    updateManualSelectionVisibility();
+function showNextManualQueueResult() {
+    if (!manualQueueActive || manualQueueCurrentItemId || isPosterModalOpen()) return;
+
+    for (const itemId of manualQueueOrder) {
+        if (manualQueuePresentedIds.has(itemId)) continue;
+        if (!manualQueueIds.has(itemId)) {
+            manualQueuePresentedIds.add(itemId);
+            continue;
+        }
+
+        if (manualQueueErrors.has(itemId)) {
+            manualQueuePresentedIds.add(itemId);
+            setManualQueueItemQueued(itemId, false);
+            continue;
+        }
+
+        const data = manualQueueResults.get(itemId);
+        if (!data) break;
+
+        manualQueueCurrentItemId = itemId;
+        setManualQueueItemQueued(itemId, false);
+        preparePosterSearchForItem(itemId, data.poster_set_limit || 3);
+        applyPosterSearchData(data, data.poster_set_limit || 3);
+        updateUploadAllButton();
+        return;
+    }
+
+    const pending = manualQueueOrder.some(itemId =>
+        !manualQueuePresentedIds.has(itemId) && !manualQueueResults.has(itemId) && !manualQueueErrors.has(itemId)
+    );
+    if (!pending && !manualQueueWorkerRunning) {
+        manualQueueActive = false;
+        manualQueueOrder = [];
+        updateUploadAllButton();
+    }
 }
 
 // Notifications
+function getAlertIcon(type) {
+    return {
+        success: 'fa-check-circle',
+        danger: 'fa-exclamation-circle',
+        warning: 'fa-triangle-exclamation',
+        info: 'fa-info-circle',
+    }[type] || 'fa-info-circle';
+}
+
 function showAlert(message, type = 'info') {
     const safeMessage = escapeHtml(message);
-    const alertHtml = `
-        <div class="alert alert-${type} alert-dismissible fade show" role="alert">
-            <i class="fas fa-info-circle me-2"></i>
-            ${safeMessage}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    const container = document.getElementById('toastContainer');
+    if (!container || !window.bootstrap?.Toast) {
+        const alertHtml = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                <i class="fas ${getAlertIcon(type)} me-2"></i>
+                ${safeMessage}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        const fallbackContainer = document.querySelector('.container') || document.body;
+        fallbackContainer.insertAdjacentHTML('afterbegin', alertHtml);
+        setTimeout(() => fallbackContainer.querySelector('.alert')?.remove(), 5000);
+        return;
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast app-toast app-toast-${type}`;
+    toast.setAttribute('role', 'alert');
+    toast.setAttribute('aria-live', 'assertive');
+    toast.setAttribute('aria-atomic', 'true');
+    toast.innerHTML = `
+        <div class="toast-body d-flex align-items-start gap-2">
+            <i class="fas ${getAlertIcon(type)} mt-1"></i>
+            <div class="flex-grow-1">${safeMessage}</div>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
         </div>
     `;
-    const container = document.querySelector('.container') || document.body;
-    container.insertAdjacentHTML('afterbegin', alertHtml);
-    setTimeout(() => {
-        const alert = container.querySelector('.alert');
-        if (alert) alert.remove();
-    }, 5000);
+    container.appendChild(toast);
+
+    const toastInstance = new bootstrap.Toast(toast, { delay: 5000 });
+    toast.addEventListener('hidden.bs.toast', () => toast.remove());
+    toastInstance.show();
+}
+
+function showConfirmDialog({ title = 'Confirm action', message = '', details = '', confirmText = 'Continue', cancelText = 'Cancel', variant = 'primary' } = {}) {
+    const modalElement = document.getElementById('confirmModal');
+    const titleElement = document.getElementById('confirmModalTitle');
+    const bodyElement = document.getElementById('confirmModalBody');
+    const confirmButton = document.getElementById('confirmModalConfirmBtn');
+    const cancelButton = document.getElementById('confirmModalCancelBtn');
+    if (!modalElement || !confirmButton || !bodyElement || !window.bootstrap?.Modal) {
+        return Promise.resolve(false);
+    }
+
+    titleElement.textContent = title;
+    cancelButton.textContent = cancelText;
+    confirmButton.textContent = confirmText;
+    confirmButton.className = `btn btn-${variant}`;
+    bodyElement.innerHTML = `
+        <p class="mb-${details ? '2' : '0'}">${escapeHtml(message)}</p>
+        ${details ? `<div class="confirm-details">${escapeHtml(details).replace(/\n/g, '<br>')}</div>` : ''}
+    `;
+
+    return new Promise(resolve => {
+        let resolved = false;
+        const finish = (value) => {
+            if (resolved) return;
+            resolved = true;
+            confirmButton.removeEventListener('click', onConfirm);
+            modalElement.removeEventListener('hidden.bs.modal', onHidden);
+            resolve(value);
+        };
+        const onConfirm = () => {
+            finish(true);
+            (confirmModal || bootstrap.Modal.getOrCreateInstance(modalElement)).hide();
+        };
+        const onHidden = () => finish(false);
+
+        confirmButton.addEventListener('click', onConfirm);
+        modalElement.addEventListener('hidden.bs.modal', onHidden, { once: true });
+        (confirmModal || bootstrap.Modal.getOrCreateInstance(modalElement)).show();
+    });
 }
 
 function escapeHtml(value) {
@@ -1360,7 +2313,7 @@ async function loadFailedItems(options = {}) {
         const items = data.items || [];
         activeFailedItemIds = new Set(items.map(item => item.item_id).filter(Boolean));
         activeFailedItemDetails = new Map(items.filter(item => item.item_id).map(item => [item.item_id, item]));
-        applyProcessedItemMarkers(activeProcessedItemDetails);
+        applyProcessedItemMarkers(activeProcessedItemDetails, { refreshFilters: false });
         applyFailedItemMarkers(activeFailedItemIds);
         failedItemsCount.textContent = items.length;
         const toolbarCount = document.getElementById('failedItemsToolbarCount');
@@ -1455,10 +2408,130 @@ async function loadProcessedItems() {
 
         const items = data.items || [];
         activeProcessedItemDetails = new Map(items.filter(item => item.item_id).map(item => [item.item_id, item]));
-        applyProcessedItemMarkers(activeProcessedItemDetails);
+        applyProcessedItemMarkers(activeProcessedItemDetails, { refreshFilters: false });
         applyFailedItemMarkers(activeFailedItemIds);
     } catch (error) {
         console.error('Processed items error:', error);
+    }
+}
+
+async function clearProcessedItems() {
+    await clearProcessedItemsByScope();
+}
+
+async function clearProcessedItemsForVisibleItems() {
+    const visibleItemIds = Array.from(document.querySelectorAll('.item-card-wrapper:not(.hidden)'))
+        .map(wrapper => wrapper.getAttribute('data-item-id'))
+        .filter(itemId => itemId && activeProcessedItemDetails.has(itemId));
+
+    if (visibleItemIds.length === 0) {
+        showAlert('No visible processed items to clear.', 'info');
+        return;
+    }
+
+    await clearProcessedItemsByScope(visibleItemIds);
+}
+
+async function clearProcessedItemsByScope(itemIds = null) {
+    const isVisibleOnly = Array.isArray(itemIds);
+    const confirmed = await showConfirmDialog({
+        title: isVisibleOnly ? 'Clear visible processed items?' : 'Clear processed items?',
+        message: isVisibleOnly
+            ? `This will remove processed markers for ${itemIds.length} visible item${itemIds.length === 1 ? '' : 's'}.`
+            : 'This will remove all processed markers and history used by Skip already processed.',
+        details: isVisibleOnly
+            ? 'Items outside the current visible grid will keep their processed history.'
+            : 'Posters that were already changed will no longer be considered processed until they are processed again.',
+        confirmText: isVisibleOnly ? 'Clear visible processed' : 'Clear processed',
+        cancelText: 'Cancel',
+        variant: 'danger'
+    });
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/processed-items', {
+            method: 'DELETE',
+            headers: isVisibleOnly ? { 'Content-Type': 'application/json' } : undefined,
+            body: isVisibleOnly ? JSON.stringify({ item_ids: itemIds }) : undefined
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to clear processed items');
+
+        if (isVisibleOnly) {
+            itemIds.forEach(itemId => activeProcessedItemDetails.delete(itemId));
+        } else {
+            activeProcessedItemDetails = new Map();
+        }
+        applyProcessedItemMarkers(activeProcessedItemDetails, { refreshFilters: false });
+        applyFailedItemMarkers(activeFailedItemIds);
+        latestAutoBatchJob = null;
+        await loadLatestAutoBatchResults();
+        showAlert(isVisibleOnly ? 'Visible processed items cleared' : 'Processed items cleared', 'success');
+    } catch (error) {
+        console.error('Clear processed items error:', error);
+        showAlert('Failed to clear processed items: ' + error.message, 'danger');
+    }
+}
+
+function initProtectedItemButtons() {
+    document.querySelectorAll('.protected-item-toggle').forEach(button => {
+        button.addEventListener('click', () => toggleProtectedItem(button.getAttribute('data-item-id'), button));
+    });
+}
+
+async function loadProtectedItems() {
+    try {
+        const response = await fetch('/protected-items');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to load protected items');
+
+        protectedItemIds = new Set((data.items || []).filter(Boolean));
+        applyProtectedItemMarkers();
+    } catch (error) {
+        console.error('Protected items error:', error);
+        showAlert('Failed to load protected items: ' + error.message, 'danger');
+    }
+}
+
+function applyProtectedItemMarkers() {
+    document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
+        const itemId = wrapper.getAttribute('data-item-id');
+        const card = wrapper.querySelector('.item-card');
+        const button = wrapper.querySelector('.protected-item-toggle');
+        const isProtected = protectedItemIds.has(itemId);
+        if (card) card.classList.toggle('protected-item', isProtected);
+        if (!button) return;
+
+        button.classList.toggle('active', isProtected);
+        button.title = isProtected ? 'Protected from Auto-Get' : 'Protect from Auto-Get';
+        button.setAttribute('aria-label', isProtected ? 'Remove Auto-Get protection' : 'Protect from Auto-Get');
+        button.innerHTML = isProtected ? '<i class="fas fa-lock"></i>' : '<i class="fas fa-lock-open"></i>';
+    });
+    applyGridFilters();
+}
+
+async function toggleProtectedItem(itemId, button) {
+    if (!itemId) return;
+    if (button) button.disabled = true;
+
+    try {
+        const response = await fetch('/protected-items/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ item_id: itemId })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to update protected item');
+
+        protectedItemIds = new Set((data.items || []).filter(Boolean));
+        applyProtectedItemMarkers();
+        showAlert(data.protected ? 'Item protected from Auto-Get' : 'Item can be processed by Auto-Get again', 'success');
+    } catch (error) {
+        console.error('Protected item toggle error:', error);
+        showAlert('Failed to update protection: ' + error.message, 'danger');
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
@@ -1485,7 +2558,8 @@ function formatProcessedItemTooltip(detail) {
     return `${targetSummary}\nProcessed ${timestamp}`;
 }
 
-function applyProcessedItemMarkers(itemDetails) {
+function applyProcessedItemMarkers(itemDetails, options = {}) {
+    const refreshFilters = options.refreshFilters !== false;
     document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
         const itemId = wrapper.getAttribute('data-item-id');
         const card = wrapper.querySelector('.item-card');
@@ -1505,14 +2579,16 @@ function applyProcessedItemMarkers(itemDetails) {
 
         if (isProcessed && overlay) {
             overlay.title = formatProcessedItemTooltip(detail);
-            overlay.innerHTML = '<span class="badge bg-success"><i class="fas fa-check me-1"></i>Processed</span>';
+            overlay.innerHTML = '<span class="badge bg-success"><i class="fas fa-check"></i></span>';
         } else if (!isProcessed && overlay) {
             overlay.remove();
         }
     });
+    if (refreshFilters) applyGridFilters();
 }
 
-function applyFailedItemMarkers(itemIds) {
+function applyFailedItemMarkers(itemIds, options = {}) {
+    const refreshFilters = options.refreshFilters !== false;
     document.querySelectorAll('.item-card-wrapper').forEach(wrapper => {
         const itemId = wrapper.getAttribute('data-item-id');
         const card = wrapper.querySelector('.item-card');
@@ -1540,11 +2616,54 @@ function applyFailedItemMarkers(itemIds) {
             const reason = detail?.error || 'Unknown failure';
             const timestamp = formatLogTimestamp(detail?.timestamp);
             overlay.title = `Failed ${timestamp}\n${reason}`;
-            overlay.innerHTML = '<span class="badge bg-danger"><i class="fas fa-triangle-exclamation me-1"></i>Failed</span>';
+            overlay.innerHTML = '<span class="badge bg-danger"><i class="fas fa-triangle-exclamation"></i></span>';
         } else if (!isFailed && overlay) {
             overlay.remove();
         }
     });
+    if (refreshFilters) applyGridFilters();
+}
+
+function applyAutoBatchResultMarkers(results = [], timestamp = null) {
+    results.forEach(result => {
+        const itemId = result.item_id;
+        if (!itemId) return;
+
+        if (result.success) {
+            const seasonResults = Array.isArray(result.season_results) ? result.season_results : [];
+            const successfulSeasons = seasonResults.filter(season => season.success);
+            activeFailedItemIds.delete(itemId);
+            activeFailedItemDetails.delete(itemId);
+            activeProcessedItemDetails.set(itemId, {
+                item_id: itemId,
+                item_title: result.item_title,
+                item_type: result.item_type,
+                item_year: result.item_year,
+                poster_url: result.poster_url,
+                timestamp: timestamp || new Date().toISOString(),
+                poster_targets: {
+                    series_poster: Boolean(result.poster_url),
+                    season_count: successfulSeasons.length,
+                    season_titles: successfulSeasons.map(season => season.season_title).filter(Boolean)
+                }
+            });
+        } else {
+            activeProcessedItemDetails.delete(itemId);
+            activeFailedItemIds.add(itemId);
+            activeFailedItemDetails.set(itemId, {
+                item_id: itemId,
+                item_title: result.item_title,
+                item_type: result.item_type,
+                item_year: result.item_year,
+                error: result.error || 'Unknown failure',
+                timestamp: timestamp || new Date().toISOString(),
+                operation: 'auto-poster'
+            });
+        }
+    });
+
+    applyProcessedItemMarkers(activeProcessedItemDetails, { refreshFilters: false });
+    applyFailedItemMarkers(activeFailedItemIds);
 }
 
 function scrollToItemCard(itemId) {
@@ -1573,7 +2692,13 @@ function scrollToItemCard(itemId) {
 }
 
 async function clearFailedItems() {
-    if (!confirm('Clear all failed item entries from failed.log?')) return;
+    const confirmed = await showConfirmDialog({
+        title: 'Clear failed items?',
+        message: 'Clear all failed item entries?',
+        confirmText: 'Clear list',
+        variant: 'danger'
+    });
+    if (!confirmed) return;
 
     const clearBtn = document.getElementById('clearFailedItemsBtn');
     const retryAllBtn = document.getElementById('retryAllFailedBtn');
@@ -1597,7 +2722,7 @@ async function clearFailedItems() {
         if (failedToolbarCount) failedToolbarCount.textContent = '0';
         activeFailedItemIds = new Set();
         activeFailedItemDetails = new Map();
-        applyFailedItemMarkers(activeFailedItemIds);
+        applyFailedItemMarkers(activeFailedItemIds, { refreshFilters: false });
         applyProcessedItemMarkers(activeProcessedItemDetails);
         failedItemsPanelVisible = false;
         if (failedItemsRow) failedItemsRow.style.display = 'none';
@@ -1647,7 +2772,13 @@ async function retryFailedItem(itemId, button) {
 
 async function retryAllFailedItems() {
     const retryAllBtn = document.getElementById('retryAllFailedBtn');
-    if (!confirm('Retry poster fetch and upload for all recent failed items?')) return;
+    const confirmed = await showConfirmDialog({
+        title: 'Retry failed items?',
+        message: 'Retry poster fetch and upload for all recent failed items?',
+        confirmText: 'Retry all',
+        variant: 'warning'
+    });
+    if (!confirmed) return;
 
     if (retryAllBtn) {
         retryAllBtn.disabled = true;
@@ -1736,7 +2867,42 @@ function updateAutoBatchCurrentPoster(url) {
     empty.style.display = 'none';
 }
 
+function saveActiveAutoBatchJob(jobId) {
+    try {
+        if (jobId) localStorage.setItem(ACTIVE_AUTO_BATCH_JOB_KEY, jobId);
+        else localStorage.removeItem(ACTIVE_AUTO_BATCH_JOB_KEY);
+    } catch (e) {}
+}
+
+function getSavedActiveAutoBatchJob() {
+    try {
+        return localStorage.getItem(ACTIVE_AUTO_BATCH_JOB_KEY);
+    } catch (e) {
+        return null;
+    }
+}
+
+function clearActiveAutoBatchJob() {
+    saveActiveAutoBatchJob(null);
+}
+
+async function resumeAutoBatchProgressOnLoad() {
+    const savedJobId = getSavedActiveAutoBatchJob();
+    if (!savedJobId || currentAutoBatchJobId) return;
+
+    currentAutoBatchJobId = savedJobId;
+    setAutoBatchRunning(true);
+    await pollAutoBatchProgress(savedJobId);
+
+    if (currentAutoBatchJobId === savedJobId && !autoBatchPollTimer) {
+        autoBatchPollTimer = setInterval(() => pollAutoBatchProgress(savedJobId), 1000);
+    }
+}
+
 function calculateAutoBatchEta(job, processed, remaining) {
+    if (processed < AUTO_BATCH_ESTIMATE_MIN_PROCESSED && !job.done) {
+        return 'Waiting for more samples';
+    }
     if (!autoBatchStartedAt || processed <= 0 || remaining <= 0 || job.done) {
         return job.done ? 'Done' : 'Calculating...';
     }
@@ -1752,11 +2918,16 @@ function updateAutoBatchProgress(job) {
     const processed = Number(job.processed || 0);
     const remaining = Number(job.remaining ?? Math.max(total - processed, 0));
     const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+    const canShowEstimate = processed >= AUTO_BATCH_ESTIMATE_MIN_PROCESSED;
+    const progressWrap = document.getElementById('autoBatchProgressBarWrap');
+    const etaWrap = document.getElementById('autoBatchEtaWrap');
 
     panel.style.display = 'block';
     document.getElementById('autoBatchProgressStatus').textContent = job.message || 'Running automatic poster batch...';
     document.getElementById('autoBatchCurrentItem').textContent = job.current_item ? `Current item: ${job.current_item}` : 'No item currently processing';
     document.getElementById('autoBatchProgressCounts').textContent = `${processed} / ${total}`;
+    if (progressWrap) progressWrap.style.display = canShowEstimate ? '' : 'none';
+    if (etaWrap) etaWrap.style.display = canShowEstimate ? '' : 'none';
     document.getElementById('autoBatchProgressBar').style.width = `${percent}%`;
     document.getElementById('autoBatchProgressBar').setAttribute('aria-valuenow', String(percent));
     document.getElementById('autoBatchRemaining').textContent = remaining;
@@ -1781,12 +2952,21 @@ async function pollAutoBatchProgress(jobId) {
         if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load batch progress');
 
         const job = data.job;
+        if (!autoBatchStartedAt && job.created_at) {
+            const createdAt = Date.parse(job.created_at);
+            if (!Number.isNaN(createdAt)) autoBatchStartedAt = createdAt;
+        }
         updateAutoBatchProgress(job);
+        applyAutoBatchResultMarkers(job.results || [], job.updated_at);
 
         if (job.done) {
             stopAutoBatchPolling();
             setAutoBatchRunning(false);
             currentAutoBatchJobId = null;
+            autoBatchStartedAt = null;
+            clearActiveAutoBatchJob();
+            latestAutoBatchJob = job;
+            updateLastResultsButton();
             loadFailedItems({ autoExpand: true });
             loadProcessedItems();
 
@@ -1801,6 +2981,8 @@ async function pollAutoBatchProgress(jobId) {
         stopAutoBatchPolling();
         setAutoBatchRunning(false);
         currentAutoBatchJobId = null;
+        autoBatchStartedAt = null;
+        clearActiveAutoBatchJob();
         console.error('Auto-batch progress error:', error);
         showAlert('Failed to update auto-batch progress: ' + error.message, 'danger');
     }
@@ -1808,7 +2990,13 @@ async function pollAutoBatchProgress(jobId) {
 
 async function cancelAutoBatch() {
     if (!currentAutoBatchJobId) return;
-    if (!confirm('Cancel the running Auto-Get Posters job?')) return;
+    const confirmed = await showConfirmDialog({
+        title: 'Cancel poster search?',
+        message: 'Cancel the running poster search and apply job?',
+        confirmText: 'Cancel job',
+        variant: 'danger'
+    });
+    if (!confirmed) return;
 
     const cancelBtn = document.getElementById('cancelAutoBatchBtn');
     if (cancelBtn) {
@@ -1835,10 +3023,16 @@ async function cancelAutoBatch() {
 async function startAutoBatchPoster(filter) {
     try {
         if (!filter) filter = 'no-poster';
+        const queuedItemIds = filter === 'queued' ? Array.from(manualQueueIds) : [];
+        if (filter === 'queued' && queuedItemIds.length === 0) {
+            showAlert('Choose one or more items with the Queue checkbox first.', 'warning');
+            return;
+        }
 
         const confirmText = {
             'no-poster': 'Automatically find and upload posters for items without posters?',
             'all': 'Automatically find and upload posters for ALL items?',
+            'queued': `Automatically find and upload posters for ${queuedItemIds.length} queued item${queuedItemIds.length === 1 ? '' : 's'}?`,
             'movies': 'Automatically find and upload posters for all Movies?',
             'series': 'Automatically find and upload posters for all Series?'
         }[filter] || 'Start automatic poster upload?';
@@ -1850,20 +3044,27 @@ async function startAutoBatchPoster(filter) {
         const includeSeasonPosters = Boolean(document.getElementById('includeSeasonPostersAutoBatch')?.checked);
         const replaceSeasonPosters = Boolean(document.getElementById('replaceSeasonPostersAutoBatch')?.checked);
         const confirmNotes = [];
-        if (skipProcessed) confirmNotes.push('Already processed items in results.log will be skipped.');
+        if (skipProcessed) confirmNotes.push('Already processed items will be skipped.');
         if (includeSeasonPosters) {
             confirmNotes.push(replaceSeasonPosters ?
                 'Season posters will be included and existing season posters may be replaced.' :
                 'Season posters will be included only when a season is missing a poster.');
         }
         if (libraryName) confirmNotes.push(`Library: ${libraryName}`);
-        const fullConfirmText = confirmNotes.length ? `${confirmText}\n\n${confirmNotes.join('\n')}` : confirmText;
 
-        if (!confirm(fullConfirmText)) return;
+        const confirmed = await showConfirmDialog({
+            title: 'Find and apply posters?',
+            message: confirmText,
+            details: confirmNotes.join('\n'),
+            confirmText: 'Start',
+            variant: 'primary'
+        });
+        if (!confirmed) return;
 
         stopAutoBatchPolling();
         setAutoBatchRunning(true);
         currentAutoBatchJobId = null;
+        clearActiveAutoBatchJob();
         autoBatchStartedAt = Date.now();
 
         updateAutoBatchProgress({
@@ -1885,6 +3086,7 @@ async function startAutoBatchPoster(filter) {
             body: JSON.stringify({
                 filter,
                 library_id: libraryId,
+                item_ids: queuedItemIds,
                 skip_processed: skipProcessed,
                 include_season_posters: includeSeasonPosters,
                 replace_existing_season_posters: replaceSeasonPosters
@@ -1895,14 +3097,19 @@ async function startAutoBatchPoster(filter) {
         if (!resp.ok || !data.success) throw new Error(data.error || 'Automatic batch failed');
 
         currentAutoBatchJobId = data.job_id;
+        saveActiveAutoBatchJob(data.job_id);
         await pollAutoBatchProgress(data.job_id);
-        autoBatchPollTimer = setInterval(() => pollAutoBatchProgress(data.job_id), 1000);
+        if (currentAutoBatchJobId === data.job_id && !autoBatchPollTimer) {
+            autoBatchPollTimer = setInterval(() => pollAutoBatchProgress(data.job_id), 1000);
+        }
 
     } catch (err) {
         console.error('Auto-batch error:', err);
         stopAutoBatchPolling();
         setAutoBatchRunning(false);
         currentAutoBatchJobId = null;
+        autoBatchStartedAt = null;
+        clearActiveAutoBatchJob();
         showAlert('Automatic batch failed: ' + err.message, 'danger');
     }
 }

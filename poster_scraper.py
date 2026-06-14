@@ -23,6 +23,15 @@ from config import Config
 import logging
 from requests.exceptions import ChunkedEncodingError, ConnectionError
 
+try:
+    from PIL import Image, ImageOps
+except ImportError:
+    Image = None
+    ImageOps = None
+
+if Config.JELLYFIN_URL:
+    Config.JELLYFIN_URL = Config.JELLYFIN_URL.rstrip('/')
+
 # Global Selenium driver
 selenium_driver = None
 selenium_lock = threading.RLock()
@@ -32,6 +41,8 @@ ITEM_POSTER_SELECTOR = "a.bg-transparent.border-0.text-white"
 TPDB_PAGE_REQUEST_DELAY_SEC = 1.25
 TPDB_IMAGE_PREVIEW_DELAY_SEC = 0.75
 TPDB_IMAGE_PREVIEW_RETRY_DELAY_SEC = 3
+TPDB_PREVIEW_MAX_SIZE = (160, 242)
+TPDB_PREVIEW_QUALITY = 85
 RATE_LIMIT_MARKERS = (
     "rate limit",
     "too many requests",
@@ -58,11 +69,11 @@ RATE_LIMIT_TITLE_MARKERS = (
 
 
 class TPDBSessionExpired(Exception):
-    """Raised when TPDB redirects Selenium back to /login."""
+    """Raised when TPDb redirects Selenium back to /login."""
 
 
 class TPDBRateLimited(Exception):
-    """Raised when TPDB responds with a likely rate-limit/challenge page."""
+    """Raised when TPDb responds with a likely rate-limit/challenge page."""
 
 
 def _iter_file_chunks(file_obj, chunk_size=1024 * 1024):
@@ -104,7 +115,7 @@ def _write_tpdb_debug_snapshot(page_source, context_label):
             snapshot_file.write(page_source or "")
         return snapshot_path
     except Exception as snapshot_error:
-        logging.warning(f"Failed to write TPDB debug snapshot: {snapshot_error}")
+        logging.warning(f"Failed to write TPDb debug snapshot: {snapshot_error}")
         return None
 
 
@@ -117,7 +128,7 @@ def _raise_if_rate_limited(page_source, current_url, context_label="search", che
 
     if _is_rate_limit_url(current_url) or title_looks_challenge or page_looks_challenge:
         snapshot_path = _write_tpdb_debug_snapshot(page_source, f"{context_label}_challenge")
-        details = f"TPDB returned a rate-limit/challenge page at {current_url or 'unknown URL'} (title: {title})"
+        details = f"TPDb returned a rate-limit/challenge page at {current_url or 'unknown URL'} (title: {title})"
         if snapshot_path:
             details += f". Snapshot: {snapshot_path}"
         raise TPDBRateLimited(details)
@@ -132,7 +143,7 @@ def _wait_for_search_results_ready(driver, timeout=15):
         )
     except TimeoutException as exc:
         _raise_if_rate_limited(driver.page_source, driver.current_url, "search_timeout")
-        raise TimeoutError("Timed out waiting for TPDB search results page to load.") from exc
+        raise TimeoutError("Timed out waiting for TPDb search results page to load.") from exc
 
 
 def _wait_for_item_posters_ready(driver, timeout=15):
@@ -144,7 +155,7 @@ def _wait_for_item_posters_ready(driver, timeout=15):
         )
     except TimeoutException as exc:
         _raise_if_rate_limited(driver.page_source, driver.current_url, "item_timeout")
-        raise TimeoutError("Timed out waiting for TPDB item poster page to load.") from exc
+        raise TimeoutError("Timed out waiting for TPDb item poster page to load.") from exc
 
 
 def _get_selenium_current_url():
@@ -232,7 +243,7 @@ def setup_selenium_and_login(force=False):
 
             WebDriverWait(selenium_driver, 20).until(lambda d: not _is_login_url(d.current_url))
             # After sign-in, /feed is expected. Avoid content-marker checks here because
-            # regular TPDB pages can include Cloudflare-related script text.
+            # regular TPDb pages can include Cloudflare-related script text.
             _raise_if_rate_limited(
                 selenium_driver.page_source,
                 selenium_driver.current_url,
@@ -240,7 +251,7 @@ def setup_selenium_and_login(force=False):
                 check_content_markers=False,
             )
             if _is_login_url(selenium_driver.current_url):
-                raise RuntimeError("TPDB login failed: still on /login after submitting credentials.")
+                raise RuntimeError("TPDb login failed: still on /login after submitting credentials.")
 
             if force:
                 logging.info("Selenium re-authenticated with ThePosterDB.")
@@ -288,7 +299,7 @@ def get_selenium_cookies_as_dict():
 
 def download_image_with_cookies(url, save_path):
     """
-    Download an image from TPDB using Selenium cookies for authentication.
+    Download an image from TPDb using Selenium cookies for authentication.
     """
     try:
         # Ensure target dir exists
@@ -363,7 +374,31 @@ def are_images_identical(item_id, image_path, image_type='Primary'):
         return False
     return jellyfin_hash == local_hash
 
-def get_image_as_base64(image_url):
+def _compress_image_preview(image_bytes, max_size=TPDB_PREVIEW_MAX_SIZE, quality=TPDB_PREVIEW_QUALITY):
+    if not Image or not ImageOps:
+        return None
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image = ImageOps.fit(image, max_size, Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+            if image.mode not in ('RGB', 'RGBA'):
+                image = image.convert('RGB')
+
+            output = BytesIO()
+            try:
+                image.save(output, format='WEBP', quality=quality, method=4)
+                return 'image/webp', output.getvalue()
+            except Exception:
+                output = BytesIO()
+                if image.mode == 'RGBA':
+                    image = image.convert('RGB')
+                image.save(output, format='JPEG', quality=quality, optimize=True)
+                return 'image/jpeg', output.getvalue()
+    except Exception as e:
+        logging.debug(f"Failed to compress preview image: {e}")
+        return None
+
+
+def get_image_as_base64(image_url, max_size=TPDB_PREVIEW_MAX_SIZE, quality=TPDB_PREVIEW_QUALITY):
     """
     Download image and convert to base64 data URL for embedding in UI.
     """
@@ -380,13 +415,19 @@ def get_image_as_base64(image_url):
                 logging.debug(f"Converting image to base64: {image_url}")
                 response = session.get(image_url, timeout=15)
                 if response.status_code == 429 and attempt == 0:
-                    logging.warning("TPDB preview image rate limit hit; retrying in %ss.", TPDB_IMAGE_PREVIEW_RETRY_DELAY_SEC)
+                    logging.warning("TPDb preview image rate limit hit; retrying in %ss.", TPDB_IMAGE_PREVIEW_RETRY_DELAY_SEC)
                     time.sleep(TPDB_IMAGE_PREVIEW_RETRY_DELAY_SEC)
                     continue
                 response.raise_for_status()
 
-                image_data = base64.b64encode(response.content).decode('utf-8')
+                image_bytes = response.content
                 content_type = response.headers.get('content-type', 'image/jpeg')
+                if max_size:
+                    compressed = _compress_image_preview(image_bytes, max_size=max_size, quality=quality)
+                    if compressed:
+                        content_type, image_bytes = compressed
+
+                image_data = base64.b64encode(image_bytes).decode('utf-8')
                 return f"data:{content_type};base64,{image_data}"
         except Exception as e:
             logging.warning(f"Error converting image to base64: {e}")
@@ -479,6 +520,7 @@ def _extract_tpdb_card_metadata(poster_link):
     set_link = card.select_one('a[href*="/set/"]') if card else None
     uploader_link = card.select_one('.uploaded-by a') if card else None
     overlay = card.select_one('.overlay[data-poster-id]') if card else None
+    title_element = card.select_one('.poster-title-correction p') if card else None
     preview_source = card.select_one('source[srcset], img.tpdb-poster[src]') if card else None
     set_url = _tpdb_absolute_url(set_link.get('href')) if set_link else None
     preview_href = preview_source.get('srcset') or preview_source.get('src') if preview_source else None
@@ -494,12 +536,32 @@ def _extract_tpdb_card_metadata(poster_link):
     return {
         'set_id': set_id,
         'set_url': set_url,
-        'set_poster_count': set_link.get_text(strip=True) if set_link else None,
         'uploader': uploader_link.get_text(strip=True) if uploader_link else 'Unknown',
         'tpdb_poster_id': overlay.get('data-poster-id') if overlay else None,
         'tpdb_poster_type': overlay.get('data-poster-type') if overlay else None,
+        'tpdb_title': format_title_year_spacing(title_element.get_text(strip=True)) if title_element else None,
         'preview_url': preview_url,
     }
+
+
+def _tpdb_card_matches_item(metadata, expected_title_norm, expected_year=None):
+    card_title = metadata.get('tpdb_title')
+    if not card_title:
+        return True
+
+    card_year = extract_title_year(card_title)
+    if expected_year and card_year and card_year != expected_year:
+        return False
+
+    card_title_norm = normalize_title_for_comparison(strip_title_year(card_title))
+    if not expected_title_norm or not card_title_norm:
+        return True
+
+    return (
+        card_title_norm == expected_title_norm or
+        card_title_norm.startswith(f"{expected_title_norm} season") or
+        card_title_norm.startswith(f"{expected_title_norm} specials")
+    )
 
 
 def _poster_dict(poster_id, poster_url, base64_image=None, target_type="series", season=None, group_id=None, metadata=None):
@@ -515,8 +577,8 @@ def _poster_dict(poster_id, poster_url, base64_image=None, target_type="series",
         'group_id': group_id,
         'set_id': metadata.get('set_id'),
         'set_url': metadata.get('set_url'),
-        'set_poster_count': metadata.get('set_poster_count'),
         'tpdb_poster_id': metadata.get('tpdb_poster_id'),
+        'source_url': metadata.get('source_url'),
     }
     if season:
         poster.update({
@@ -553,7 +615,7 @@ def _resolve_tpdb_search_query(item_title, item_type=None, tmdb_id=None):
                 year = (tmdb_data.get("release_date") or "")[:4]
             if tmdb_title:
                 search_query = f'{tmdb_title} ({year})' if year else tmdb_title
-                logging.debug(f"Using TMDB title for TPDB search: {search_query}")
+                logging.debug(f"Using TMDB title for TPDb search: {search_query}")
         except Exception as e:
             logging.warning(f"TMDB lookup failed for {item_title} ({item_type}): {e}; falling back to Jellyfin title.")
     return search_query
@@ -575,13 +637,19 @@ def _tpdb_url_with_query_params(url, **params):
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
-def _get_tpdb_preview_image(image_url, include_base64, preview_url=None):
+def _get_tpdb_preview_image(image_url, include_base64, preview_url=None, cache=None, max_size=TPDB_PREVIEW_MAX_SIZE, quality=TPDB_PREVIEW_QUALITY):
     if not include_base64:
         return None
     image_source = preview_url or image_url
+    cache_key = (image_source, max_size, quality)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
     if image_source == image_url:
         time.sleep(TPDB_IMAGE_PREVIEW_DELAY_SEC)
-    return get_image_as_base64(image_source)
+    base64_image = get_image_as_base64(image_source, max_size=max_size, quality=quality)
+    if cache is not None:
+        cache[cache_key] = base64_image
+    return base64_image
 
 
 def _open_tpdb_page_with_delay(url):
@@ -599,11 +667,20 @@ def search_tpdb_for_poster_groups(
     max_groups=6,
     include_base64=True,
     requested_set_urls=None,
+    tpdb_item_url=None,
+    cached_available_sets=None,
+    preview_max_size=TPDB_PREVIEW_MAX_SIZE,
+    preview_quality=TPDB_PREVIEW_QUALITY,
 ):
-    """Return grouped TPDB poster candidates plus a flat show-poster list."""
+    """Return grouped TPDb poster candidates plus a flat show-poster list."""
     global selenium_driver
     eligible_seasons = eligible_seasons or []
     requested_set_urls = set(requested_set_urls or [])
+    cached_sets_by_id = {
+        str(set_info.get('set_id') or ''): set_info
+        for set_info in (cached_available_sets or [])
+        if set_info.get('set_id')
+    }
     season_by_key = {
         _season_key_from_jellyfin(season): season
         for season in eligible_seasons
@@ -611,99 +688,119 @@ def search_tpdb_for_poster_groups(
     }
     search_query = _resolve_tpdb_search_query(item_title, item_type=item_type, tmdb_id=tmdb_id)
     search_url = _build_tpdb_search_url(search_query, item_type=item_type)
-    logging.info(f"TPDB search URL: {search_url}")
+    tpdb_item_url = _tpdb_absolute_url(tpdb_item_url) if tpdb_item_url else None
+    if tpdb_item_url:
+        logging.info(f"Using saved TPDb page for '{search_query}': {tpdb_item_url}")
+    else:
+        logging.info(f"TPDb search URL: {search_url}")
 
     try:
         groups = []
         poster_id = 1
+        preview_image_cache = {}
+        set_discovery_limit = max(
+            max_posters,
+            int(getattr(Config, "MAX_TPDB_SETS_PER_ITEM", Config.MAX_POSTERS_PER_ITEM))
+        )
         for attempt in range(3):
             try:
                 with selenium_lock:
                     if not selenium_driver:
                         setup_selenium_and_login()
 
-                    selenium_driver.get(search_url)
-                    current_url = selenium_driver.current_url
-                    if _is_login_url(current_url):
-                        logging.warning("TPDB session expired on search page for '%s' (%s).", item_title, current_url)
-                        raise TPDBSessionExpired("TPDB session expired while loading search page.")
-
-                    _raise_if_rate_limited(selenium_driver.page_source, current_url, "search_page")
-                    _wait_for_search_results_ready(selenium_driver, timeout=15)
-                    soup = BeautifulSoup(selenium_driver.page_source, 'html.parser')
-
-                    search_result_links = soup.select(SEARCH_RESULT_SELECTOR)
-                    if not search_result_links:
-                        logging.info(f"No TPDB search results for '{search_query}'.")
-                        return {'posters': [], 'groups': [], 'best_group': None, 'search_query': search_query}
-
                     expected_year = extract_title_year(search_query) or (str(item_year) if item_year else None)
                     expected_title = strip_title_year(search_query)
                     expected_title_norm = normalize_title_for_comparison(expected_title)
-                    candidate_links = []
-                    year_mismatch_count = 0
-                    for index, link in enumerate(search_result_links):
-                        try:
-                            title_element = link.find(class_="text-truncate") or link.find("span") or link
-                            result_title = title_element.get_text(strip=True) if title_element else link.get_text(strip=True)
-                            display_title = format_title_year_spacing(result_title)
-                            result_year = extract_title_year(result_title)
-                            result_title_norm = normalize_title_for_comparison(strip_title_year(result_title))
-                            exact_title_match = bool(expected_title_norm and expected_title_norm == result_title_norm)
-                            if expected_year and result_year and result_year != expected_year:
-                                year_mismatch_count += 1
-                                logging.debug("Skipping TPDB result for '%s' due to year mismatch: %s", search_query, display_title)
-                                continue
-                            item_page_path = link.get('href')
-                            target_item_page_url = item_page_path if item_page_path and item_page_path.startswith('http') else (
-                                Config.TPDB_BASE_URL + item_page_path if item_page_path and item_page_path.startswith('/') else None
-                            )
-                            if not target_item_page_url:
-                                continue
-                            candidate_links.append({
-                                'title': display_title,
-                                'year': result_year,
-                                'score': calculate_title_match_score(search_query, result_title),
-                                'exact_title_match': exact_title_match,
-                                'exact_year_match': exact_title_match and (not expected_year or result_year == expected_year),
-                                'url': target_item_page_url,
-                                'index': index,
-                            })
-                        except Exception:
-                            continue
+                    if tpdb_item_url:
+                        candidates_to_check = [{
+                            'title': search_query,
+                            'year': expected_year,
+                            'score': 1.0,
+                            'exact_title_match': True,
+                            'exact_year_match': True,
+                            'url': tpdb_item_url,
+                            'index': 0,
+                        }]
+                    else:
+                        selenium_driver.get(search_url)
+                        current_url = selenium_driver.current_url
+                        if _is_login_url(current_url):
+                            logging.warning("TPDb session expired on search page for '%s' (%s).", item_title, current_url)
+                            raise TPDBSessionExpired("TPDb session expired while loading search page.")
 
-                    if year_mismatch_count:
-                        logging.debug("Skipped %d TPDB result(s) for '%s' due to year mismatch.", year_mismatch_count, search_query)
+                        _raise_if_rate_limited(selenium_driver.page_source, current_url, "search_page")
+                        _wait_for_search_results_ready(selenium_driver, timeout=15)
+                        soup = BeautifulSoup(selenium_driver.page_source, 'html.parser')
 
-                    exact_matches = sorted(
-                        [candidate for candidate in candidate_links if candidate['exact_year_match']],
-                        key=lambda candidate: candidate['index'],
-                    )
-                    strong_matches = [candidate for candidate in candidate_links if candidate['score'] >= 0.8]
-                    fallback_matches = sorted(
-                        strong_matches or candidate_links,
-                        key=lambda candidate: (-candidate['score'], candidate['index'])
-                    )
-                    if exact_matches:
-                        logging.info(
-                            "Found %d exact TPDB result(s) for '%s'; checking exact matches first.",
-                            len(exact_matches),
-                            search_query,
+                        search_result_links = soup.select(SEARCH_RESULT_SELECTOR)
+                        if not search_result_links:
+                            logging.info(f"No TPDb search results for '{search_query}'.")
+                            return {'posters': [], 'groups': [], 'best_group': None, 'search_query': search_query}
+
+                        candidate_links = []
+                        year_mismatch_count = 0
+                        for index, link in enumerate(search_result_links):
+                            try:
+                                title_element = link.find(class_="text-truncate") or link.find("span") or link
+                                result_title = title_element.get_text(strip=True) if title_element else link.get_text(strip=True)
+                                display_title = format_title_year_spacing(result_title)
+                                result_year = extract_title_year(result_title)
+                                result_title_norm = normalize_title_for_comparison(strip_title_year(result_title))
+                                exact_title_match = bool(expected_title_norm and expected_title_norm == result_title_norm)
+                                if expected_year and result_year and result_year != expected_year:
+                                    year_mismatch_count += 1
+                                    logging.debug("Skipping TPDb result for '%s' due to year mismatch: %s", search_query, display_title)
+                                    continue
+                                item_page_path = link.get('href')
+                                target_item_page_url = item_page_path if item_page_path and item_page_path.startswith('http') else (
+                                    Config.TPDB_BASE_URL + item_page_path if item_page_path and item_page_path.startswith('/') else None
+                                )
+                                if not target_item_page_url:
+                                    continue
+                                candidate_links.append({
+                                    'title': display_title,
+                                    'year': result_year,
+                                    'score': calculate_title_match_score(search_query, result_title),
+                                    'exact_title_match': exact_title_match,
+                                    'exact_year_match': exact_title_match and (not expected_year or result_year == expected_year),
+                                    'url': target_item_page_url,
+                                    'index': index,
+                                })
+                            except Exception:
+                                continue
+
+                        if year_mismatch_count:
+                            logging.debug("Skipped %d TPDb result(s) for '%s' due to year mismatch.", year_mismatch_count, search_query)
+
+                        exact_matches = sorted(
+                            [candidate for candidate in candidate_links if candidate['exact_year_match']],
+                            key=lambda candidate: candidate['index'],
                         )
+                        strong_matches = [candidate for candidate in candidate_links if candidate['score'] >= 0.8]
+                        fallback_matches = sorted(
+                            strong_matches or candidate_links,
+                            key=lambda candidate: (-candidate['score'], candidate['index'])
+                        )
+                        if exact_matches:
+                            logging.info(
+                                "Found %d exact TPDb result(s) for '%s'; checking exact matches first.",
+                                len(exact_matches),
+                                search_query,
+                            )
 
-                    queued_candidate_indexes = set()
-                    candidates_to_check = []
-                    for candidate in exact_matches + fallback_matches:
-                        if candidate['index'] in queued_candidate_indexes:
-                            continue
-                        candidates_to_check.append(candidate)
-                        queued_candidate_indexes.add(candidate['index'])
-                        if len(candidates_to_check) >= max_groups:
-                            break
+                        queued_candidate_indexes = set()
+                        candidates_to_check = []
+                        for candidate in exact_matches + fallback_matches:
+                            if candidate['index'] in queued_candidate_indexes:
+                                continue
+                            candidates_to_check.append(candidate)
+                            queued_candidate_indexes.add(candidate['index'])
+                            if len(candidates_to_check) >= max_groups:
+                                break
 
                     for candidate in candidates_to_check:
                         logging.info(
-                            "Checking TPDB result for '%s': %s (%d%% match)",
+                            "Checking TPDb result for '%s': %s (%d%% match)",
                             search_query,
                             candidate['title'],
                             round(candidate['score'] * 100),
@@ -711,14 +808,14 @@ def search_tpdb_for_poster_groups(
                         _open_tpdb_page_with_delay(candidate['url'])
                         current_url = selenium_driver.current_url
                         if _is_login_url(current_url):
-                            logging.warning("TPDB session expired on item page for '%s' (%s).", item_title, current_url)
-                            raise TPDBSessionExpired("TPDB session expired while loading item page.")
+                            logging.warning("TPDb session expired on item page for '%s' (%s).", item_title, current_url)
+                            raise TPDBSessionExpired("TPDb session expired while loading item page.")
 
                         _raise_if_rate_limited(selenium_driver.page_source, current_url, "item_page")
                         try:
                             _wait_for_item_posters_ready(selenium_driver, timeout=15)
                         except TimeoutError:
-                            logging.warning("Timed out checking TPDB result '%s' for '%s'; trying next result.", candidate['title'], search_query)
+                            logging.warning("Timed out checking TPDb result '%s' for '%s'; trying next result.", candidate['title'], search_query)
                             continue
 
                         item_soup = BeautifulSoup(selenium_driver.page_source, 'html.parser')
@@ -739,28 +836,50 @@ def search_tpdb_for_poster_groups(
                         discovered_set_lookup = {}
                         discovered_set_order = {}
 
-                        for poster_link in item_soup.select(ITEM_POSTER_SELECTOR)[:Config.MAX_POSTERS_PER_ITEM]:
+                        for poster_link in item_soup.select(ITEM_POSTER_SELECTOR)[:set_discovery_limit]:
                             href = poster_link.get('href')
                             poster_url = _tpdb_absolute_url(href)
                             if not poster_url:
                                 continue
 
                             metadata = _extract_tpdb_card_metadata(poster_link)
+                            metadata['source_url'] = candidate['url']
                             set_url = metadata.get('set_url')
                             if set_url and set_url not in discovered_set_lookup:
+                                cached_set = cached_sets_by_id.get(str(metadata.get('set_id') or ''))
+                                preview_base64 = None
+                                if cached_set and cached_set.get('preview_base64'):
+                                    preview_base64 = cached_set.get('preview_base64')
+                                elif not requested_set_urls:
+                                    preview_base64 = _get_tpdb_preview_image(
+                                        poster_url,
+                                        include_base64,
+                                        metadata.get('preview_url'),
+                                        preview_image_cache,
+                                        max_size=preview_max_size,
+                                        quality=preview_quality,
+                                    )
                                 discovered_set_order[set_url] = len(discovered_set_urls)
                                 discovered_set_urls.append(set_url)
                                 discovered_set_lookup[set_url] = {
                                     'set_id': metadata.get('set_id'),
                                     'set_url': set_url,
-                                    'set_poster_count': metadata.get('set_poster_count'),
-                                    'uploader': metadata.get('uploader') or 'Unknown',
+                                    'uploader': metadata.get('uploader') or (cached_set or {}).get('uploader') or 'Unknown',
+                                    'preview_url': metadata.get('preview_url') or (cached_set or {}).get('preview_url') or poster_url,
+                                    'preview_base64': preview_base64,
                                 }
                             if requested_set_urls and set_url not in requested_set_urls:
                                 continue
                             if not requested_set_urls and set_url and discovered_set_order.get(set_url, 0) >= max_posters:
                                 continue
-                            base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
+                            base64_image = _get_tpdb_preview_image(
+                                poster_url,
+                                include_base64,
+                                metadata.get('preview_url'),
+                                preview_image_cache,
+                                max_size=preview_max_size,
+                                quality=preview_quality,
+                            )
                             season_key = _extract_tpdb_season_key(poster_link)
                             if season_key and season_key in season_by_key:
                                 season = season_by_key[season_key]
@@ -796,12 +915,12 @@ def search_tpdb_for_poster_groups(
                                 for poster in group['show_posters'] + group['season_posters']
                             }
                             for set_url in set_urls_to_load:
-                                logging.info("Checking TPDB poster set for '%s': %s", search_query, set_url)
+                                logging.info("Checking TPDb poster set for '%s': %s", search_query, set_url)
                                 _open_tpdb_page_with_delay(set_url)
                                 current_url = selenium_driver.current_url
                                 if _is_login_url(current_url):
-                                    logging.warning("TPDB session expired on set page for '%s' (%s).", item_title, current_url)
-                                    raise TPDBSessionExpired("TPDB session expired while loading set page.")
+                                    logging.warning("TPDb session expired on set page for '%s' (%s).", item_title, current_url)
+                                    raise TPDBSessionExpired("TPDb session expired while loading set page.")
 
                                 _raise_if_rate_limited(selenium_driver.page_source, current_url, "set_page")
                                 try:
@@ -816,11 +935,21 @@ def search_tpdb_for_poster_groups(
                                         continue
 
                                     metadata = _extract_tpdb_card_metadata(poster_link)
+                                    metadata['source_url'] = candidate['url']
+                                    if not _tpdb_card_matches_item(metadata, expected_title_norm, expected_year):
+                                        continue
                                     season_key = _extract_tpdb_season_key(poster_link)
                                     poster_type = (metadata.get('tpdb_poster_type') or '').lower()
                                     if season_key and season_key in season_by_key:
                                         season = season_by_key[season_key]
-                                        base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
+                                        base64_image = _get_tpdb_preview_image(
+                                            poster_url,
+                                            include_base64,
+                                            metadata.get('preview_url'),
+                                            preview_image_cache,
+                                            max_size=preview_max_size,
+                                            quality=preview_quality,
+                                        )
                                         group['season_posters'].append(_poster_dict(
                                             poster_id,
                                             poster_url,
@@ -833,7 +962,14 @@ def search_tpdb_for_poster_groups(
                                         poster_id += 1
                                         seen_poster_urls.add(poster_url)
                                     elif poster_type == 'show':
-                                        base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
+                                        base64_image = _get_tpdb_preview_image(
+                                            poster_url,
+                                            include_base64,
+                                            metadata.get('preview_url'),
+                                            preview_image_cache,
+                                            max_size=preview_max_size,
+                                            quality=preview_quality,
+                                        )
                                         group['show_posters'].append(_poster_dict(
                                             poster_id,
                                             poster_url,
@@ -850,7 +986,7 @@ def search_tpdb_for_poster_groups(
                         )
                         if should_fallback_to_season_pages:
                             logging.info(
-                                "No usable TPDB set season posters found for '%s'; falling back to season-filtered pages.",
+                                "No usable TPDb set season posters found for '%s'; falling back to season-filtered pages.",
                                 search_query,
                             )
 
@@ -865,7 +1001,7 @@ def search_tpdb_for_poster_groups(
                                 variation="orig",
                             )
                             logging.info(
-                                "Checking TPDB season posters for '%s': %s season %s",
+                                "Checking TPDb season posters for '%s': %s season %s",
                                 search_query,
                                 candidate['title'],
                                 season_param,
@@ -873,8 +1009,8 @@ def search_tpdb_for_poster_groups(
                             _open_tpdb_page_with_delay(season_url)
                             current_url = selenium_driver.current_url
                             if _is_login_url(current_url):
-                                logging.warning("TPDB session expired on season page for '%s' (%s).", item_title, current_url)
-                                raise TPDBSessionExpired("TPDB session expired while loading season page.")
+                                logging.warning("TPDb session expired on season page for '%s' (%s).", item_title, current_url)
+                                raise TPDBSessionExpired("TPDb session expired while loading season page.")
 
                             _raise_if_rate_limited(selenium_driver.page_source, current_url, "season_page")
                             try:
@@ -895,7 +1031,15 @@ def search_tpdb_for_poster_groups(
                                     continue
 
                                 metadata = _extract_tpdb_card_metadata(poster_link)
-                                base64_image = _get_tpdb_preview_image(poster_url, include_base64, metadata.get('preview_url'))
+                                metadata['source_url'] = candidate['url']
+                                base64_image = _get_tpdb_preview_image(
+                                    poster_url,
+                                    include_base64,
+                                    metadata.get('preview_url'),
+                                    preview_image_cache,
+                                    max_size=preview_max_size,
+                                    quality=preview_quality,
+                                )
                                 group['season_posters'].append(_poster_dict(
                                     poster_id,
                                     poster_url,
@@ -922,14 +1066,14 @@ def search_tpdb_for_poster_groups(
                     break
             except TPDBSessionExpired:
                 if attempt == 0:
-                    logging.warning("TPDB session expired; re-authenticating and retrying once for '%s'.", item_title)
+                    logging.warning("TPDb session expired; re-authenticating and retrying once for '%s'.", item_title)
                     setup_selenium_and_login(force=True)
                     continue
                 raise
             except TPDBRateLimited:
                 if attempt < 2:
                     backoff_sec = 2 + attempt * 2
-                    logging.warning("TPDB challenge/rate-limit detected for '%s'; retrying in %ss.", item_title, backoff_sec)
+                    logging.warning("TPDb challenge/rate-limit detected for '%s'; retrying in %ss.", item_title, backoff_sec)
                     time.sleep(backoff_sec)
                     continue
                 raise
@@ -950,7 +1094,7 @@ def search_tpdb_for_poster_groups(
             'search_query': search_query,
         }
     except Exception:
-        logging.exception("Error during TPDB scraping: search_url=%s current_url=%s", search_url, _get_selenium_current_url())
+        logging.exception("Error during TPDb scraping: search_url=%s current_url=%s", search_url, _get_selenium_current_url())
         raise
 
 

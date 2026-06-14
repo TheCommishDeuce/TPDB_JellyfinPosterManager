@@ -58,57 +58,21 @@
     </div>
 </div>
 
-<!-- Manual Selection -->
-<div class="row mb-3" id="manualSelectionRow" style="display: none;">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body py-3">
-                <div class="row align-items-center">
-                    <div class="col-md-8">
-                        <h5 class="mb-0">
-                            <i class="fas fa-tasks me-2"></i>Manual Selection
-                        </h5>
-                        <small class="text-muted">
-                            <span id="selectedCount">0</span> items selected for manual upload
-                        </small>
-                    </div>
-                    <div class="col-md-4 text-md-end">
-                        <button class="btn btn-success" id="uploadAllBtn" onclick="uploadAllSelected()" disabled>
-                            <i class="fas fa-cloud-upload-alt me-2"></i>
-                            Upload All Selected
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Progress (hidden until used) -->
-                <div id="progressContainer" class="mt-3" style="display:none;">
-                    <div class="progress">
-                        <div id="progressBar" class="progress-bar" style="width: 0%"></div>
-                    </div>
-                    <div class="text-end mt-1">
-                        <small id="progressText" class="text-muted">0%</small>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Automatic Batch Operations -->
-<div class="row mb-4 automatic-batch-row">
+<!-- Poster Selection -->
+<div class="row mb-4 automatic-batch-row" id="manualSelectionRow">
     <div class="col-12">
         <div class="card automatic-batch-card">
             <div class="card-body py-3">
-                <div class="row align-items-center">
-                    <div class="col-md-8">
+                <div class="row align-items-center g-3">
+                    <div class="col-md-4">
                         <h5 class="mb-0">
-                            <i class="fas fa-magic me-2"></i>Automatic Batch Operations
+                            <i class="fas fa-images me-2"></i>Poster Selection
                         </h5>
                         <small class="text-muted">
-                            Automatically find and upload the first available poster for items
+                            Auto-get posters or queue items for manual selection
                         </small>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-8">
                         <div class="d-flex flex-wrap align-items-center justify-content-md-end gap-2">
                             <button class="btn btn-outline-danger" type="button" id="cancelAutoBatchBtn" onclick="cancelAutoBatch()" style="display: none;">
                                 <i class="fas fa-stop me-1"></i>Cancel
@@ -121,32 +85,41 @@
                                 </button>
                                 <ul class="dropdown-menu dropdown-menu-end">
                                     <li>
-                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('no-poster')">
-                                            <i class="fas fa-exclamation-circle me-2 text-warning"></i>
-                                            Items Without Posters
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('all')">
+                                            <i class="fas fa-th me-2 text-primary"></i>
+                                            All items
                                         </a>
                                     </li>
                                     <li>
-                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('all')">
-                                            <i class="fas fa-th me-2 text-primary"></i>
-                                            All Items
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('queued')">
+                                            <i class="fas fa-list-check me-2 text-primary"></i>
+                                            Queued items
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('no-poster')">
+                                            <i class="fas fa-exclamation-circle me-2 text-warning"></i>
+                                            Items without posters
                                         </a>
                                     </li>
                                     <li><hr class="dropdown-divider"></li>
                                     <li>
                                         <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('movies')">
                                             <i class="fas fa-film me-2 text-info"></i>
-                                            Movies Only
+                                            Movies only
                                         </a>
                                     </li>
                                     <li>
                                         <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('series')">
                                             <i class="fas fa-tv me-2 text-success"></i>
-                                            TV Series Only
+                                            Series only
                                         </a>
                                     </li>
                                 </ul>
                             </div>
+                            <button class="btn btn-outline-secondary" type="button" id="lastAutoBatchResultsBtn" onclick="showLastAutoBatchResults()" title="Last Results" aria-label="Last Results" disabled>
+                                <i class="fas fa-clock-rotate-left"></i>
+                            </button>
                             <div class="dropdown">
                                 <button type="button" class="btn btn-outline-secondary"
                                         data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
@@ -172,6 +145,33 @@
                         </div>
                     </div>
                 </div>
+                <div class="poster-selection-manual-row mt-3 pt-3">
+                    <div class="row align-items-center g-3">
+                        <div class="col-md-6">
+                            <div class="fw-semibold">
+                                <i class="fas fa-tasks me-2"></i>Manual Selection
+                            </div>
+                            <small class="text-muted">
+                                <span id="manualQueueCount">0</span> queued for poster search
+                                <span class="mx-1">&bull;</span>
+                                <span id="selectedCount">0</span> ready to upload
+                            </small>
+                        </div>
+                        <div class="col-md-6 text-md-end">
+                            <div class="d-flex flex-wrap align-items-center justify-content-md-end gap-2">
+                                <button class="btn btn-outline-primary manual-action-btn" id="manualQueueStartBtn" onclick="startManualPosterQueue()" disabled title="Set Posters for Queued" aria-label="Set Posters for Queued">
+                                    <i class="fas fa-search me-1"></i>
+                                    Set Posters for Queued
+                                    <span class="badge bg-primary ms-2" id="manualQueueActionCount">0</span>
+                                </button>
+                                <button class="btn btn-success manual-action-btn" id="uploadAllBtn" onclick="uploadAllSelected()" disabled title="Upload All Selected" aria-label="Upload All Selected">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <span class="badge bg-light text-dark ms-2" id="manualUploadActionCount">0</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <div id="autoBatchProgressPanel" class="automatic-batch-progress mt-3" style="display: none;">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <div class="d-flex align-items-center gap-2">
@@ -186,11 +186,13 @@
                         </div>
                         <div class="text-end">
                             <small class="text-muted d-block" id="autoBatchProgressCounts">0 / 0</small>
-                            <small class="text-muted d-block mt-1">Estimated time remaining</small>
-                            <strong id="autoBatchEta">Calculating...</strong>
+                            <div id="autoBatchEtaWrap" style="display: none;">
+                                <small class="text-muted d-block mt-1">Estimated time remaining</small>
+                                <strong id="autoBatchEta">Calculating...</strong>
+                            </div>
                         </div>
                     </div>
-                    <div class="progress">
+                    <div class="progress" id="autoBatchProgressBarWrap" style="display: none;">
                         <div id="autoBatchProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
                     </div>
                     <div class="row row-cols-2 row-cols-md-4 text-center mt-2 g-2">
@@ -210,6 +212,15 @@
                             <small class="text-muted d-block">Status</small>
                             <strong id="autoBatchPhase">Starting</strong>
                         </div>
+                    </div>
+                </div>
+                <!-- Progress (hidden until used) -->
+                <div id="progressContainer" class="mt-3" style="display:none;">
+                    <div class="progress">
+                        <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div class="text-end mt-1">
+                        <small id="progressText" class="text-muted">0%</small>
                     </div>
                 </div>
             </div>
@@ -265,16 +276,40 @@
 <!-- Grid Tools -->
 <div class="row mb-3">
     <div class="col-12 d-flex flex-wrap justify-content-end gap-2">
-        <button class="btn btn-outline-secondary btn-sm" type="button" id="manualSelectionToolbarBtn" onclick="toggleManualSelectionPanel()" aria-expanded="false">
-            <i class="fas fa-tasks me-1"></i>
-            Manual
-            <span class="badge bg-secondary ms-1" id="manualSelectionToolbarCount">0</span>
-        </button>
         <button class="btn btn-outline-secondary btn-sm" type="button" id="failedItemsToolbarBtn" onclick="toggleFailedItemsFromToolbar()" aria-expanded="false">
             <i class="fas fa-triangle-exclamation me-1"></i>
             Failed
             <span class="badge bg-danger ms-1" id="failedItemsToolbarCount">0</span>
         </button>
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
+                    id="filterDropdownBtn" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" data-bs-boundary="viewport">
+                <i class="fas fa-filter me-1"></i>
+                Filter
+            </button>
+            <div class="dropdown-menu dropdown-menu-end grid-filter-menu" aria-labelledby="filterDropdownBtn">
+                <div class="small text-muted mb-2">Status</div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input grid-status-filter" type="checkbox" value="processed" id="filterProcessed" onchange="setGridStatusFilter(this)">
+                    <label class="form-check-label" for="filterProcessed">Processed</label>
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input grid-status-filter" type="checkbox" value="failed" id="filterFailed" onchange="setGridStatusFilter(this)">
+                    <label class="form-check-label" for="filterFailed">Failed</label>
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input grid-status-filter" type="checkbox" value="queued" id="filterQueued" onchange="setGridStatusFilter(this)">
+                    <label class="form-check-label" for="filterQueued">Queued</label>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input grid-status-filter" type="checkbox" value="locked" id="filterLocked" onchange="setGridStatusFilter(this)">
+                    <label class="form-check-label" for="filterLocked">Locked</label>
+                </div>
+                <button class="btn btn-outline-secondary btn-sm w-100" type="button" onclick="clearGridStatusFilters()">
+                    Clear filters
+                </button>
+            </div>
+        </div>
         <div class="dropdown">
             <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
                     id="sortDropdownBtn" data-bs-toggle="dropdown" aria-expanded="false" data-bs-boundary="viewport">
@@ -348,6 +383,20 @@
                         {{ item.type }}
                     </span>
                 </div>
+                <button class="protected-item-toggle"
+                        type="button"
+                        data-item-id="{{ item.id }}"
+                        title="Protect from Auto-Get"
+                        aria-label="Protect {{ item.title }} from Auto-Get">
+                    <i class="fas fa-lock-open"></i>
+                </button>
+                <button class="find-posters-overlay-btn"
+                        type="button"
+                        onclick="loadPosters('{{ item.id }}')"
+                        title="Find Posters"
+                        aria-label="Auto-Get postersfor {{ item.title }}">
+                    <i class="fas fa-search"></i>
+                </button>
             </div>
 
             <div class="card-body p-2">
@@ -361,21 +410,28 @@
                     {% endif %}
                     {% if item.type == 'Series' and item.season_count is defined and item.season_count is not none %}
                     {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
-                    <i class="fas fa-layer-group me-1"></i>{{ item.season_count }} season{{ '' if item.season_count == 1 else 's' }}
+                    <button class="season-count-button" type="button" onclick="showSeasonPosters('{{ item.id }}')" title="View season posters">
+                        <i class="fas fa-layer-group me-1"></i>{{ item.season_count }} season{{ '' if item.season_count == 1 else 's' }}
+                    </button>
                     {% elif item.type == 'Series' %}
-                    <span class="series-season-count" data-season-count-item-id="{{ item.id }}">
-                        {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
+                    {% if item.year %}<span class="mx-1">&bull;</span>{% endif %}
+                    <button class="series-season-count season-count-button" type="button" data-season-count-item-id="{{ item.id }}" onclick="showSeasonPosters('{{ item.id }}')" title="View season posters">
                         <i class="fas fa-layer-group me-1"></i><span class="season-count-text">Seasons</span>
-                    </span>
+                    </button>
                     {% endif %}
                 </small>
                 {% endif %}
 
                 <div class="d-grid">
-                    <button class="btn btn-outline-primary btn-sm find-posters-btn" onclick="loadPosters('{{ item.id }}')">
-                        <i class="fas fa-search me-1"></i>
-                        Find Posters
-                    </button>
+                    <input class="btn-check manual-queue-checkbox"
+                           type="checkbox"
+                           id="manual-queue-{{ item.id }}"
+                           data-item-id="{{ item.id }}"
+                           autocomplete="off">
+                    <label class="btn btn-outline-secondary btn-sm manual-queue-label" for="manual-queue-{{ item.id }}">
+                        <i class="fas fa-list-check me-1"></i>
+                        Queue
+                    </label>
                 </div>
 
                 <div class="mt-2" id="status-{{ item.id }}"></div>
@@ -413,11 +469,28 @@
             <div class="modal-body" id="posterModalBody"></div>
             <div class="modal-footer" id="posterModalFooter" style="display:none;">
                 <small class="text-muted me-auto" id="posterSelectionHint">Choose a poster to save it for upload.</small>
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-primary" id="savePosterSelectionBtn" onclick="finishPosterSelection()" disabled>
-                    <i class="fas fa-save me-1"></i>Save Selection
+                <button type="button" class="btn btn-queue-upload" id="queuePosterSelectionBtn" onclick="queueCurrentPosterSelection()" disabled>
+                    <i class="fas fa-list-check me-1"></i>Queue Upload
+                </button>
+                <button type="button" class="btn btn-primary" id="uploadPosterSelectionBtn" onclick="uploadCurrentPosterSelection()" disabled>
+                    <i class="fas fa-cloud-upload-alt me-1"></i>Select and Upload
                 </button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Season Posters Modal -->
+<div class="modal fade" id="seasonPostersModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="seasonPostersModalTitle">
+                    <i class="fas fa-layer-group me-2"></i>Season Posters
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="seasonPostersModalBody"></div>
         </div>
     </div>
 </div>
@@ -436,6 +509,25 @@
             <div class="modal-body" id="resultsModalBody"></div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer"></div>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="confirmModalTitle">Confirm action</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="confirmModalBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="confirmModalCancelBtn" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmModalConfirmBtn">Continue</button>
             </div>
         </div>
     </div>

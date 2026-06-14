@@ -4,15 +4,86 @@ import json
 import os
 import logging
 import re
+import hashlib
+import base64
 import sys
 import time
-from datetime import datetime
+from io import BytesIO
+from datetime import datetime, timedelta, timezone
 from poster_scraper import *
 from config import Config
 import threading
 
+try:
+    from PIL import Image, ImageOps
+except ImportError:
+    Image = None
+    ImageOps = None
+
 app = Flask(__name__)
 app.config.from_object(Config)
+
+
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+
+def _utc_timestamp():
+    return _utc_now().isoformat(timespec='seconds').replace('+00:00', 'Z')
+
+
+TPDB_CACHE_PREVIEW_SIZE = (24, 36)
+TPDB_CACHE_PREVIEW_QUALITY = 25
+TPDB_SET_CACHE_PREVIEW_SIZE = (72, 108)
+TPDB_SET_CACHE_PREVIEW_QUALITY = 35
+
+
+def _compress_base64_preview(data_url, max_size=TPDB_PREVIEW_MAX_SIZE, quality=TPDB_PREVIEW_QUALITY):
+    if not data_url or not isinstance(data_url, str) or not Image or not ImageOps:
+        return data_url
+    if not data_url.startswith('data:image/') or ';base64,' not in data_url:
+        return data_url
+
+    try:
+        _, encoded = data_url.split(';base64,', 1)
+        image_bytes = base64.b64decode(encoded)
+        with Image.open(BytesIO(image_bytes)) as image:
+            image = ImageOps.fit(image, max_size, Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+            if image.mode not in ('RGB', 'RGBA'):
+                image = image.convert('RGB')
+
+            output = BytesIO()
+            try:
+                image.save(output, format='WEBP', quality=quality, method=4)
+                content_type = 'image/webp'
+            except Exception:
+                output = BytesIO()
+                if image.mode == 'RGBA':
+                    image = image.convert('RGB')
+                image.save(output, format='JPEG', quality=quality, optimize=True)
+                content_type = 'image/jpeg'
+
+        return f"data:{content_type};base64,{base64.b64encode(output.getvalue()).decode('utf-8')}"
+    except Exception as e:
+        logging.debug(f"Failed to compress cached TPDb preview: {e}")
+        return data_url
+
+
+def _tiny_cached_preview(data_url):
+    return _compress_base64_preview(data_url, max_size=TPDB_CACHE_PREVIEW_SIZE, quality=TPDB_CACHE_PREVIEW_QUALITY)
+
+
+def _set_cached_preview(data_url):
+    return _compress_base64_preview(data_url, max_size=TPDB_SET_CACHE_PREVIEW_SIZE, quality=TPDB_SET_CACHE_PREVIEW_QUALITY)
+
+
+def _cached_compressed_preview(data_url, preview_cache, cache_key, compressor):
+    if not data_url:
+        return data_url
+    key = (cache_key, data_url)
+    if key not in preview_cache:
+        preview_cache[key] = compressor(data_url)
+    return preview_cache[key]
 
 class ConsoleFormatter(logging.Formatter):
     COLORS = {
@@ -29,7 +100,7 @@ class ConsoleFormatter(logging.Formatter):
         "Successfully uploaded poster for: ",
         "Searching posters for: ",
         "Processing item ",
-        "No TPDB search results for ",
+        "No TPDb search results for ",
         "Found 0 poster links for ",
     )
 
@@ -113,8 +184,19 @@ selenium_ready_event = threading.Event()
 BATCH_DELAY_SEC = getattr(Config, 'TPDB_BATCH_DELAY_SEC', 1.5)
 FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR, 'failed.log'))
 RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_DIR, 'results.log'))
+CACHE_DIR = getattr(Config, 'CACHE_DIR', 'cache')
+APP_STATE_DIR = getattr(Config, 'APP_STATE_DIR', 'data')
+PROTECTED_ITEMS_FILE = getattr(Config, 'PROTECTED_ITEMS_FILE', os.path.join(APP_STATE_DIR, 'protected_items.json'))
+TPDB_ITEM_MAP_FILE = getattr(Config, 'TPDB_ITEM_MAP_FILE', os.path.join(APP_STATE_DIR, 'tpdb_item_map.json'))
+if getattr(Config, 'TEMP_POSTER_DIR', None) in (None, 'temp_posters'):
+    Config.TEMP_POSTER_DIR = os.path.join(CACHE_DIR, 'temp_posters')
+TPDB_SET_CACHE_FILE = getattr(Config, 'TPDB_SET_CACHE_FILE', os.path.join(CACHE_DIR, 'tpdb_set_cache.json'))
+TPDB_PICKER_CACHE_FILE = getattr(Config, 'TPDB_PICKER_CACHE_FILE', os.path.join(CACHE_DIR, 'tpdb_picker_cache.json'))
+TPDB_SET_CACHE_MAX_AGE_DAYS = getattr(Config, 'TPDB_SET_CACHE_MAX_AGE_DAYS', 14)
+TPDB_PICKER_CACHE_MAX_AGE_DAYS = getattr(Config, 'TPDB_PICKER_CACHE_MAX_AGE_DAYS', 7)
 auto_batch_jobs = {}
 auto_batch_jobs_lock = threading.Lock()
+latest_auto_batch_job_id = None
 season_count_cache = {}
 season_count_cache_lock = threading.Lock()
 MAX_FINISHED_AUTO_BATCH_JOBS = 20
@@ -177,15 +259,16 @@ def _sweep_stale_temp_posters(max_age_sec=3600):
         logging.info("Removed %d stale temp poster files.", removed_count)
 
 
-def _create_auto_batch_job(target_filter, skip_processed=False, include_season_posters=False, replace_existing_season_posters=False):
+def _create_auto_batch_job(target_filter, skip_processed=False, include_season_posters=False, replace_existing_season_posters=False, item_ids=None):
     job_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+    now = _utc_timestamp()
     job = {
         'job_id': job_id,
         'filter': target_filter,
         'skip_processed': skip_processed,
         'include_season_posters': include_season_posters,
         'replace_existing_season_posters': replace_existing_season_posters,
+        'item_ids': item_ids or [],
         'status': 'starting',
         'phase': 'starting',
         'message': 'Starting automatic poster batch...',
@@ -215,7 +298,8 @@ def _create_auto_batch_job(target_filter, skip_processed=False, include_season_p
 
 
 def _update_auto_batch_job(job_id, **updates):
-    updates['updated_at'] = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+    global latest_auto_batch_job_id
+    updates['updated_at'] = _utc_timestamp()
     with auto_batch_jobs_lock:
         job = auto_batch_jobs.get(job_id)
         if not job:
@@ -223,11 +307,25 @@ def _update_auto_batch_job(job_id, **updates):
         job.update(updates)
         if 'processed' in updates or 'total_items' in updates:
             job['remaining'] = max(job.get('total_items', 0) - job.get('processed', 0), 0)
+        if updates.get('done'):
+            latest_auto_batch_job_id = job_id
 
 
 def _get_auto_batch_job(job_id):
     with auto_batch_jobs_lock:
         job = auto_batch_jobs.get(job_id)
+        if not job:
+            return None
+        snapshot = dict(job)
+        snapshot['results'] = list(job.get('results', []))
+        return snapshot
+
+
+def _get_latest_auto_batch_job():
+    with auto_batch_jobs_lock:
+        if not latest_auto_batch_job_id:
+            return None
+        job = auto_batch_jobs.get(latest_auto_batch_job_id)
         if not job:
             return None
         snapshot = dict(job)
@@ -252,7 +350,7 @@ def _cancel_auto_batch_job(job_id):
         job['status'] = 'cancelling'
         job['phase'] = 'cancelling'
         job['message'] = 'Cancelling after the current step...'
-        job['updated_at'] = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+        job['updated_at'] = _utc_timestamp()
         return dict(job)
 
 
@@ -283,16 +381,467 @@ def _get_results_log_path():
     return RESULTS_LOG_FILE
 
 
+def _get_protected_items_path():
+    return PROTECTED_ITEMS_FILE
+
+
+def _get_tpdb_item_map_path():
+    return TPDB_ITEM_MAP_FILE
+
+
+def _get_tpdb_set_cache_path():
+    return TPDB_SET_CACHE_FILE
+
+
+def _get_tpdb_picker_cache_path():
+    return TPDB_PICKER_CACHE_FILE
+
+
+def _ensure_parent_dir(path):
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+
+
+def _read_json_file(path, default=None, expected_type=None, description='JSON file'):
+    if not os.path.exists(path):
+        return default() if callable(default) else default
+    try:
+        with open(path, 'r', encoding='utf-8') as json_file:
+            data = json.load(json_file)
+        if expected_type and not isinstance(data, expected_type):
+            return default() if callable(default) else default
+        return data
+    except Exception as e:
+        logging.warning(f"Failed to read {description}: {e}")
+        return default() if callable(default) else default
+
+
+def _write_json_file(path, payload):
+    _ensure_parent_dir(path)
+    with open(path, 'w', encoding='utf-8') as json_file:
+        json.dump(payload, json_file, ensure_ascii=False, indent=2)
+
+
+def _append_jsonl_entry(path, entry):
+    _ensure_parent_dir(path)
+    with open(path, 'a', encoding='utf-8') as jsonl_file:
+        jsonl_file.write(json.dumps(entry, ensure_ascii=False) + '\n')
+
+
+def _read_jsonl_entries(path, fallback_factory=None):
+    if not os.path.exists(path):
+        return []
+
+    entries = []
+    with open(path, 'r', encoding='utf-8') as jsonl_file:
+        for line in jsonl_file:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                if fallback_factory:
+                    entries.append(fallback_factory(line))
+    return entries
+
+
+def _clear_file(path):
+    _ensure_parent_dir(path)
+    with open(path, 'w', encoding='utf-8'):
+        pass
+
+
+def _normalize_tpdb_item_url(value):
+    value = (value or '').strip()
+    if not value:
+        return ''
+    if value.isdigit():
+        return f"{Config.TPDB_BASE_URL}/posters/{value}"
+    match = re.search(r'(?:https?://theposterdb\.com)?/posters/(\d+)', value, re.IGNORECASE)
+    if match:
+        return f"{Config.TPDB_BASE_URL}/posters/{match.group(1)}"
+    return ''
+
+
+def _build_tpdb_set_url(set_id):
+    return f"{Config.TPDB_BASE_URL}/set/{set_id}" if set_id else ''
+
+
+def _read_tpdb_item_map():
+    return _read_json_file(_get_tpdb_item_map_path(), default=dict, expected_type=dict, description='TPDb item map')
+
+
+def _write_tpdb_item_map(mapping):
+    payload = {
+        str(item_id): _normalize_tpdb_item_url(url)
+        for item_id, url in (mapping or {}).items()
+        if item_id and _normalize_tpdb_item_url(url)
+    }
+    _write_json_file(_get_tpdb_item_map_path(), payload)
+
+
+def _get_tpdb_item_map_url(item_id):
+    return _normalize_tpdb_item_url(_read_tpdb_item_map().get(str(item_id)))
+
+
+def _set_tpdb_item_map_url(item_id, tpdb_url):
+    tpdb_url = _normalize_tpdb_item_url(tpdb_url)
+    if not item_id or not tpdb_url:
+        return ''
+    mapping = _read_tpdb_item_map()
+    mapping[str(item_id)] = tpdb_url
+    _write_tpdb_item_map(mapping)
+    return tpdb_url
+
+
+def _read_tpdb_set_cache():
+    return _read_json_file(_get_tpdb_set_cache_path(), default=dict, expected_type=dict, description='TPDb set cache')
+
+
+def _write_tpdb_set_cache(cache):
+    _write_json_file(_get_tpdb_set_cache_path(), cache or {})
+
+
+def _is_cache_entry_fresh(entry, max_age_days):
+    updated_at = (entry or {}).get('updated_at')
+    if not updated_at:
+        return False
+    try:
+        updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    return _utc_now() - updated <= timedelta(days=max_age_days)
+
+
+def _is_tpdb_set_cache_fresh(entry):
+    return _is_cache_entry_fresh(entry, TPDB_SET_CACHE_MAX_AGE_DAYS)
+
+
+def _get_cached_tpdb_sets(tpdb_item_url):
+    tpdb_item_url = _normalize_tpdb_item_url(tpdb_item_url)
+    if not tpdb_item_url:
+        return []
+    entry = _read_tpdb_set_cache().get(tpdb_item_url)
+    if not _is_tpdb_set_cache_fresh(entry):
+        return []
+    sets = []
+    for set_info in entry.get('available_sets', []):
+        set_id = str(set_info.get('set_id') or '')
+        if not set_id:
+            continue
+        sets.append({
+            'set_id': set_id,
+            'set_url': _build_tpdb_set_url(set_id),
+            'uploader': set_info.get('uploader') or 'Unknown',
+            'preview_url': set_info.get('preview_url'),
+            'preview_base64': set_info.get('preview_base64'),
+        })
+    return sets
+
+
+def _cache_tpdb_sets_from_groups(groups):
+    cache = _read_tpdb_set_cache()
+    changed = False
+    preview_cache = {}
+    for group in groups or []:
+        tpdb_item_url = _normalize_tpdb_item_url(group.get('url'))
+        available_sets = group.get('available_sets') or []
+        if not tpdb_item_url or not available_sets:
+            continue
+        cache[tpdb_item_url] = {
+            'updated_at': _utc_timestamp(),
+            'available_sets': [
+                {
+                    'set_id': str(set_info.get('set_id') or ''),
+                    'uploader': set_info.get('uploader') or 'Unknown',
+                    'preview_url': set_info.get('preview_url'),
+                    'preview_base64': _cached_compressed_preview(set_info.get('preview_base64'), preview_cache, 'set', _set_cached_preview),
+                }
+                for set_info in available_sets
+                if set_info.get('set_id')
+            ],
+        }
+        changed = True
+    if changed:
+        _write_tpdb_set_cache(cache)
+
+
+def _read_tpdb_picker_cache():
+    return _read_json_file(_get_tpdb_picker_cache_path(), default=dict, expected_type=dict, description='TPDb picker cache')
+
+
+def _write_tpdb_picker_cache(cache):
+    _write_json_file(_get_tpdb_picker_cache_path(), cache or {})
+
+
+def _is_tpdb_picker_cache_fresh(entry):
+    return _is_cache_entry_fresh(entry, TPDB_PICKER_CACHE_MAX_AGE_DAYS)
+
+
+def _tpdb_picker_cache_key(item, tpdb_url, poster_set_limit, eligible_seasons):
+    season_signature = [
+        {
+            'id': str(season.get('id') or ''),
+            'number': season.get('number'),
+            'has_poster': bool(season.get('has_poster')),
+        }
+        for season in (eligible_seasons or [])
+    ]
+    payload = {
+        'item_id': str(item.get('id') or ''),
+        'item_type': item.get('type') or '',
+        'item_year': item.get('year'),
+        'tpdb_url': _normalize_tpdb_item_url(tpdb_url),
+        'poster_set_limit': poster_set_limit,
+        'set_discovery_limit': int(getattr(Config, 'MAX_TPDB_SETS_PER_ITEM', Config.MAX_POSTERS_PER_ITEM)),
+        'seasons': season_signature,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def _get_cached_tpdb_picker_response(cache_key):
+    entry = _read_tpdb_picker_cache().get(cache_key)
+    if not _is_tpdb_picker_cache_fresh(entry):
+        return None
+    response = _hydrate_tpdb_picker_cache_response(entry.get('response'))
+    return response if isinstance(response, dict) else None
+
+
+def _cache_tpdb_picker_response(cache_key, response_payload):
+    if not cache_key or not response_payload:
+        return
+    cache = _read_tpdb_picker_cache()
+    cache[cache_key] = {
+        'updated_at': _utc_timestamp(),
+        'response': _compact_tpdb_picker_cache_response(response_payload),
+    }
+    _write_tpdb_picker_cache(cache)
+
+
+def _clear_tpdb_cache():
+    cleared = []
+    for path in (_get_tpdb_set_cache_path(), _get_tpdb_picker_cache_path()):
+        try:
+            _write_json_file(path, {})
+            cleared.append(path)
+        except Exception as e:
+            logging.warning(f"Failed to clear TPDb cache file {path}: {e}")
+    return cleared
+
+
+def _compact_tpdb_picker_cache_response(response):
+    if not isinstance(response, dict):
+        return response
+
+    preview_cache = {}
+    compact_groups = [_compact_tpdb_group(group, preview_cache=preview_cache) for group in response.get('poster_groups', [])]
+    compact_posters = [_compact_tpdb_poster(poster, preview_cache=preview_cache) for poster in response.get('posters', [])]
+    first_group_posters = compact_groups[0].get('s', []) if compact_groups else []
+
+    payload = {
+        'poster_groups': compact_groups,
+        'eligible_seasons': [_compact_eligible_season(season) for season in response.get('eligible_seasons', [])],
+        'poster_set_limit': response.get('poster_set_limit'),
+        'can_browse_more_sets': response.get('can_browse_more_sets'),
+        'tpdb_mapping_url': response.get('tpdb_mapping_url'),
+    }
+    if compact_posters != first_group_posters:
+        payload['posters'] = compact_posters
+
+    return {
+        key: value
+        for key, value in payload.items()
+        if value not in (None, '', [], {})
+    }
+
+
+def _hydrate_tpdb_picker_cache_response(response):
+    if not isinstance(response, dict):
+        return response
+
+    poster_groups = [_hydrate_tpdb_group(group) for group in response.get('poster_groups', [])]
+    posters = [_hydrate_tpdb_poster(poster) for poster in response.get('posters', [])]
+    if not posters and poster_groups:
+        posters = poster_groups[0].get('show_posters', [])
+
+    return {
+        'posters': posters,
+        'poster_groups': poster_groups,
+        'eligible_seasons': [_hydrate_eligible_season(season) for season in response.get('eligible_seasons', [])],
+        'poster_set_limit': response.get('poster_set_limit'),
+        'can_browse_more_sets': response.get('can_browse_more_sets'),
+        'tpdb_mapping_url': response.get('tpdb_mapping_url'),
+    }
+
+
+def _compact_tpdb_group(group, preview_cache=None):
+    preview_cache = preview_cache if preview_cache is not None else {}
+    expected_group_id = f"group-{group.get('source_index')}"
+    compact = {
+        'i': group.get('id') if group.get('id') != expected_group_id else None,
+        'n': group.get('title'),
+        'u': group.get('url'),
+        'm': group.get('match_score'),
+        'x': group.get('source_index'),
+        's': [_compact_tpdb_poster(poster, group_id=group.get('id'), preview_cache=preview_cache) for poster in group.get('show_posters', [])],
+        'p': [_compact_tpdb_poster(poster, group_id=group.get('id'), preview_cache=preview_cache) for poster in group.get('season_posters', [])],
+        'e': group.get('eligible_season_count'),
+        'c': group.get('covered_season_count'),
+        'k': group.get('covered_season_keys') or [],
+        'a': [_compact_available_set(set_info, preview_cache=preview_cache) for set_info in group.get('available_sets', [])],
+    }
+    return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
+
+
+def _hydrate_tpdb_group(group):
+    group_id = group.get('i') or f"group-{group.get('x', 0)}"
+    hydrated = {
+        'id': group_id,
+        'title': group.get('n'),
+        'url': group.get('u'),
+        'match_score': group.get('m'),
+        'source_index': group.get('x'),
+        'show_posters': [_hydrate_tpdb_poster(poster, group_id=group_id) for poster in group.get('s', [])],
+        'season_posters': [_hydrate_tpdb_poster(poster, group_id=group_id) for poster in group.get('p', [])],
+        'eligible_season_count': group.get('e', 0),
+        'covered_season_count': group.get('c', 0),
+        'covered_season_keys': group.get('k', []),
+        'available_sets': [_hydrate_available_set(set_info) for set_info in group.get('a', [])],
+    }
+    return hydrated
+
+
+def _compact_tpdb_poster(poster, group_id=None, preview_cache=None):
+    preview_cache = preview_cache if preview_cache is not None else {}
+    compact = {
+        'i': poster.get('id'),
+        'u': poster.get('url'),
+        'b': _cached_compressed_preview(poster.get('base64'), preview_cache, 'poster', _tiny_cached_preview),
+        'l': True if poster.get('base64') else None,
+        't': poster.get('target_type'),
+        'g': poster.get('group_id') if poster.get('group_id') != group_id else None,
+        'sid': poster.get('set_id'),
+        'up': poster.get('uploader') if poster.get('uploader') != 'Unknown' else None,
+        'pid': poster.get('tpdb_poster_id'),
+        'src': poster.get('source_url'),
+        'sn': poster.get('season_number'),
+        'st': poster.get('season_title'),
+        'si': poster.get('season_id'),
+        'hp': True if poster.get('season_has_poster') else None,
+    }
+    return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
+
+
+def _hydrate_tpdb_poster(poster, group_id=None):
+    hydrated = {
+        'id': poster.get('i'),
+        'url': poster.get('u'),
+        'base64': poster.get('b'),
+        'preview_needs_load': bool(poster.get('l')),
+        'title': 'Poster',
+        'uploader': poster.get('up') or 'Unknown',
+        'likes': 0,
+        'target_type': poster.get('t'),
+        'group_id': poster.get('g') or group_id,
+        'set_id': poster.get('sid'),
+        'set_url': _build_tpdb_set_url(poster.get('sid')),
+        'tpdb_poster_id': poster.get('pid'),
+        'source_url': poster.get('src'),
+    }
+    if poster.get('si'):
+        season_number = poster.get('sn')
+        hydrated.update({
+            'season_id': poster.get('si'),
+            'season_number': season_number,
+            'season_title': poster.get('st'),
+            'is_special': season_number == 0,
+            'season_has_poster': bool(poster.get('hp')),
+        })
+    return hydrated
+
+
+def _compact_available_set(set_info, preview_cache=None):
+    preview_cache = preview_cache if preview_cache is not None else {}
+    compact = {
+        'i': str(set_info.get('set_id') or ''),
+        'u': set_info.get('uploader') if set_info.get('uploader') != 'Unknown' else None,
+        'v': set_info.get('preview_url'),
+        'p': _cached_compressed_preview(set_info.get('preview_base64'), preview_cache, 'set', _set_cached_preview),
+    }
+    return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
+
+
+def _hydrate_available_set(set_info):
+    set_id = set_info.get('i')
+    return {
+        'set_id': set_id,
+        'set_url': _build_tpdb_set_url(set_id),
+        'uploader': set_info.get('u') or 'Unknown',
+        'preview_url': set_info.get('v'),
+        'preview_base64': set_info.get('p'),
+    }
+
+
+def _compact_eligible_season(season):
+    compact = {
+        'i': season.get('id'),
+        't': season.get('title'),
+        'n': season.get('number'),
+        'h': True if season.get('has_poster') else None,
+        'u': season.get('thumbnail_url'),
+    }
+    return {key: value for key, value in compact.items() if value not in (None, '', [], {})}
+
+
+def _hydrate_eligible_season(season):
+    number = season.get('n')
+    return {
+        'id': season.get('i'),
+        'title': season.get('t') or ('Specials' if number == 0 else f"Season {number}"),
+        'number': number,
+        'is_special': number == 0,
+        'has_poster': bool(season.get('h')),
+        'thumbnail_url': season.get('u'),
+    }
+
+
+def _read_protected_item_ids():
+    data = _read_json_file(_get_protected_items_path(), default=list, description='protected items')
+    if isinstance(data, dict):
+        items = data.get('items', [])
+    else:
+        items = data
+
+    return {str(item_id) for item_id in items if item_id}
+
+
+def _write_protected_item_ids(item_ids):
+    payload = {
+        'updated_at': _utc_timestamp(),
+        'items': sorted(str(item_id) for item_id in item_ids if item_id),
+    }
+    _write_json_file(_get_protected_items_path(), payload)
+
+
+def _set_item_protected(item_id, protected):
+    protected_ids = _read_protected_item_ids()
+    item_id = str(item_id)
+    if protected:
+        protected_ids.add(item_id)
+    else:
+        protected_ids.discard(item_id)
+    _write_protected_item_ids(protected_ids)
+    return protected_ids
+
+
 def _write_failed_log_entry(entry):
-    os.makedirs(Config.LOG_DIR, exist_ok=True)
-    with open(_get_failed_log_path(), 'a', encoding='utf-8') as failed_log:
-        failed_log.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    _append_jsonl_entry(_get_failed_log_path(), entry)
 
 
 def _write_results_log_entry(entry):
-    os.makedirs(Config.LOG_DIR, exist_ok=True)
-    with open(_get_results_log_path(), 'a', encoding='utf-8') as results_log:
-        results_log.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    _append_jsonl_entry(_get_results_log_path(), entry)
 
 
 def _log_processed_item(item=None, operation='auto-poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None, poster_targets=None, season_results=None):
@@ -305,7 +854,7 @@ def _log_processed_item(item=None, operation='auto-poster', poster_url=None, ite
         resolved_item_year = item_year if item_year is not None else (item or {}).get('year')
         entry = {
             'id': str(uuid.uuid4()),
-            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'timestamp': _utc_timestamp(),
             'status': 'success',
             'operation': operation,
             'item_id': resolved_item_id,
@@ -331,43 +880,19 @@ def _log_processed_item(item=None, operation='auto-poster', poster_url=None, ite
 
 
 def _read_processed_item_ids():
-    results_log_path = _get_results_log_path()
-    if not os.path.exists(results_log_path):
-        return set()
-
-    processed_item_ids = set()
-    with open(results_log_path, 'r', encoding='utf-8') as results_log:
-        for line in results_log:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if entry.get('status') == 'success' and entry.get('item_id'):
-                processed_item_ids.add(entry['item_id'])
-
-    return processed_item_ids
+    return {
+        entry['item_id']
+        for entry in _read_jsonl_entries(_get_results_log_path())
+        if entry.get('status') == 'success' and entry.get('item_id')
+    }
 
 
 def _read_processed_items(limit=500):
-    results_log_path = _get_results_log_path()
-    if not os.path.exists(results_log_path):
-        return []
-
-    entries = []
-    with open(results_log_path, 'r', encoding='utf-8') as results_log:
-        for line in results_log:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if entry.get('status') == 'success':
-                entries.append(entry)
+    entries = [
+        entry
+        for entry in _read_jsonl_entries(_get_results_log_path())
+        if entry.get('status') == 'success'
+    ]
 
     latest_entries = []
     seen_item_ids = set()
@@ -383,12 +908,106 @@ def _read_processed_items(limit=500):
     return latest_entries
 
 
+def _build_processed_history_job(limit=100):
+    entries = _read_processed_items(limit=limit)
+    if not entries:
+        return None
+
+    results = []
+    for entry in entries:
+        item_title = entry.get('item_title') or entry.get('item_id') or 'Unknown'
+        item_year = entry.get('item_year')
+        if item_year:
+            item_title = f"{item_title} ({item_year})"
+        results.append({
+            'item_id': entry.get('item_id'),
+            'item_title': item_title,
+            'success': True,
+            'error': None,
+            'poster_url': entry.get('poster_url'),
+            'season_results': entry.get('season_results') or [],
+            'operation': entry.get('operation'),
+            'timestamp': entry.get('timestamp'),
+        })
+
+    return {
+        'job_id': 'processed-history',
+        'status': 'completed',
+        'phase': 'history',
+        'message': f'Showing {len(results)} processed item(s) from results.log.',
+        'total_items': len(results),
+        'processed': len(results),
+        'remaining': 0,
+        'successful': len(results),
+        'failed': 0,
+        'results': results,
+        'done': True,
+        'success': True,
+        'error': None,
+        'created_at': entries[-1].get('timestamp'),
+        'updated_at': entries[0].get('timestamp'),
+        'source': 'results_log',
+    }
+
+
+def _clear_processed_items(item_ids=None):
+    results_log_path = _get_results_log_path()
+
+    if not item_ids:
+        _clear_file(results_log_path)
+        return 0
+
+    item_ids = set(str(item_id) for item_id in item_ids if item_id)
+    if not item_ids:
+        return 0
+    if not os.path.exists(results_log_path):
+        return 0
+
+    kept_lines = []
+    removed_count = 0
+    with open(results_log_path, 'r', encoding='utf-8') as results_log:
+        for line in results_log:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                entry = json.loads(stripped)
+            except json.JSONDecodeError:
+                kept_lines.append(line)
+                continue
+
+            if entry.get('status') == 'success' and entry.get('item_id') in item_ids:
+                removed_count += 1
+            else:
+                kept_lines.append(line)
+
+    with open(results_log_path, 'w', encoding='utf-8') as results_log:
+        results_log.writelines(kept_lines)
+
+    return removed_count
+
+
+def _failed_log_fallback_entry(line):
+    return {
+        'id': str(uuid.uuid4()),
+        'timestamp': None,
+        'status': 'failed',
+        'operation': 'poster',
+        'item_id': None,
+        'item_title': 'Unknown',
+        'item_type': None,
+        'item_year': None,
+        'error': line,
+        'poster_url': None,
+    }
+
+
 def _log_failed_item(item=None, error=None, operation='poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None):
     """Append one structured active failure entry to failed.log."""
     try:
         entry = {
             'id': str(uuid.uuid4()),
-            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'timestamp': _utc_timestamp(),
             'status': 'failed',
             'operation': operation,
             'item_id': item_id or (item or {}).get('id'),
@@ -408,7 +1027,7 @@ def _log_resolved_item(item=None, operation='retry-auto-poster', poster_url=None
     try:
         entry = {
             'id': str(uuid.uuid4()),
-            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'timestamp': _utc_timestamp(),
             'status': 'resolved',
             'operation': operation,
             'item_id': item_id or (item or {}).get('id'),
@@ -424,31 +1043,7 @@ def _log_resolved_item(item=None, operation='retry-auto-poster', poster_url=None
 
 
 def _read_failed_items(limit=100):
-    failed_log_path = _get_failed_log_path()
-    if not os.path.exists(failed_log_path):
-        return []
-
-    entries = []
-    with open(failed_log_path, 'r', encoding='utf-8') as failed_log:
-        for line in failed_log:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                entries.append({
-                    'id': str(uuid.uuid4()),
-                    'timestamp': None,
-                    'status': 'failed',
-                    'operation': 'poster',
-                    'item_id': None,
-                    'item_title': 'Unknown',
-                    'item_type': None,
-                    'item_year': None,
-                    'error': line,
-                    'poster_url': None,
-                })
+    entries = _read_jsonl_entries(_get_failed_log_path(), fallback_factory=_failed_log_fallback_entry)
 
     latest_entries = []
     seen_item_ids = set()
@@ -727,10 +1322,6 @@ def index():
 @app.route('/item/<item_id>/posters')
 def get_item_posters(item_id):
     """Get posters for a specific item"""
-    if not selenium_ready_event.wait(timeout=30):
-        logging.error("Selenium not ready in time for /item/<item_id>/posters")
-        return jsonify({'error': 'Backend service (Selenium) is not ready. Please try again in a moment.'}), 503
-
     session_id = session.get('session_id')
     if not session_id or session_id not in user_sessions:
         return jsonify({'error': 'Session not found'}), 400
@@ -747,6 +1338,26 @@ def get_item_posters(item_id):
         poster_set_limit = request.args.get('set_limit', default=3, type=int)
         poster_set_limit = max(1, min(poster_set_limit or 3, Config.MAX_POSTERS_PER_ITEM))
         requested_set_url = request.args.get('set_url')
+        override_tpdb_url = _normalize_tpdb_item_url(request.args.get('tpdb_url'))
+        use_cache = request.args.get('use_cache', 'true').lower() != 'false'
+        cache_only = request.args.get('cache_only', 'false').lower() == 'true'
+        mapped_tpdb_url = override_tpdb_url or (_get_tpdb_item_map_url(item_id) if use_cache else '')
+        cache_key = None
+        if use_cache and not requested_set_url and not override_tpdb_url and mapped_tpdb_url:
+            cache_key = _tpdb_picker_cache_key(item, mapped_tpdb_url, poster_set_limit, eligible_seasons)
+            cached_response = _get_cached_tpdb_picker_response(cache_key)
+            if cached_response:
+                cached_response['item'] = item
+                cached_response['from_cache'] = True
+                return jsonify(cached_response)
+
+        if cache_only:
+            return jsonify({'cache_miss': True, 'from_cache': False})
+
+        if not selenium_ready_event.wait(timeout=30):
+            logging.error("Selenium not ready in time for /item/<item_id>/posters")
+            return jsonify({'error': 'Backend service (Selenium) is not ready. Please try again in a moment.'}), 503
+
         search_result = search_tpdb_for_poster_groups(
             item['title'],
             item_year=item.get('year'),
@@ -755,17 +1366,31 @@ def get_item_posters(item_id):
             eligible_seasons=eligible_seasons,
             max_posters=poster_set_limit if item.get('type') == 'Series' else Config.MAX_POSTERS_PER_ITEM,
             requested_set_urls=[requested_set_url] if requested_set_url else None,
+            tpdb_item_url=mapped_tpdb_url,
+            cached_available_sets=_get_cached_tpdb_sets(mapped_tpdb_url) if mapped_tpdb_url else [],
+            preview_max_size=None,
         )
-        return jsonify({
+        best_group = search_result.get('best_group') or {}
+        resolved_tpdb_url = _set_tpdb_item_map_url(item_id, override_tpdb_url or best_group.get('url') or mapped_tpdb_url)
+        if not requested_set_url:
+            _cache_tpdb_sets_from_groups(search_result.get('groups', []))
+        response_payload = {
             'item': item,
             'posters': search_result.get('posters', []),
             'poster_groups': search_result.get('groups', []),
             'eligible_seasons': eligible_seasons,
             'poster_set_limit': poster_set_limit,
             'can_browse_more_sets': item.get('type') == 'Series' and poster_set_limit < Config.MAX_POSTERS_PER_ITEM,
-        })
+            'tpdb_mapping_url': resolved_tpdb_url,
+            'from_cache': False,
+        }
+        if use_cache and not requested_set_url and resolved_tpdb_url and not cache_key:
+            cache_key = _tpdb_picker_cache_key(item, resolved_tpdb_url, poster_set_limit, eligible_seasons)
+        if cache_key:
+            _cache_tpdb_picker_response(cache_key, response_payload)
+        return jsonify(response_payload)
     except TPDBRateLimited as e:
-        logging.warning(f"TPDB challenge/rate-limit for {item_id}: {e}")
+        logging.warning(f"TPDb challenge/rate-limit for {item_id}: {e}")
         return jsonify({'error': str(e), 'error_type': 'tpdb_rate_limited'}), 429
     except Exception as e:
         logging.error(f"Error getting posters for {item_id}: {e}")
@@ -799,6 +1424,29 @@ def get_item_season_count(item_id):
         return jsonify({'season_count': season_count})
     except Exception as e:
         logging.warning(f"Could not get season count for {item.get('title', item_id)}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/item/<item_id>/seasons')
+def get_item_seasons(item_id):
+    session_id = session.get('session_id')
+    if not session_id or session_id not in user_sessions:
+        return jsonify({'error': 'Session not found'}), 400
+    _touch_session(session_id)
+
+    item = next((i for i in user_sessions[session_id]['items'] if i['id'] == item_id), None)
+    if not item:
+        return jsonify({'error': 'Item not found'}), 404
+    if item.get('type') != 'Series':
+        return jsonify({'item': item, 'seasons': []})
+
+    try:
+        return jsonify({
+            'item': item,
+            'seasons': get_jellyfin_seasons(item_id),
+        })
+    except Exception as e:
+        logging.warning(f"Could not get seasons for {item.get('title', item_id)}: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -946,7 +1594,7 @@ def get_jellyfin_image():
 
 @app.route('/thumbnail')
 def get_thumbnail():
-    """Serve TPDB thumbnails with proper headers and caching"""
+    """Serve TPDb thumbnails with proper headers and caching"""
     thumbnail_url = request.args.get('url')
     if not thumbnail_url or thumbnail_url == 'None':
         return create_placeholder_thumbnail(), 200
@@ -974,7 +1622,7 @@ def get_thumbnail():
         )
 
     except Exception as e:
-        logging.warning(f"Error fetching TPDB thumbnail {thumbnail_url}: {e}")
+        logging.warning(f"Error fetching TPDb thumbnail {thumbnail_url}: {e}")
         return create_placeholder_thumbnail(), 200
 
 @app.route('/health')
@@ -1005,7 +1653,7 @@ def health_check():
 @app.route('/debug/tpdb-search')
 def debug_tpdb_search():
     """
-    Debug endpoint for TPDB scraping without depending on a Jellyfin item.
+    Debug endpoint for TPDb scraping without depending on a Jellyfin item.
     Enabled only in DEBUG mode.
     """
     if not Config.DEBUG:
@@ -1059,8 +1707,11 @@ def debug_tpdb_search():
         }), 500
 
 
-def _select_auto_batch_target_items(all_items, target_filter, skip_processed=False, library_id=''):
-    if target_filter == 'all':
+def _select_auto_batch_target_items(all_items, target_filter, skip_processed=False, library_id='', item_ids=None):
+    item_id_set = set(str(item_id) for item_id in (item_ids or []) if item_id)
+    if target_filter == 'queued':
+        target_items = [item for item in all_items if item.get('id') in item_id_set]
+    elif target_filter == 'all':
         target_items = all_items
     elif target_filter == 'no-poster':
         target_items = [item for item in all_items if not item.get('thumbnail_url')]
@@ -1077,6 +1728,10 @@ def _select_auto_batch_target_items(all_items, target_filter, skip_processed=Fal
     if skip_processed:
         processed_item_ids = _read_processed_item_ids()
         target_items = [item for item in target_items if item.get('id') not in processed_item_ids]
+
+    protected_item_ids = _read_protected_item_ids()
+    if protected_item_ids:
+        target_items = [item for item in target_items if item.get('id') not in protected_item_ids]
 
     return target_items
 
@@ -1145,25 +1800,25 @@ def _auto_search_and_upload_item(item, include_season_posters=False, replace_exi
     }
 
 
-def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id='', include_season_posters=False, replace_existing_season_posters=False):
+def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id='', include_season_posters=False, replace_existing_season_posters=False, item_ids=None):
     results = []
     successful_count = 0
     failed_count = 0
 
     try:
-        _update_auto_batch_job(job_id, status='running', phase='preparing', message='Preparing TPDB login...')
+        _update_auto_batch_job(job_id, status='running', phase='preparing', message='Preparing TPDb login...')
         try:
             if not selenium_driver:
                 setup_selenium_and_login()
-            logging.info("Selenium/TPDB login ready for auto-batch job.")
+            logging.info("Selenium/TPDb login ready for auto-batch job.")
         except Exception as e:
-            logging.error(f"Failed to setup Selenium/login to TPDB: {e}")
+            logging.error(f"Failed to setup Selenium/login to TPDb: {e}")
             _update_auto_batch_job(
                 job_id,
                 status='failed',
                 phase='failed',
-                message='Failed to login to TPDB',
-                error=f'Failed to login to TPDB: {str(e)}',
+                message='Failed to login to TPDb',
+                error=f'Failed to login to TPDb: {str(e)}',
                 done=True,
                 success=False,
             )
@@ -1172,7 +1827,7 @@ def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id=
         _update_auto_batch_job(job_id, phase='loading', message='Loading Jellyfin items...')
         all_items = get_jellyfin_items()
         target_items = _select_auto_batch_target_items(
-            all_items, target_filter, skip_processed=skip_processed, library_id=library_id
+            all_items, target_filter, skip_processed=skip_processed, library_id=library_id, item_ids=item_ids
         )
         total_items = len(target_items)
         _update_auto_batch_job(
@@ -1299,12 +1954,12 @@ def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id=
                 )
             except TPDBRateLimited as e:
                 rate_limited_error = str(e)
-                logging.warning(f"TPDB rate-limit detected during batch job; aborting early: {rate_limited_error}")
+                logging.warning(f"TPDb rate-limit detected during batch job; aborting early: {rate_limited_error}")
                 result = {
                     'item_id': item_id,
                     'item_title': item_title,
                     'success': False,
-                    'error': f'Aborted due to TPDB rate limit: {rate_limited_error}',
+                    'error': f'Aborted due to TPDb rate limit: {rate_limited_error}',
                     'old_poster_url': old_poster_url,
                     'poster_url': None
                 }
@@ -1318,7 +1973,7 @@ def _run_auto_batch_job(job_id, target_filter, skip_processed=False, library_id=
                     processed=i + 1,
                     failed=failed_count,
                     results=list(results),
-                    message='Batch aborted due to TPDB rate limit.',
+                    message='Batch aborted due to TPDb rate limit.',
                     error=result['error'],
                     done=True,
                     success=False,
@@ -1385,15 +2040,17 @@ def start_batch_auto_poster():
     library_id = data.get('library_id') or ''
     include_season_posters = bool(data.get('include_season_posters'))
     replace_existing_season_posters = bool(data.get('replace_existing_season_posters'))
+    item_ids = data.get('item_ids') if isinstance(data.get('item_ids'), list) else []
     job_id = _create_auto_batch_job(
         target_filter,
         skip_processed=skip_processed,
         include_season_posters=include_season_posters,
         replace_existing_season_posters=replace_existing_season_posters,
+        item_ids=item_ids,
     )
     worker = threading.Thread(
         target=_run_auto_batch_job,
-        args=(job_id, target_filter, skip_processed, library_id, include_season_posters, replace_existing_season_posters),
+        args=(job_id, target_filter, skip_processed, library_id, include_season_posters, replace_existing_season_posters, item_ids),
         daemon=True,
     )
     worker.start()
@@ -1416,6 +2073,18 @@ def cancel_batch_auto_poster(job_id):
     return jsonify({'success': True, 'job': job})
 
 
+@app.route('/batch-auto-poster/latest-results')
+def latest_batch_auto_poster_results():
+    job = _get_latest_auto_batch_job()
+    history_job = _build_processed_history_job()
+    if history_job and (
+        not job or not job.get('results') or
+        (history_job.get('updated_at') or '') > (job.get('updated_at') or '')
+    ):
+        job = history_job
+    return jsonify({'success': True, 'job': job})
+
+
 @app.route('/batch-auto-poster', methods=['POST'])
 def batch_auto_poster():
     """
@@ -1434,12 +2103,12 @@ def batch_auto_poster():
         try:
             if not selenium_driver:
                 setup_selenium_and_login()
-            logging.info("Selenium/TPDB login ready for auto-batch.")
+            logging.info("Selenium/TPDb login ready for auto-batch.")
         except Exception as e:
-            logging.error(f"Failed to setup Selenium/login to TPDB: {e}")
+            logging.error(f"Failed to setup Selenium/login to TPDb: {e}")
             return jsonify({
                 'success': False,
-                'error': f'Failed to login to TPDB: {str(e)}',
+                'error': f'Failed to login to TPDb: {str(e)}',
                 'results': [],
                 'total_items': 0,
                 'processed': 0,
@@ -1450,20 +2119,7 @@ def batch_auto_poster():
         # Get all items
         all_items = get_jellyfin_items()
 
-        # Filter items
-        if target_filter == 'all':
-            target_items = all_items
-        elif target_filter == 'no-poster':
-            target_items = [item for item in all_items if not item.get('thumbnail_url')]
-        elif target_filter == 'movies':
-            target_items = [item for item in all_items if item.get('type') == 'Movie']
-        elif target_filter == 'series':
-            target_items = [item for item in all_items if item.get('type') == 'Series']
-        else:
-            target_items = []
-
-        if library_id:
-            target_items = [item for item in target_items if item.get('library_id') == library_id]
+        target_items = _select_auto_batch_target_items(all_items, target_filter, library_id=library_id)
 
         if not target_items:
             return jsonify({
@@ -1563,13 +2219,13 @@ def batch_auto_poster():
                     failed_count += 1
             except TPDBRateLimited as e:
                 rate_limited_error = str(e)
-                logging.warning(f"TPDB rate-limit detected during batch; aborting early: {rate_limited_error}")
-                _log_failed_item(item, f'Aborted due to TPDB rate limit: {rate_limited_error}', operation='auto-poster')
+                logging.warning(f"TPDb rate-limit detected during batch; aborting early: {rate_limited_error}")
+                _log_failed_item(item, f'Aborted due to TPDb rate limit: {rate_limited_error}', operation='auto-poster')
                 results.append({
                     'item_id': item.get('id', 'Unknown'),
                     'item_title': item.get('title', 'Unknown'),
                     'success': False,
-                    'error': f'Aborted due to TPDB rate limit: {rate_limited_error}',
+                    'error': f'Aborted due to TPDb rate limit: {rate_limited_error}',
                     'poster_url': None
                 })
                 failed_count += 1
@@ -1591,7 +2247,7 @@ def batch_auto_poster():
         if rate_limited_error:
             return jsonify({
                 'success': False,
-                'error': f'Batch aborted due to TPDB rate limit: {rate_limited_error}',
+                'error': f'Batch aborted due to TPDb rate limit: {rate_limited_error}',
                 'results': results,
                 'total_items': len(target_items),
                 'processed': len(results),
@@ -1654,13 +2310,72 @@ def processed_items():
         return jsonify({'items': [], 'error': str(e)}), 500
 
 
+@app.route('/processed-items', methods=['DELETE'])
+def clear_processed_items():
+    """Clear successful poster application history from results.log."""
+    try:
+        data = request.get_json(silent=True) or {}
+        item_ids = data.get('item_ids')
+        removed_count = _clear_processed_items(item_ids if isinstance(item_ids, list) else None)
+        return jsonify({'success': True, 'removed_count': removed_count})
+    except Exception as e:
+        logging.error(f"Error clearing processed items log: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/tpdb-cache', methods=['DELETE'])
+def clear_tpdb_cache():
+    """Clear cached TPDb picker and set preview data without removing item URL mappings."""
+    try:
+        cleared_files = _clear_tpdb_cache()
+        return jsonify({'success': True, 'cleared_files': cleared_files})
+    except Exception as e:
+        logging.error(f"Error clearing TPDb cache: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/protected-items')
+def protected_items():
+    """Return items protected from Auto-Get batch processing."""
+    try:
+        return jsonify({
+            'items': sorted(_read_protected_item_ids()),
+            'file': _get_protected_items_path(),
+        })
+    except Exception as e:
+        logging.error(f"Error reading protected items: {e}")
+        return jsonify({'items': [], 'error': str(e)}), 500
+
+
+@app.route('/protected-items/toggle', methods=['POST'])
+def toggle_protected_item():
+    """Protect or unprotect a Jellyfin item from Auto-Get batch processing."""
+    data = request.get_json() or {}
+    item_id = data.get('item_id')
+    if not item_id:
+        return jsonify({'success': False, 'error': 'Missing item_id'}), 400
+
+    try:
+        protected_ids = _read_protected_item_ids()
+        current_state = str(item_id) in protected_ids
+        protected = bool(data.get('protected')) if 'protected' in data else not current_state
+        updated_ids = _set_item_protected(item_id, protected)
+        return jsonify({
+            'success': True,
+            'item_id': str(item_id),
+            'protected': str(item_id) in updated_ids,
+            'items': sorted(updated_ids),
+        })
+    except Exception as e:
+        logging.error(f"Error updating protected item {item_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/failed-items', methods=['DELETE'])
 def clear_failed_items():
     """Clear failed.log after the user has reviewed failures."""
     try:
-        os.makedirs(Config.LOG_DIR, exist_ok=True)
-        with open(_get_failed_log_path(), 'w', encoding='utf-8'):
-            pass
+        _clear_file(_get_failed_log_path())
         return jsonify({'success': True, 'items': []})
     except Exception as e:
         logging.error(f"Error clearing failed items log: {e}")
@@ -1857,13 +2572,13 @@ def background_setup():
         logging.error(f"Failed to perform background setup: {e}")
     finally:
         # Always release startup waiters. If Selenium login failed, routes can still
-        # attempt setup on demand and return a concrete TPDB error instead of permanent 503.
+        # attempt setup on demand and return a concrete TPDb error instead of permanent 503.
         selenium_ready_event.set()
 
 
 if __name__ == '__main__':
     host = '0.0.0.0'
-    port = 5001
+    port = int(getattr(Config, 'WEB_PORT', 5001))
 
     setup_thread = threading.Thread(target=background_setup, daemon=True)
     setup_thread.start()
