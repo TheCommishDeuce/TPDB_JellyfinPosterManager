@@ -401,6 +401,56 @@ def _ensure_parent_dir(path):
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
 
 
+def _read_json_file(path, default=None, expected_type=None, description='JSON file'):
+    if not os.path.exists(path):
+        return default() if callable(default) else default
+    try:
+        with open(path, 'r', encoding='utf-8') as json_file:
+            data = json.load(json_file)
+        if expected_type and not isinstance(data, expected_type):
+            return default() if callable(default) else default
+        return data
+    except Exception as e:
+        logging.warning(f"Failed to read {description}: {e}")
+        return default() if callable(default) else default
+
+
+def _write_json_file(path, payload):
+    _ensure_parent_dir(path)
+    with open(path, 'w', encoding='utf-8') as json_file:
+        json.dump(payload, json_file, ensure_ascii=False, indent=2)
+
+
+def _append_jsonl_entry(path, entry):
+    _ensure_parent_dir(path)
+    with open(path, 'a', encoding='utf-8') as jsonl_file:
+        jsonl_file.write(json.dumps(entry, ensure_ascii=False) + '\n')
+
+
+def _read_jsonl_entries(path, fallback_factory=None):
+    if not os.path.exists(path):
+        return []
+
+    entries = []
+    with open(path, 'r', encoding='utf-8') as jsonl_file:
+        for line in jsonl_file:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                if fallback_factory:
+                    entries.append(fallback_factory(line))
+    return entries
+
+
+def _clear_file(path):
+    _ensure_parent_dir(path)
+    with open(path, 'w', encoding='utf-8'):
+        pass
+
+
 def _normalize_tpdb_item_url(value):
     value = (value or '').strip()
     if not value:
@@ -418,27 +468,16 @@ def _build_tpdb_set_url(set_id):
 
 
 def _read_tpdb_item_map():
-    path = _get_tpdb_item_map_path()
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, 'r', encoding='utf-8') as map_file:
-            data = json.load(map_file)
-        return data if isinstance(data, dict) else {}
-    except Exception as e:
-        logging.warning(f"Failed to read TPDb item map: {e}")
-        return {}
+    return _read_json_file(_get_tpdb_item_map_path(), default=dict, expected_type=dict, description='TPDb item map')
 
 
 def _write_tpdb_item_map(mapping):
-    _ensure_parent_dir(_get_tpdb_item_map_path())
     payload = {
         str(item_id): _normalize_tpdb_item_url(url)
         for item_id, url in (mapping or {}).items()
         if item_id and _normalize_tpdb_item_url(url)
     }
-    with open(_get_tpdb_item_map_path(), 'w', encoding='utf-8') as map_file:
-        json.dump(payload, map_file, ensure_ascii=False, indent=2)
+    _write_json_file(_get_tpdb_item_map_path(), payload)
 
 
 def _get_tpdb_item_map_url(item_id):
@@ -456,25 +495,14 @@ def _set_tpdb_item_map_url(item_id, tpdb_url):
 
 
 def _read_tpdb_set_cache():
-    path = _get_tpdb_set_cache_path()
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, 'r', encoding='utf-8') as cache_file:
-            data = json.load(cache_file)
-        return data if isinstance(data, dict) else {}
-    except Exception as e:
-        logging.warning(f"Failed to read TPDb set cache: {e}")
-        return {}
+    return _read_json_file(_get_tpdb_set_cache_path(), default=dict, expected_type=dict, description='TPDb set cache')
 
 
 def _write_tpdb_set_cache(cache):
-    os.makedirs(os.path.dirname(_get_tpdb_set_cache_path()) or '.', exist_ok=True)
-    with open(_get_tpdb_set_cache_path(), 'w', encoding='utf-8') as cache_file:
-        json.dump(cache or {}, cache_file, ensure_ascii=False, indent=2)
+    _write_json_file(_get_tpdb_set_cache_path(), cache or {})
 
 
-def _is_tpdb_set_cache_fresh(entry):
+def _is_cache_entry_fresh(entry, max_age_days):
     updated_at = (entry or {}).get('updated_at')
     if not updated_at:
         return False
@@ -484,7 +512,11 @@ def _is_tpdb_set_cache_fresh(entry):
             updated = updated.replace(tzinfo=timezone.utc)
     except ValueError:
         return False
-    return _utc_now() - updated <= timedelta(days=TPDB_SET_CACHE_MAX_AGE_DAYS)
+    return _utc_now() - updated <= timedelta(days=max_age_days)
+
+
+def _is_tpdb_set_cache_fresh(entry):
+    return _is_cache_entry_fresh(entry, TPDB_SET_CACHE_MAX_AGE_DAYS)
 
 
 def _get_cached_tpdb_sets(tpdb_item_url):
@@ -537,35 +569,15 @@ def _cache_tpdb_sets_from_groups(groups):
 
 
 def _read_tpdb_picker_cache():
-    path = _get_tpdb_picker_cache_path()
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, 'r', encoding='utf-8') as cache_file:
-            data = json.load(cache_file)
-        return data if isinstance(data, dict) else {}
-    except Exception as e:
-        logging.warning(f"Failed to read TPDb picker cache: {e}")
-        return {}
+    return _read_json_file(_get_tpdb_picker_cache_path(), default=dict, expected_type=dict, description='TPDb picker cache')
 
 
 def _write_tpdb_picker_cache(cache):
-    os.makedirs(os.path.dirname(_get_tpdb_picker_cache_path()) or '.', exist_ok=True)
-    with open(_get_tpdb_picker_cache_path(), 'w', encoding='utf-8') as cache_file:
-        json.dump(cache or {}, cache_file, ensure_ascii=False, indent=2)
+    _write_json_file(_get_tpdb_picker_cache_path(), cache or {})
 
 
 def _is_tpdb_picker_cache_fresh(entry):
-    updated_at = (entry or {}).get('updated_at')
-    if not updated_at:
-        return False
-    try:
-        updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
-        if updated.tzinfo is None:
-            updated = updated.replace(tzinfo=timezone.utc)
-    except ValueError:
-        return False
-    return _utc_now() - updated <= timedelta(days=TPDB_PICKER_CACHE_MAX_AGE_DAYS)
+    return _is_cache_entry_fresh(entry, TPDB_PICKER_CACHE_MAX_AGE_DAYS)
 
 
 def _tpdb_picker_cache_key(item, tpdb_url, poster_set_limit, eligible_seasons):
@@ -611,9 +623,7 @@ def _clear_tpdb_cache():
     cleared = []
     for path in (_get_tpdb_set_cache_path(), _get_tpdb_picker_cache_path()):
         try:
-            os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-            with open(path, 'w', encoding='utf-8') as cache_file:
-                json.dump({}, cache_file)
+            _write_json_file(path, {})
             cleared.append(path)
         except Exception as e:
             logging.warning(f"Failed to clear TPDb cache file {path}: {e}")
@@ -797,13 +807,7 @@ def _hydrate_eligible_season(season):
 
 
 def _read_protected_item_ids():
-    path = _get_protected_items_path()
-    if not os.path.exists(path):
-        return set()
-
-    with open(path, 'r', encoding='utf-8') as protected_file:
-        data = json.load(protected_file)
-
+    data = _read_json_file(_get_protected_items_path(), default=list, description='protected items')
     if isinstance(data, dict):
         items = data.get('items', [])
     else:
@@ -813,13 +817,11 @@ def _read_protected_item_ids():
 
 
 def _write_protected_item_ids(item_ids):
-    _ensure_parent_dir(_get_protected_items_path())
     payload = {
         'updated_at': _utc_timestamp(),
         'items': sorted(str(item_id) for item_id in item_ids if item_id),
     }
-    with open(_get_protected_items_path(), 'w', encoding='utf-8') as protected_file:
-        json.dump(payload, protected_file, ensure_ascii=False, indent=2)
+    _write_json_file(_get_protected_items_path(), payload)
 
 
 def _set_item_protected(item_id, protected):
@@ -834,15 +836,11 @@ def _set_item_protected(item_id, protected):
 
 
 def _write_failed_log_entry(entry):
-    os.makedirs(Config.LOG_DIR, exist_ok=True)
-    with open(_get_failed_log_path(), 'a', encoding='utf-8') as failed_log:
-        failed_log.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    _append_jsonl_entry(_get_failed_log_path(), entry)
 
 
 def _write_results_log_entry(entry):
-    os.makedirs(Config.LOG_DIR, exist_ok=True)
-    with open(_get_results_log_path(), 'a', encoding='utf-8') as results_log:
-        results_log.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    _append_jsonl_entry(_get_results_log_path(), entry)
 
 
 def _log_processed_item(item=None, operation='auto-poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None, poster_targets=None, season_results=None):
@@ -881,43 +879,19 @@ def _log_processed_item(item=None, operation='auto-poster', poster_url=None, ite
 
 
 def _read_processed_item_ids():
-    results_log_path = _get_results_log_path()
-    if not os.path.exists(results_log_path):
-        return set()
-
-    processed_item_ids = set()
-    with open(results_log_path, 'r', encoding='utf-8') as results_log:
-        for line in results_log:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if entry.get('status') == 'success' and entry.get('item_id'):
-                processed_item_ids.add(entry['item_id'])
-
-    return processed_item_ids
+    return {
+        entry['item_id']
+        for entry in _read_jsonl_entries(_get_results_log_path())
+        if entry.get('status') == 'success' and entry.get('item_id')
+    }
 
 
 def _read_processed_items(limit=500):
-    results_log_path = _get_results_log_path()
-    if not os.path.exists(results_log_path):
-        return []
-
-    entries = []
-    with open(results_log_path, 'r', encoding='utf-8') as results_log:
-        for line in results_log:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if entry.get('status') == 'success':
-                entries.append(entry)
+    entries = [
+        entry
+        for entry in _read_jsonl_entries(_get_results_log_path())
+        if entry.get('status') == 'success'
+    ]
 
     latest_entries = []
     seen_item_ids = set()
@@ -977,11 +951,9 @@ def _build_processed_history_job(limit=100):
 
 def _clear_processed_items(item_ids=None):
     results_log_path = _get_results_log_path()
-    os.makedirs(os.path.dirname(results_log_path), exist_ok=True)
 
     if not item_ids:
-        with open(results_log_path, 'w', encoding='utf-8'):
-            pass
+        _clear_file(results_log_path)
         return 0
 
     item_ids = set(str(item_id) for item_id in item_ids if item_id)
@@ -1012,6 +984,21 @@ def _clear_processed_items(item_ids=None):
         results_log.writelines(kept_lines)
 
     return removed_count
+
+
+def _failed_log_fallback_entry(line):
+    return {
+        'id': str(uuid.uuid4()),
+        'timestamp': None,
+        'status': 'failed',
+        'operation': 'poster',
+        'item_id': None,
+        'item_title': 'Unknown',
+        'item_type': None,
+        'item_year': None,
+        'error': line,
+        'poster_url': None,
+    }
 
 
 def _log_failed_item(item=None, error=None, operation='poster', poster_url=None, item_id=None, item_title=None, item_type=None, item_year=None):
@@ -1055,31 +1042,7 @@ def _log_resolved_item(item=None, operation='retry-auto-poster', poster_url=None
 
 
 def _read_failed_items(limit=100):
-    failed_log_path = _get_failed_log_path()
-    if not os.path.exists(failed_log_path):
-        return []
-
-    entries = []
-    with open(failed_log_path, 'r', encoding='utf-8') as failed_log:
-        for line in failed_log:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                entries.append({
-                    'id': str(uuid.uuid4()),
-                    'timestamp': None,
-                    'status': 'failed',
-                    'operation': 'poster',
-                    'item_id': None,
-                    'item_title': 'Unknown',
-                    'item_type': None,
-                    'item_year': None,
-                    'error': line,
-                    'poster_url': None,
-                })
+    entries = _read_jsonl_entries(_get_failed_log_path(), fallback_factory=_failed_log_fallback_entry)
 
     latest_entries = []
     seen_item_ids = set()
@@ -2411,9 +2374,7 @@ def toggle_protected_item():
 def clear_failed_items():
     """Clear failed.log after the user has reviewed failures."""
     try:
-        os.makedirs(Config.LOG_DIR, exist_ok=True)
-        with open(_get_failed_log_path(), 'w', encoding='utf-8'):
-            pass
+        _clear_file(_get_failed_log_path())
         return jsonify({'success': True, 'items': []})
     except Exception as e:
         logging.error(f"Error clearing failed items log: {e}")

@@ -617,6 +617,13 @@ function isCurrentManualQueueModal() {
     return manualQueueActive && manualQueueCurrentItemId === currentItemId;
 }
 
+function bindAll(root, selector, eventName, handler) {
+    if (!root) return;
+    root.querySelectorAll(selector).forEach(element => {
+        element.addEventListener(eventName, () => handler(element));
+    });
+}
+
 function updatePosterSelectionFooter() {
     const modalFooter = document.getElementById('posterModalFooter');
     const queueBtn = document.getElementById('queuePosterSelectionBtn');
@@ -655,7 +662,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], 
     const modalTitle = document.querySelector('#posterModal .modal-title');
     const modalFooter = document.getElementById('posterModalFooter');
     const previousItemId = currentPosterSearchItem?.id;
-    if (modalTitle) modalTitle.innerHTML = `<i class="fas fa-images me-2"></i>Choose Poster for ${item.title}`;
+    if (modalTitle) modalTitle.innerHTML = `<i class="fas fa-images me-2"></i>Choose Poster for ${escapeHtml(item.title)}`;
     if (modalFooter) modalFooter.style.display = '';
     posterSearchGroups = Array.isArray(posterGroups) ? posterGroups : [];
     if (previousItemId !== item.id) {
@@ -968,26 +975,18 @@ function displayPosterGroups(item, groups, eligibleSeasons, tpdbMappingUrl = '',
         : renderPosterGroupsByTarget(groups, eligibleSeasons);
 
     modalBody.innerHTML = html;
-    modalBody.querySelectorAll('.poster-group-view-btn').forEach(button => {
-        button.addEventListener('click', () => setPosterGroupDisplayMode(button.dataset.mode));
+    bindAll(modalBody, '.poster-group-view-btn', 'click', button => setPosterGroupDisplayMode(button.dataset.mode));
+    bindAll(modalBody, '.load-poster-set-btn', 'click', button => loadPosterSet(button.dataset.setUrl));
+    bindAll(modalBody, '.select-poster-group-btn', 'click', button => selectPosterGroup(button.dataset.groupId));
+    bindAll(modalBody, '.select-poster-set-btn', 'click', button => {
+        selectPosterSet(button.dataset.groupId, Number(button.dataset.setIndex || 0), button.dataset.setId || null);
     });
-    modalBody.querySelectorAll('.load-poster-set-btn').forEach(button => {
-        button.addEventListener('click', () => loadPosterSet(button.dataset.setUrl));
-    });
-    modalBody.querySelectorAll('.select-poster-group-btn').forEach(button => {
-        button.addEventListener('click', () => selectPosterGroup(button.dataset.groupId));
-    });
-    modalBody.querySelectorAll('.select-poster-set-btn').forEach(button => {
-        button.addEventListener('click', () => selectPosterSet(button.dataset.groupId, Number(button.dataset.setIndex || 0), button.dataset.setId || null));
-    });
-    modalBody.querySelectorAll('.grouped-poster-option').forEach(card => {
-        card.addEventListener('click', () => {
-            if (card.dataset.targetType === 'season') {
-                selectGroupedSeasonPoster(card.dataset.groupId, card.dataset.seasonId, card.dataset.posterId);
-            } else {
-                selectGroupedShowPoster(card.dataset.groupId, card.dataset.posterId);
-            }
-        });
+    bindAll(modalBody, '.grouped-poster-option', 'click', card => {
+        if (card.dataset.targetType === 'season') {
+            selectGroupedSeasonPoster(card.dataset.groupId, card.dataset.seasonId, card.dataset.posterId);
+        } else {
+            selectGroupedShowPoster(card.dataset.groupId, card.dataset.posterId);
+        }
     });
 
     if (posterModal) posterModal.show();
