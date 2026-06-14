@@ -159,6 +159,7 @@ let posterSearchGroups = [];
 let currentPosterSelection = null;
 let currentPosterSearchItem = null;
 let currentPosterEligibleSeasons = [];
+let currentPosterSearchFromCache = false;
 let posterGroupDisplayMode = 'group';
 let currentPosterSetLimit = 3;
 let canBrowseMorePosterSets = false;
@@ -563,7 +564,7 @@ async function loadPosters(itemId, setLimit = 3) {
         stopLoading();
         currentPosterSetLimit = data.poster_set_limit || setLimit;
         canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || '');
+        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || '', Boolean(data.from_cache));
     } catch (error) {
         console.error('Error loading posters:', error);
         stopLoading();
@@ -574,6 +575,7 @@ async function loadPosters(itemId, setLimit = 3) {
 function preparePosterSearchForItem(itemId, setLimit = 3) {
     if (currentPosterSearchItem?.id !== itemId) {
         currentPosterSelection = null;
+        currentPosterSearchFromCache = false;
         posterGroupDisplayMode = 'group';
         loadingPosterSetUrls = new Set();
         manuallyLoadedPosterSetUrls = new Set();
@@ -619,7 +621,7 @@ function updatePosterSelectionFooter() {
 }
 
 // Display posters in modal (image-only, no author/download box)
-function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], tpdbMappingUrl = '') {
+function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], tpdbMappingUrl = '', fromCache = false) {
     const modalBody = document.getElementById('posterModalBody');
     const modalTitle = document.querySelector('#posterModal .modal-title');
     const modalFooter = document.getElementById('posterModalFooter');
@@ -635,10 +637,11 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], 
     }
     currentPosterSearchItem = item;
     currentPosterEligibleSeasons = Array.isArray(eligibleSeasons) ? eligibleSeasons : [];
+    currentPosterSearchFromCache = Boolean(fromCache);
     updatePosterSelectionFooter();
 
     if (item.type === 'Series' && posterSearchGroups.length > 0) {
-        displayPosterGroups(item, posterSearchGroups, currentPosterEligibleSeasons, tpdbMappingUrl);
+        displayPosterGroups(item, posterSearchGroups, currentPosterEligibleSeasons, tpdbMappingUrl, fromCache);
         return;
     }
 
@@ -647,6 +650,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], 
             <div class="mb-3">
                 <div class="d-flex flex-wrap align-items-center gap-2">
                     <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                    ${renderPosterCacheIndicator(fromCache)}
                     ${renderTpdbActions('', tpdbMappingUrl)}
                 </div>
                 ${renderTpdbOverrideControl(tpdbMappingUrl)}
@@ -662,6 +666,7 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], 
             <div class="mb-3">
                 <div class="d-flex flex-wrap align-items-center gap-2">
                     <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                    ${renderPosterCacheIndicator(fromCache)}
                     ${renderTpdbActions(getPosterPickerTpdbPageUrl(posters, posterSearchGroups), tpdbMappingUrl)}
                 </div>
                 ${renderTpdbOverrideControl(tpdbMappingUrl)}
@@ -707,6 +712,15 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], 
 
     if (posterModal) posterModal.show();
     bindTpdbOverrideControl();
+}
+
+function renderPosterCacheIndicator(fromCache) {
+    if (!fromCache) return '';
+    return `
+        <span class="badge rounded-pill poster-cache-indicator" title="Loaded from TPDb picker cache">
+            <i class="fas fa-database me-1"></i>Cached
+        </span>
+    `;
 }
 
 function getPosterPickerTpdbPageUrl(posters = [], groups = []) {
@@ -800,7 +814,7 @@ function bindTpdbOverrideControl() {
             const data = await fetchPostersForItem(currentItemId, currentPosterSetLimit, tpdbUrl);
             stopLoading();
             canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-            displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || tpdbUrl);
+            displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || tpdbUrl, Boolean(data.from_cache));
         } catch (error) {
             console.error('TPDb override error:', error);
             stopLoading();
@@ -833,7 +847,7 @@ function renderSinglePosterMetadata(poster) {
     `;
 }
 
-function displayPosterGroups(item, groups, eligibleSeasons, tpdbMappingUrl = '') {
+function displayPosterGroups(item, groups, eligibleSeasons, tpdbMappingUrl = '', fromCache = currentPosterSearchFromCache) {
     const modalBody = document.getElementById('posterModalBody');
     updatePosterSelectionFooter();
     let html = `
@@ -841,6 +855,7 @@ function displayPosterGroups(item, groups, eligibleSeasons, tpdbMappingUrl = '')
             <div>
                 <div class="d-flex flex-wrap align-items-center gap-2">
                     <h6 class="mb-0"><i class="fas fa-film me-2"></i>${escapeHtml(item.title)}</h6>
+                    ${renderPosterCacheIndicator(fromCache)}
                     ${renderTpdbActions(getPosterPickerTpdbPageUrl([], groups), tpdbMappingUrl)}
                 </div>
                 ${renderTpdbOverrideControl(tpdbMappingUrl)}
@@ -2080,7 +2095,7 @@ function showNextManualQueueResult() {
         preparePosterSearchForItem(itemId, data.poster_set_limit || 3);
         currentPosterSetLimit = data.poster_set_limit || 3;
         canBrowseMorePosterSets = Boolean(data.can_browse_more_sets);
-        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || '');
+        displayPosters(data.item, data.posters, data.poster_groups || [], data.eligible_seasons || [], data.tpdb_mapping_url || '', Boolean(data.from_cache));
         updateUploadAllButton();
         return;
     }

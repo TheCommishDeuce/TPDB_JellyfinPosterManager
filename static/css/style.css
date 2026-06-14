@@ -222,6 +222,11 @@ body {
 .poster-set-group-compact .grouped-poster-option .poster-target-label {
     padding: 0.25rem 0.35rem;
 }
+.poster-cache-indicator {
+    background: rgba(13, 110, 253, 0.14);
+    border: 1px solid rgba(13, 110, 253, 0.35);
+    color: var(--primary-color);
+}
 .poster-target-label { padding: 0.35rem 0.5rem; font-size: 0.8rem; color: var(--muted-color); text-align: center; border-top: 1px solid var(--border-color); }
 .season-poster-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
 .season-poster-card { border: 1px solid var(--border-color); border-radius: var(--border-radius-sm); background: var(--surface-muted); overflow: hidden; }
