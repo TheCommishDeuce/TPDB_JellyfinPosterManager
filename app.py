@@ -161,9 +161,12 @@ selenium_ready_event = threading.Event()
 BATCH_DELAY_SEC = getattr(Config, 'TPDB_BATCH_DELAY_SEC', 1.5)
 FAILED_LOG_FILE = getattr(Config, 'FAILED_LOG_FILE', os.path.join(Config.LOG_DIR, 'failed.log'))
 RESULTS_LOG_FILE = getattr(Config, 'RESULTS_LOG_FILE', os.path.join(Config.LOG_DIR, 'results.log'))
-PROTECTED_ITEMS_FILE = getattr(Config, 'PROTECTED_ITEMS_FILE', os.path.join(Config.LOG_DIR, 'protected_items.json'))
-TPDB_ITEM_MAP_FILE = getattr(Config, 'TPDB_ITEM_MAP_FILE', os.path.join(Config.LOG_DIR, 'tpdb_item_map.json'))
 CACHE_DIR = getattr(Config, 'CACHE_DIR', 'cache')
+APP_STATE_DIR = getattr(Config, 'APP_STATE_DIR', 'data')
+PROTECTED_ITEMS_FILE = getattr(Config, 'PROTECTED_ITEMS_FILE', os.path.join(APP_STATE_DIR, 'protected_items.json'))
+TPDB_ITEM_MAP_FILE = getattr(Config, 'TPDB_ITEM_MAP_FILE', os.path.join(APP_STATE_DIR, 'tpdb_item_map.json'))
+if getattr(Config, 'TEMP_POSTER_DIR', None) in (None, 'temp_posters'):
+    Config.TEMP_POSTER_DIR = os.path.join(CACHE_DIR, 'temp_posters')
 TPDB_SET_CACHE_FILE = getattr(Config, 'TPDB_SET_CACHE_FILE', os.path.join(CACHE_DIR, 'tpdb_set_cache.json'))
 TPDB_PICKER_CACHE_FILE = getattr(Config, 'TPDB_PICKER_CACHE_FILE', os.path.join(CACHE_DIR, 'tpdb_picker_cache.json'))
 TPDB_SET_CACHE_MAX_AGE_DAYS = getattr(Config, 'TPDB_SET_CACHE_MAX_AGE_DAYS', 14)
@@ -371,6 +374,10 @@ def _get_tpdb_picker_cache_path():
     return TPDB_PICKER_CACHE_FILE
 
 
+def _ensure_parent_dir(path):
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+
+
 def _normalize_tpdb_item_url(value):
     value = (value or '').strip()
     if not value:
@@ -401,7 +408,7 @@ def _read_tpdb_item_map():
 
 
 def _write_tpdb_item_map(mapping):
-    os.makedirs(Config.LOG_DIR, exist_ok=True)
+    _ensure_parent_dir(_get_tpdb_item_map_path())
     payload = {
         str(item_id): _normalize_tpdb_item_url(url)
         for item_id, url in (mapping or {}).items()
@@ -778,7 +785,7 @@ def _read_protected_item_ids():
 
 
 def _write_protected_item_ids(item_ids):
-    os.makedirs(Config.LOG_DIR, exist_ok=True)
+    _ensure_parent_dir(_get_protected_items_path())
     payload = {
         'updated_at': _utc_timestamp(),
         'items': sorted(str(item_id) for item_id in item_ids if item_id),

@@ -23,13 +23,14 @@ class Config:
     MAX_POSTERS_PER_ITEM = 18
     TPDB_BATCH_DELAY_SEC = 1.5
     TPDB_DEBUG_SNAPSHOTS = False
-    TEMP_POSTER_DIR = "temp_posters"
     LOG_DIR = "logs"
     CACHE_DIR = "cache"
+    APP_STATE_DIR = "data"
+    TEMP_POSTER_DIR = os.path.join(CACHE_DIR, "temp_posters")
     FAILED_LOG_FILE = os.path.join(LOG_DIR, "failed.log")
     RESULTS_LOG_FILE = os.path.join(LOG_DIR, "results.log")
-    PROTECTED_ITEMS_FILE = os.path.join(LOG_DIR, "protected_items.json")
-    TPDB_ITEM_MAP_FILE = os.path.join(LOG_DIR, "tpdb_item_map.json")
+    PROTECTED_ITEMS_FILE = os.path.join(APP_STATE_DIR, "protected_items.json")
+    TPDB_ITEM_MAP_FILE = os.path.join(APP_STATE_DIR, "tpdb_item_map.json")
     TPDB_SET_CACHE_FILE = os.path.join(CACHE_DIR, "tpdb_set_cache.json")
     TPDB_PICKER_CACHE_FILE = os.path.join(CACHE_DIR, "tpdb_picker_cache.json")
     TPDB_SET_CACHE_MAX_AGE_DAYS = 14

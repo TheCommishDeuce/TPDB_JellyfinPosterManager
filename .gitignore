@@ -2,5 +2,7 @@
 config.py
 logs/
 cache/
+data/
+temp_posters/
 __pycache__/
 *.pyc
