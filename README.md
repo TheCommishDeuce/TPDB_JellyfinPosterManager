@@ -111,6 +111,27 @@ python app.py
 
 Visit `http://localhost:5001` in your web browser, or use your configured `WEB_PORT`.
 
+### Docker
+
+Docker images include Chromium for Selenium-based TPDb searches. Create a `.env` file with the required values:
+
+```env
+SECRET_KEY=replace-with-a-long-random-value
+JELLYFIN_URL=https://jellyfin.example.com
+JELLYFIN_API_KEY=your-jellyfin-api-key
+TPDB_EMAIL=you@example.com
+TPDB_PASSWORD=your-tpdb-password
+TMDB_API_KEY=your-tmdb-api-key
+```
+
+Build and start the container with:
+
+```bash
+docker compose up -d --build
+```
+
+Open `http://localhost:5001`.
+
 ### Upgrading an existing installation
 
 1. Stop the old process. Back up `data/` and `logs/` before starting the new version.

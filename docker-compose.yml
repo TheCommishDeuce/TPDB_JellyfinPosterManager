@@ -1,0 +1,20 @@
+services:
+  jellyfin-poster-manager:
+    build: .
+    container_name: jellyfin-poster-manager
+    ports:
+      - "5001:5001"
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
+      JELLYFIN_URL: ${JELLYFIN_URL:?Set JELLYFIN_URL}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:?Set JELLYFIN_API_KEY}
+      TPDB_EMAIL: ${TPDB_EMAIL:?Set TPDB_EMAIL}
+      TPDB_PASSWORD: ${TPDB_PASSWORD:?Set TPDB_PASSWORD}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 5001
+    volumes:
+      - ./data:/app/data
+      - ./cache:/app/cache
+      - ./logs:/app/logs
+    restart: unless-stopped
