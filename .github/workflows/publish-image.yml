@@ -52,13 +52,15 @@ jobs:
           load: true
           tags: poster-manager:smoke
 
-      - name: Smoke test startup, volumes, and Selenium as Unraid user
+      - name: Smoke test startup, volumes, Selenium, and custom user permissions
         timeout-minutes: 3
         run: |
           set -euo pipefail
           trap 'docker volume rm smoke-data smoke-cache smoke-logs' EXIT
-          for persisted in 0 1; do
+          for settings in '99 100 022 0' '1001 1002 002 1'; do
+            read -r puid pgid mask persisted <<< "$settings"
             docker run --rm --network none \
+              -e PUID="$puid" -e PGID="$pgid" -e UMASK="$mask" \
               -e WEB_PORT=5087 \
               -e APP_STATE_DIR=/app/data -e CACHE_DIR=/app/cache -e LOG_DIR=/app/logs \
               -e SMOKE_EXPECT_PERSISTED="$persisted" \

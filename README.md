@@ -155,7 +155,9 @@ Add these persistent path mappings:
 
 Add the required credentials and optional settings from `.env.example` as environment variables in the Unraid form. For predictable updates, select a numbered image tag instead of `latest` when one is available.
 
-The image runs as Unraid's standard `nobody:users` account (`99:100`), so the default appdata folder permissions work without extra changes. If you use custom ownership for the host folders, grant that account write access to all three mapped folders.
+The image supports `PUID`, `PGID`, and `UMASK`. Defaults are `PUID=99`, `PGID=100` (Unraid's `nobody:users`), and `UMASK=022`. For different ownership, set the IDs to match your host account; `UMASK=002` allows group writes to newly created files. These settings are also available in Compose through `.env`.
+
+The container briefly starts as root to create and assign ownership of its data, cache, logs, and home directories, including existing files, then runs the app and Chromium as the configured non-root user. Changing IDs can change ownership of the mapped host directories. The umask affects new files and does not change permissions on existing files. Do not add a Compose `user:` override for normal use; if you use `--user`, its IDs must match `PUID`/`PGID` and the mapped directories must already be writable by that account.
 
 If Jellyfin runs on Unraid, set `JELLYFIN_URL` to its Unraid LAN address or its hostname on a shared custom Docker network. Do not use `localhost`. This web application has no sign-in screen, so keep it on a trusted LAN and do not expose its port to the internet.
 

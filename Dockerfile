@@ -6,7 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CHROME_BINARY=/usr/bin/chromium \
     HOME=/home/appuser \
     WEB_HOST=0.0.0.0 \
-    WEB_PORT=5001
+    WEB_PORT=5001 \
+    PUID=99 \
+    PGID=100 \
+    UMASK=022 \
+    APP_STATE_DIR=/app/data \
+    CACHE_DIR=/app/cache \
+    LOG_DIR=/app/logs
 
 WORKDIR /app
 
@@ -21,8 +27,8 @@ COPY . .
 RUN mkdir -p /app/data /app/cache /app/logs /home/appuser \
     && chown -R 99:100 /app /home/appuser
 
-# Unraid creates appdata folders as nobody:users (99:100).
-USER 99:100
+# The entrypoint initializes volume ownership, then drops privileges.
+ENTRYPOINT ["python", "/app/docker-entrypoint.py"]
 
 EXPOSE 5001
 

@@ -17,7 +17,11 @@ from picker_cache import PickerCache
 
 
 def main():
-    assert (os.getuid(), os.getgid()) == (99, 100), 'Expected Unraid UID/GID 99:100'
+    uid, gid = int(os.environ['PUID']), int(os.environ['PGID'])
+    assert (os.getuid(), os.getgid()) == (uid, gid), 'Configured PUID/PGID not applied'
+    mask = int(os.environ['UMASK'], 8)
+    current_mask = os.umask(mask)
+    assert current_mask == mask, 'Configured UMASK not applied'
     assert not Path('/app/config.py').exists(), 'Local configuration leaked into image'
     assert not Path('/app/.venv').exists(), 'Local virtualenv leaked into image'
     persisted = os.environ.get('SMOKE_EXPECT_PERSISTED') == '1'
@@ -26,6 +30,14 @@ def main():
         if persisted:
             assert marker.read_text() == '99:100', f'{directory} did not persist'
         marker.write_text('99:100')
+        info = marker.stat()
+        assert (info.st_uid, info.st_gid) == (uid, gid), f'{directory} has incorrect ownership'
+        probe = marker.parent / f'permissions-{uid}-{gid}.txt'
+        probe.write_text('permissions')
+        assert probe.stat().st_mode & 0o777 == 0o666 & ~mask, f'{directory} has incorrect file permissions'
+        probe_directory = marker.parent / f'permissions-{uid}-{gid}'
+        probe_directory.mkdir()
+        assert probe_directory.stat().st_mode & 0o777 == 0o777 & ~mask, f'{directory} has incorrect directory permissions'
 
     process = subprocess.Popen([sys.executable, '/app/app.py'])
     try:
@@ -62,7 +74,7 @@ def main():
             driver.set_page_load_timeout(10)
             driver.get('data:text/html,<title>Container smoke test</title>')
             assert driver.title == 'Container smoke test'
-        print('PASS: startup on custom port, volume writes/persistence, SQLite, and Selenium as 99:100')
+        print(f'PASS: startup, volume persistence, SQLite, Selenium as {uid}:{gid}, UMASK={mask:03o}')
     finally:
         process.terminate()
         try:

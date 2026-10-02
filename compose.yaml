@@ -5,6 +5,9 @@ services:
       # This application has no authentication; keep it accessible only from this host.
       - "127.0.0.1:${WEB_PORT:-5001}:${WEB_PORT:-5001}"
     environment:
+      PUID: ${PUID:-99}
+      PGID: ${PGID:-100}
+      UMASK: ${UMASK:-022}
       WEB_HOST: 0.0.0.0
       WEB_PORT: ${WEB_PORT:-5001}
       JELLYFIN_URL: ${JELLYFIN_URL:-}
