@@ -5,6 +5,7 @@ config.py
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.venv/
 cache/
 data/
 logs/

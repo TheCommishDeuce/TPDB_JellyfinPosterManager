@@ -44,7 +44,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish image
+      - name: Build image for smoke test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: poster-manager:smoke
+
+      - name: Smoke test startup, volumes, and Selenium as Unraid user
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          trap 'docker volume rm smoke-data smoke-cache smoke-logs' EXIT
+          for persisted in 0 1; do
+            docker run --rm --network none \
+              -e WEB_PORT=5087 \
+              -e APP_STATE_DIR=/app/data -e CACHE_DIR=/app/cache -e LOG_DIR=/app/logs \
+              -e SMOKE_EXPECT_PERSISTED="$persisted" \
+              -v smoke-data:/app/data -v smoke-cache:/app/cache -v smoke-logs:/app/logs \
+              -v "$PWD/tests/container_smoke.py:/container_smoke.py:ro" \
+              poster-manager:smoke python /container_smoke.py
+          done
+
+      - name: Publish tested image
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v7
         with:
           context: .
