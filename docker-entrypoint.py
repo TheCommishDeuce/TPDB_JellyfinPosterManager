@@ -21,6 +21,8 @@ def permissions_mask():
 
 def prepare_directory(directory, uid, gid):
     path = Path(directory)
+    if path.resolve() in tuple(Path(root).resolve() for root in ('/', '/app', '/home')):
+        raise ValueError(f'Writable directory must be a dedicated runtime directory: {path}')
     if path.is_symlink():
         raise ValueError(f'Writable directory must not be a symlink: {path}')
     path.mkdir(parents=True, exist_ok=True)

@@ -80,6 +80,12 @@ class ContainerEntrypointTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'must not be a symlink'):
                 entrypoint.prepare_directory('/app/data', 99, 100)
 
+    def test_application_root_cannot_be_made_writable(self):
+        for directory in ('/', '/app', '/home'):
+            with self.subTest(directory=directory):
+                with self.assertRaisesRegex(ValueError, 'dedicated runtime directory'):
+                    entrypoint.prepare_directory(directory, 99, 100)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y chromium chromium-driver \
+    && apt-get install --no-install-recommends -y chromium chromium-driver tini \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -25,11 +25,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 RUN mkdir -p /app/data /app/cache /app/logs /home/appuser \
-    && chown -R 99:100 /app /home/appuser
+    && chown -R root:root /app \
+    && chmod -R go-w /app \
+    && chown -R 99:100 /app/data /app/cache /app/logs /home/appuser
 
 # The entrypoint initializes volume ownership, then drops privileges.
-ENTRYPOINT ["python", "/app/docker-entrypoint.py"]
+ENTRYPOINT ["/usr/bin/tini", "--", "python", "/app/docker-entrypoint.py"]
 
 EXPOSE 5001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["python", "/app/container-healthcheck.py"]
 
 CMD ["python", "app.py"]

@@ -22,6 +22,30 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Validate Compose configuration and required settings
+        env:
+          SECRET_KEY: container-test-only-secret
+          JELLYFIN_URL: http://jellyfin.invalid:8096
+          JELLYFIN_API_KEY: container-test-only-key
+          TPDB_EMAIL: container-test@example.invalid
+          TPDB_PASSWORD: container-test-only-password
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.example config --quiet
+          for key in SECRET_KEY JELLYFIN_URL JELLYFIN_API_KEY TPDB_EMAIL TPDB_PASSWORD; do
+            if env "$key=" docker compose --env-file .env.example config --quiet >/dev/null 2>&1; then
+              echo "Compose accepted an empty $key"
+              exit 1
+            fi
+          done
+          docker compose --env-file .env.example -f compose.yaml -f compose.bind.yaml config --format json > "$RUNNER_TEMP/compose-bind.json"
+          python -c 'import json, sys; s=json.load(open(sys.argv[1]))["services"]["poster-manager"]; assert s["build"]; assert len(s["volumes"]) == 3; assert all(v["type"] == "bind" for v in s["volumes"])' "$RUNNER_TEMP/compose-bind.json"
+
+      - name: Create build-exclusion fixtures
+        run: |
+          mkdir -p .venv venv env .virtualenv
+          touch .env.container-smoke
+
       - name: Generate image metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -52,7 +76,7 @@ jobs:
           load: true
           tags: poster-manager:smoke
 
-      - name: Smoke test startup, volumes, Selenium, and custom user permissions
+      - name: Smoke test startup, health, shutdown, volumes, and Selenium
         timeout-minutes: 3
         run: |
           set -euo pipefail

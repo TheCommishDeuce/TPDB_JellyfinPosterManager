@@ -24,6 +24,11 @@ def main():
     assert current_mask == mask, 'Configured UMASK not applied'
     assert not Path('/app/config.py').exists(), 'Local configuration leaked into image'
     assert not Path('/app/.venv').exists(), 'Local virtualenv leaked into image'
+    for excluded in ('.env.container-smoke', 'venv', 'env', '.virtualenv'):
+        assert not Path('/app', excluded).exists(), f'{excluded} leaked into image'
+    for source in ('/app', '/app/app.py', '/app/docker-entrypoint.py', '/app/container-healthcheck.py'):
+        assert Path(source).stat().st_uid == 0, f'{source} is not root-owned'
+        assert not os.access(source, os.W_OK), f'{source} is writable by app user'
     persisted = os.environ.get('SMOKE_EXPECT_PERSISTED') == '1'
     for directory in ('APP_STATE_DIR', 'CACHE_DIR', 'LOG_DIR'):
         marker = Path(os.environ[directory]) / 'container-smoke.txt'
@@ -53,6 +58,8 @@ def main():
                     raise
                 time.sleep(0.25)
 
+        subprocess.run([sys.executable, '/app/container-healthcheck.py'], check=True, timeout=5)
+
         database = Path(os.environ['APP_STATE_DIR']) / 'poster_manager.sqlite3'
         with sqlite3.connect(database) as db:
             if persisted:
@@ -78,7 +85,7 @@ def main():
     finally:
         process.terminate()
         try:
-            process.wait(timeout=10)
+            assert process.wait(timeout=15) == 0, 'App did not shut down cleanly on SIGTERM'
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)

@@ -147,6 +147,8 @@ docker compose -f compose.yaml -f compose.bind.yaml up -d
 
 This stores state in `./data`, `./cache`, and `./logs` next to the Compose files. Use the same `-f` options for subsequent Compose commands. Stop the service before backing up `data/`, including SQLite sidecar files. Switching storage options does not migrate existing data; copy it while the app is stopped if needed.
 
+The image includes a health check for local app responsiveness at `/health/live`, using your configured `WEB_PORT`. Jellyfin being offline does not mark the container unhealthy; `/health` still reports backend connectivity separately. Tini handles child-process reaping and signal forwarding, and the app handles `SIGTERM` to close the worker and Selenium during shutdown.
+
 When Jellyfin runs on the Docker host, `localhost` inside the container is not the host. On Docker Desktop, set `JELLYFIN_URL` to `http://host.docker.internal:8096` (adjust the port if needed). On Linux, use an address reachable from the container, such as the host's LAN address.
 
 The supplied `.env.example` lists the settings you can customize. Set `IMAGE_TAG` to a numbered release rather than `latest` if you prefer controlled updates. Docker uses the variables in `.env`; local Python usage can continue to use `config.py` as before.
@@ -174,6 +176,8 @@ Add the required credentials and optional settings from `.env.example` as enviro
 The image supports `PUID`, `PGID`, and `UMASK`. Defaults are `PUID=99`, `PGID=100` (Unraid's `nobody:users`), and `UMASK=022`. For different ownership, set the IDs to match your host account; `UMASK=002` allows group writes to newly created files. These settings are also available in Compose through `.env`.
 
 The container briefly starts as root to create and assign ownership of its data, cache, logs, and home directories, including existing files, then runs the app and Chromium as the configured non-root user. Changing IDs can change ownership of the mapped host directories. The umask affects new files and does not change permissions on existing files. Do not add a Compose `user:` override for normal use; if you use `--user`, its IDs must match `PUID`/`PGID` and the mapped directories must already be writable by that account.
+
+Application code and the startup entrypoint remain root-owned and are not writable by the app user. Keep writable paths in dedicated runtime directories; do not set a data, cache, logs, or home path to `/app`, `/home`, or `/`.
 
 If Jellyfin runs on Unraid, set `JELLYFIN_URL` to its Unraid LAN address or its hostname on a shared custom Docker network. Do not use `localhost`. This web application has no sign-in screen, so keep it on a trusted LAN and do not expose its port to the internet.
 

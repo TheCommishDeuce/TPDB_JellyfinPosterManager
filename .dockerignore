@@ -1,11 +1,16 @@
 .git
 .github
 .env
+.env.*
+!.env.example
 config.py
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+venv/
+env/
+.virtualenv/
 cache/
 data/
 logs/
