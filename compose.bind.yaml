@@ -1,0 +1,7 @@
+# Optional host-directory storage. Merge with compose.yaml as documented in README.md.
+services:
+  poster-manager:
+    volumes:
+      - ./data:/app/data
+      - ./cache:/app/cache
+      - ./logs:/app/logs

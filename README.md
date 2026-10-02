@@ -121,6 +121,14 @@ docker compose pull
 docker compose up -d
 ```
 
+Set `SECRET_KEY` to a long random value along with the Jellyfin and TPDb credentials; Compose reports an error if any of these are missing or empty. `TMDB_API_KEY` remains optional.
+
+To build the image from this checkout instead of downloading it:
+
+```bash
+docker compose up -d --build --pull never
+```
+
 Open `http://localhost:5001`. The Compose file intentionally publishes only to `127.0.0.1`, because this application is single-user and has no authentication. Do not change this to a public address unless an authenticated reverse proxy protects it.
 
 The `poster-manager-data`, `poster-manager-cache`, and `poster-manager-logs` volumes preserve state across updates. To inspect logs, update, or stop the service:
@@ -130,6 +138,14 @@ docker compose logs -f
 docker compose pull && docker compose up -d
 docker compose down
 ```
+
+For host directories instead of named volumes, use the supplied override:
+
+```bash
+docker compose -f compose.yaml -f compose.bind.yaml up -d
+```
+
+This stores state in `./data`, `./cache`, and `./logs` next to the Compose files. Use the same `-f` options for subsequent Compose commands. Stop the service before backing up `data/`, including SQLite sidecar files. Switching storage options does not migrate existing data; copy it while the app is stopped if needed.
 
 When Jellyfin runs on the Docker host, `localhost` inside the container is not the host. On Docker Desktop, set `JELLYFIN_URL` to `http://host.docker.internal:8096` (adjust the port if needed). On Linux, use an address reachable from the container, such as the host's LAN address.
 
