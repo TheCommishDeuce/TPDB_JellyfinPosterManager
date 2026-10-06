@@ -1,0 +1,104 @@
+name: Publish container image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  container:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Validate Compose configuration and required settings
+        env:
+          SECRET_KEY: container-test-only-secret
+          JELLYFIN_URL: http://jellyfin.invalid:8096
+          JELLYFIN_API_KEY: container-test-only-key
+          TPDB_EMAIL: container-test@example.invalid
+          TPDB_PASSWORD: container-test-only-password
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.example config --quiet
+          for key in SECRET_KEY JELLYFIN_URL JELLYFIN_API_KEY TPDB_EMAIL TPDB_PASSWORD; do
+            if env "$key=" docker compose --env-file .env.example config --quiet >/dev/null 2>&1; then
+              echo "Compose accepted an empty $key"
+              exit 1
+            fi
+          done
+          docker compose --env-file .env.example -f compose.yaml -f compose.bind.yaml config --format json > "$RUNNER_TEMP/compose-bind.json"
+          python -c 'import json, sys; s=json.load(open(sys.argv[1]))["services"]["poster-manager"]; assert s["build"]; assert len(s["volumes"]) == 3; assert all(v["type"] == "bind" for v in s["volumes"])' "$RUNNER_TEMP/compose-bind.json"
+
+      - name: Create build-exclusion fixtures
+        run: |
+          mkdir -p .venv venv env .virtualenv
+          touch .env.container-smoke
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/jellyfin-poster-manager
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image for smoke test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: poster-manager:smoke
+
+      - name: Smoke test startup, health, shutdown, volumes, and Selenium
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          trap 'docker volume rm smoke-data smoke-cache smoke-logs' EXIT
+          for settings in '99 100 022 0' '1001 1002 002 1'; do
+            read -r puid pgid mask persisted <<< "$settings"
+            docker run --rm --network none \
+              -e PUID="$puid" -e PGID="$pgid" -e UMASK="$mask" \
+              -e WEB_PORT=5087 \
+              -e APP_STATE_DIR=/app/data -e CACHE_DIR=/app/cache -e LOG_DIR=/app/logs \
+              -e SMOKE_EXPECT_PERSISTED="$persisted" \
+              -v smoke-data:/app/data -v smoke-cache:/app/cache -v smoke-logs:/app/logs \
+              -v "$PWD/tests/container_smoke.py:/container_smoke.py:ro" \
+              poster-manager:smoke python /container_smoke.py
+          done
+
+      - name: Publish tested image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

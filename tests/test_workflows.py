@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from app import create_app
+import app as app_module
 from state_store import StateStore
 from poster_service import PosterService
 from jobs import JobQueue
@@ -35,6 +36,36 @@ class OfflineCase(unittest.TestCase):
 
 
 class WorkflowTests(OfflineCase):
+    def test_liveness_does_not_call_jellyfin(self):
+        with patch('app.scraper.get_jellyfin_server_info') as server_info:
+            response = self.client.get('/health/live')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {'status': 'alive'})
+        server_info.assert_not_called()
+
+    def test_backend_health_still_reports_jellyfin_outage(self):
+        with patch('app.scraper.get_jellyfin_server_info', return_value={'connected': False}):
+            response = self.client.get('/health')
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()['status'], 'degraded')
+
+    def test_sigterm_runs_worker_and_selenium_cleanup(self):
+        runtime = Mock()
+        runtime.extensions = {'poster_jobs': self.queue}
+        runtime.run.side_effect = lambda **kwargs: app_module.handle_shutdown_signal(app_module.signal.SIGTERM, None)
+        with patch('app.create_app', return_value=runtime), \
+                patch('app.logging.basicConfig'), patch('app.logging.FileHandler'), \
+                patch('app.os.makedirs'), patch('app.signal.signal') as signal_handler, \
+                patch.object(self.queue, 'close') as close, \
+                patch('app.scraper.teardown_selenium') as teardown:
+            with self.assertRaises(SystemExit) as stopped:
+                app_module.main()
+        self.assertEqual(stopped.exception.code, 0)
+        close.assert_called_once()
+        teardown.assert_called_once()
+        self.assertEqual(signal_handler.call_count, 2)
+        self.assertEqual(signal_handler.call_args_list[0].args, (app_module.signal.SIGTERM, app_module.handle_shutdown_signal))
+
     def test_proxy_rejects_foreign_origin_without_request(self):
         with patch('app.scraper.requests.get') as get:
             response = self.client.get('/jellyfin-image?url=https://example.invalid/image')

@@ -196,6 +196,9 @@ def setup_selenium_and_login(force=False):
         created_driver = False
         if not selenium_driver:
             chrome_options = Options()
+            chrome_binary = os.environ.get("CHROME_BINARY")
+            if chrome_binary:
+                chrome_options.binary_location = chrome_binary
             chrome_options.add_argument("--headless=new")
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--disable-gpu")

@@ -2,6 +2,7 @@
 import atexit
 import logging
 import os
+import signal
 import threading
 import time
 from urllib.parse import urlsplit
@@ -294,6 +295,10 @@ def create_app(config=None, store=None, job_queue=None):
     def placeholder():
         return app.send_static_file('images/no-poster.svg')
 
+    @app.route('/health/live')
+    def liveness_check():
+        return jsonify(status='alive'), 200
+
     @app.route('/health')
     def health_check():
         info = scraper.get_jellyfin_server_info()
@@ -439,6 +444,11 @@ def create_app(config=None, store=None, job_queue=None):
     return app
 
 
+def handle_shutdown_signal(signum, frame):
+    logging.info('Shutdown requested by signal %s', signum)
+    raise SystemExit(0)
+
+
 def main():
     os.makedirs(Config.LOG_DIR, exist_ok=True)
     logging.basicConfig(level=logging.DEBUG if Config.DEBUG else logging.INFO,
@@ -448,11 +458,15 @@ def main():
     host = getattr(Config, 'WEB_HOST', '127.0.0.1')
     if host not in ('localhost', '127.0.0.1', '::1'):
         logging.warning('Non-local binding: put an authenticated reverse proxy in front of this single-user app.')
+    previous_handler = signal.signal(signal.SIGTERM, handle_shutdown_signal)
     try:
         app.run(host=host, port=int(getattr(Config, 'WEB_PORT', 5001)), debug=Config.DEBUG, use_reloader=False)
     finally:
-        app.extensions['poster_jobs'].close()
-        scraper.teardown_selenium()
+        try:
+            app.extensions['poster_jobs'].close()
+        finally:
+            scraper.teardown_selenium()
+            signal.signal(signal.SIGTERM, previous_handler)
 
 
 if __name__ == '__main__':

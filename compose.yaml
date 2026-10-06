@@ -1,0 +1,40 @@
+services:
+  poster-manager:
+    image: ghcr.io/thecommishdeuce/jellyfin-poster-manager:${IMAGE_TAG:-latest}
+    build: .
+    ports:
+      # This application has no authentication; keep it accessible only from this host.
+      - "127.0.0.1:${WEB_PORT:-5001}:${WEB_PORT:-5001}"
+    environment:
+      PUID: ${PUID:-99}
+      PGID: ${PGID:-100}
+      UMASK: ${UMASK:-022}
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: ${WEB_PORT:-5001}
+      JELLYFIN_URL: ${JELLYFIN_URL:?Set JELLYFIN_URL in .env}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:?Set JELLYFIN_API_KEY in .env}
+      TPDB_EMAIL: ${TPDB_EMAIL:?Set TPDB_EMAIL in .env}
+      TPDB_PASSWORD: ${TPDB_PASSWORD:?Set TPDB_PASSWORD in .env}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+      SECRET_KEY: ${SECRET_KEY:?Set a long random SECRET_KEY in .env}
+      DEBUG: ${DEBUG:-false}
+      TPDB_BASE_URL: ${TPDB_BASE_URL:-https://theposterdb.com}
+      TPDB_SEARCH_URL_TEMPLATE: ${TPDB_SEARCH_URL_TEMPLATE:-https://theposterdb.com/search?term={query}}
+      MAX_POSTERS_PER_ITEM: ${MAX_POSTERS_PER_ITEM:-18}
+      MAX_TPDB_SETS_PER_ITEM: ${MAX_TPDB_SETS_PER_ITEM:-30}
+      TPDB_BATCH_DELAY_SEC: ${TPDB_BATCH_DELAY_SEC:-1.5}
+      TPDB_DEBUG_SNAPSHOTS: ${TPDB_DEBUG_SNAPSHOTS:-false}
+      TPDB_PICKER_CACHE_MAX_AGE_DAYS: ${TPDB_PICKER_CACHE_MAX_AGE_DAYS:-7}
+      APP_STATE_DIR: /app/data
+      CACHE_DIR: /app/cache
+      LOG_DIR: /app/logs
+    volumes:
+      - poster-manager-data:/app/data
+      - poster-manager-cache:/app/cache
+      - poster-manager-logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  poster-manager-data:
+  poster-manager-cache:
+  poster-manager-logs:
