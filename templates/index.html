@@ -40,6 +40,11 @@
                             <label class="btn btn-outline-primary" for="filterSeries" onclick="filterContent('series')">
                                 <i class="fas fa-tv me-1"></i>Series
                             </label>
+
+                            <input type="radio" class="btn-check" name="contentFilter" id="filterCollections" {{ 'checked' if current_filter == 'collections' else '' }}>
+                            <label class="btn btn-outline-primary" for="filterCollections" onclick="filterContent('collections')">
+                                <i class="fas fa-layer-group me-1"></i>Collections
+                            </label>
                         </div>
                         {% if libraries %}
                         <select class="form-select form-select-sm mt-2" id="libraryFilter" onchange="filterLibrary()" aria-label="Filter Jellyfin library">
@@ -113,6 +118,12 @@
                                         <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('series')">
                                             <i class="fas fa-tv me-2 text-success"></i>
                                             Series only
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('collections')">
+                                            <i class="fas fa-layer-group me-2 text-warning"></i>
+                                            Collections only
                                         </a>
                                     </li>
                                 </ul>
@@ -388,7 +399,7 @@
 
                 <div class="item-type-overlay">
                     <span class="badge item-type-badge-{{ item.type.lower() }}">
-                        {{ item.type }}
+                        {{ 'Collection' if item.type == 'BoxSet' else item.type }}
                     </span>
                 </div>
                 <button class="protected-item-toggle"

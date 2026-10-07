@@ -604,6 +604,8 @@ def _resolve_tpdb_search_query(item_title, item_type=None, tmdb_id=None):
         tmdb_type = "movie"
     elif item_type == "Series":
         tmdb_type = "tv"
+    elif item_type == "BoxSet":
+        tmdb_type = "collection"
 
     search_query = item_title
     if tmdb_id and tmdb_type:
@@ -614,9 +616,9 @@ def _resolve_tpdb_search_query(item_title, item_type=None, tmdb_id=None):
             )
             tmdb_response.raise_for_status()
             tmdb_data = tmdb_response.json()
-            if tmdb_type == "tv":
+            if tmdb_type in ("tv", "collection"):
                 tmdb_title = tmdb_data.get("name")
-                year = (tmdb_data.get("first_air_date") or "")[:4]
+                year = (tmdb_data.get("first_air_date") or "")[:4] if tmdb_type == "tv" else ""
             else:
                 tmdb_title = tmdb_data.get("title")
                 year = (tmdb_data.get("release_date") or "")[:4]
@@ -634,6 +636,8 @@ def _build_tpdb_search_url(search_query, item_type=None):
         search_url += "&section=movies"
     elif item_type == "Series":
         search_url += "&section=shows"
+    elif item_type == "BoxSet":
+        search_url += "&section=collections"
     return search_url
 
 
@@ -721,7 +725,11 @@ def search_tpdb_for_poster_groups(
                     if not selenium_driver:
                         setup_selenium_and_login()
 
-                    expected_year = extract_title_year(search_query) or (str(item_year) if item_year else None)
+                    # TPDb collection pages do not consistently expose a year.  Requiring
+                    # Jellyfin's collection year would reject an otherwise exact match.
+                    expected_year = None if item_type == "BoxSet" else (
+                        extract_title_year(search_query) or (str(item_year) if item_year else None)
+                    )
                     expected_title = strip_title_year(search_query)
                     expected_title_norm = normalize_title_for_comparison(expected_title)
                     if tpdb_item_url:
@@ -1119,7 +1127,7 @@ def search_tpdb_for_poster_groups(
 def search_tpdb_for_posters_multiple(item_title, item_year=None, item_type=None, tmdb_id=None, max_posters=18):
     """
     Return up to max_posters show/movie poster URLs with base64 data for preview.
-    item_type should be "Movie" or "Series" (Jellyfin item Type).
+    item_type should be "Movie", "Series", or "BoxSet" (Jellyfin item Type).
     """
     result = search_tpdb_for_poster_groups(
         item_title,
@@ -1345,8 +1353,8 @@ def get_jellyfin_libraries():
 
 def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
     """
-    Fetch a list of movies and TV shows from Jellyfin with thumbnail URLs.
-    item_type: 'movies', 'series', or None for both
+    Fetch movies, TV shows, and collections from Jellyfin with thumbnail URLs.
+    item_type: 'movies', 'series', 'collections', or None for all supported types
     sort_by: 'name', 'year', 'date_added'
     """
     if not Config.JELLYFIN_URL or not Config.JELLYFIN_API_KEY:
@@ -1395,13 +1403,29 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
     def parse_date(date_str):
         return _parse_jellyfin_datetime(date_str) or datetime.min
 
+    def deduplicate_items(candidates):
+        # A box set may be associated with more than one media library.  Jellyfin
+        # then returns the same ID for each library query; present it once and
+        # keep the first library association for filtering and display.
+        unique_items = []
+        seen_item_ids = set()
+        for candidate in candidates:
+            item_id = candidate.get('id')
+            if not item_id or item_id in seen_item_ids:
+                continue
+            seen_item_ids.add(item_id)
+            unique_items.append(candidate)
+        return unique_items
+
     try:
         if libraries:
-            include_types = "Movie,Series"
+            include_types = "Movie,Series,BoxSet"
             if item_type == 'movies':
                 include_types = "Movie"
             elif item_type == 'series':
                 include_types = "Series"
+            elif item_type == 'collections':
+                include_types = "BoxSet"
 
             for library in libraries:
                 library_items_url = (
@@ -1414,7 +1438,9 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
                 response.raise_for_status()
                 library_data = response.json()
                 for item in library_data.get('Items', []):
-                    item_type_label = "Movie" if item.get('Type') == 'Movie' else "Series"
+                    item_type_label = item.get('Type')
+                    if item_type_label not in ('Movie', 'Series', 'BoxSet'):
+                        continue
                     items.append(build_item(item, item_type_label, fallback_library=library))
 
             if sort_by == 'library':
@@ -1426,6 +1452,7 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
             else:
                 items.sort(key=lambda x: (x.get('title') or '').lower())
 
+            items = deduplicate_items(items)
             logging.info(f"Total items fetched: {len(items)}")
             return items
 
@@ -1433,7 +1460,7 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
             logging.debug("Fetching all items for chronological sorting (mixed types).")
             all_items_url = (
                 f"{Config.JELLYFIN_URL}/Items"
-                f"?IncludeItemTypes=Movie,Series&Recursive=true"
+                f"?IncludeItemTypes=Movie,Series,BoxSet&Recursive=true"
                 f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,Type,ParentId,ChildCount"
                 f"&SortBy={sort_by_param}&SortOrder={sort_order}"
             )
@@ -1443,7 +1470,9 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
 
             if 'Items' in all_data:
                 for item in all_data['Items']:
-                    items.append(build_item(item, "Movie" if item.get('Type') == 'Movie' else "Series"))
+                    item_type_label = item.get('Type')
+                    if item_type_label in ('Movie', 'Series', 'BoxSet'):
+                        items.append(build_item(item, item_type_label))
             # Python-side sort for safety
             items.sort(key=lambda x: parse_date(x['date_created']), reverse=True)
 
@@ -1475,8 +1504,26 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
                 shows_data = response.json()
                 for item in shows_data.get('Items', []):
                     items.append(build_item(item, "Series"))
+
+            # Jellyfin box sets are poster-bearing library items, but do not
+            # have seasons.  Fetch them separately so older servers that do
+            # not honour a combined IncludeItemTypes list still expose them.
+            if item_type == 'collections' or item_type is None:
+                collections_url = (
+                    f"{Config.JELLYFIN_URL}/Items"
+                    f"?IncludeItemTypes=BoxSet&Recursive=true"
+                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,ParentId"
+                    f"&SortBy={sort_by_param}&SortOrder={sort_order}"
+                )
+                response = requests.get(collections_url, headers=headers, timeout=15)
+                response.raise_for_status()
+                collections_data = response.json()
+                for item in collections_data.get('Items', []):
+                    if item.get('Type') == 'BoxSet':
+                        items.append(build_item(item, "BoxSet"))
     except Exception as e:
         raise RuntimeError('Could not load Jellyfin library items') from e
 
+    items = deduplicate_items(items)
     logging.info(f"Total items fetched: {len(items)}")
     return items

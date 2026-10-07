@@ -222,7 +222,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Filter and Sort Functions
 function filterContent(type, updateUrl = true) {
-    const filterId = type === 'movies' ? 'filterMovies' : type === 'series' ? 'filterSeries' : 'filterAll';
+    const filterId = type === 'movies' ? 'filterMovies' : type === 'series' ? 'filterSeries' : type === 'collections' ? 'filterCollections' : 'filterAll';
     const filterInput = document.getElementById(filterId);
     if (filterInput) filterInput.checked = true;
 
@@ -235,7 +235,7 @@ function filterContent(type, updateUrl = true) {
     if (type === 'all') {
         url.searchParams.delete('type');
     } else {
-        url.searchParams.set('type', type); // keep 'movies'/'series'
+        url.searchParams.set('type', type);
     }
     if (selectedLibrary) {
         url.searchParams.set('library', selectedLibrary);
@@ -253,6 +253,7 @@ function updateLibraryFilterOptions(type = getCurrentContentFilter()) {
     let domType = type;
     if (type === 'movies') domType = 'movie';
     if (type === 'series') domType = 'series';
+    if (type === 'collections') domType = 'boxset';
 
     const matchingLibraryIds = new Set(
         Array.from(document.querySelectorAll('.item-card-wrapper'))
@@ -267,7 +268,9 @@ function updateLibraryFilterOptions(type = getCurrentContentFilter()) {
                 ? 'All Movie Libraries'
                 : type === 'series'
                     ? 'All Series Libraries'
-                    : 'All Libraries';
+                    : type === 'collections'
+                        ? 'All Collection Libraries'
+                        : 'All Libraries';
             option.hidden = false;
             option.disabled = false;
             return;
@@ -289,6 +292,7 @@ function applyGridFilters(type = getCurrentContentFilter(), selectedLibrary = do
     let domType = type;
     if (type === 'movies') domType = 'movie';
     if (type === 'series') domType = 'series';
+    if (type === 'collections') domType = 'boxset';
 
     const items = document.querySelectorAll('.item-card-wrapper');
     const visibleLibraryIds = new Set();
@@ -327,7 +331,10 @@ function applyGridFilters(type = getCurrentContentFilter(), selectedLibrary = do
 
 function getCurrentContentFilter() {
     const currentType = document.querySelector('input[name="contentFilter"]:checked')?.id;
-    return currentType === 'filterMovies' ? 'movies' : currentType === 'filterSeries' ? 'series' : 'all';
+    return currentType === 'filterMovies' ? 'movies'
+        : currentType === 'filterSeries' ? 'series'
+            : currentType === 'filterCollections' ? 'collections'
+                : 'all';
 }
 
 function matchesGridStatusFilters(item) {
@@ -598,7 +605,8 @@ async function clearTpdbCache() {
 // Load posters for item
 async function loadPosters(itemId, setLimit = 3) {
     preparePosterSearchForItem(itemId, setLimit);
-    const itemType = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`)?.getAttribute('data-type') === 'series' ? 'Series' : 'Movie';
+    const itemTypeValue = document.querySelector(`[data-item-id="${cssEscapeValue(itemId)}"]`)?.getAttribute('data-type');
+    const itemType = itemTypeValue === 'series' ? 'Series' : itemTypeValue === 'boxset' ? 'BoxSet' : 'Movie';
     let stopLoading = null;
 
     try {
@@ -2972,7 +2980,8 @@ async function startAutoBatchPoster(filter) {
             'all': 'Automatically find and upload posters for ALL items?',
             'queued': `Automatically find and upload posters for ${queuedItemIds.length} queued item${queuedItemIds.length === 1 ? '' : 's'}?`,
             'movies': 'Automatically find and upload posters for all Movies?',
-            'series': 'Automatically find and upload posters for all Series?'
+            'series': 'Automatically find and upload posters for all Series?',
+            'collections': 'Automatically find and upload posters for all Collections?'
         }[filter] || 'Start automatic poster upload?';
         const librarySelect = document.getElementById('libraryFilter');
         const libraryId = librarySelect?.value || '';

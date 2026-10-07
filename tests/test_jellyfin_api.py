@@ -59,6 +59,36 @@ class JellyfinApiCompatibilityTests(unittest.TestCase):
 
         self.assertEqual([item['id'] for item in items], ['newer', 'older', 'missing'])
 
+    @patch.object(poster_scraper.requests, 'get')
+    def test_collections_keep_their_boxset_type_and_request_the_collection_section(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            'Items': [
+                {'Id': 'collection', 'Name': 'Example Collection', 'Type': 'BoxSet', 'ProductionYear': 2024},
+                {'Id': 'collection', 'Name': 'Example Collection', 'Type': 'BoxSet', 'ProductionYear': 2024},
+                {'Id': 'movie', 'Name': 'Example Movie', 'Type': 'Movie'},
+                {'Id': 'folder', 'Name': 'Unexpected folder', 'Type': 'Folder'},
+            ]
+        }
+        get.return_value = response
+
+        with patch.object(poster_scraper.Config, 'JELLYFIN_URL', 'http://jellyfin'), \
+             patch.object(poster_scraper.Config, 'JELLYFIN_API_KEY', 'test-key'):
+            items = poster_scraper.get_jellyfin_items(
+                libraries=[{'id': 'library-id', 'name': 'Library'}],
+            )
+
+        self.assertEqual(
+            [(item['id'], item['type']) for item in items],
+            [('collection', 'BoxSet'), ('movie', 'Movie')],
+        )
+        self.assertIn('IncludeItemTypes=Movie,Series,BoxSet', get.call_args.args[0])
+        self.assertEqual(
+            poster_scraper._build_tpdb_search_url('Example Collection', item_type='BoxSet'),
+            'https://theposterdb.com/search?term=Example+Collection&section=collections',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

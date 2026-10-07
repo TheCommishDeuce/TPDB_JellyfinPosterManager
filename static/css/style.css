@@ -93,6 +93,7 @@ body {
 .item-type-overlay { position: absolute; top: 0.5rem; right: 0.5rem; z-index: 10; }
 .item-type-badge-movie  { background-color: rgba(25, 118, 210, 0.9); color: white; }
 .item-type-badge-series { background-color: rgba(123, 31, 162, 0.9); color: white; }
+.item-type-badge-boxset { background-color: rgba(255, 143, 0, 0.9); color: #1f1f1f; }
 .protected-item-toggle { position: absolute; bottom: 0.5rem; right: 0.5rem; z-index: 10; width: 2rem; height: 2rem; border: 1px solid rgba(255,255,255,0.35); border-radius: 999px; background: rgba(15,17,21,0.72); color: #fff; display: inline-flex; align-items: center; justify-content: center; transition: var(--transition); }
 .protected-item-toggle:hover, .protected-item-toggle.active { background: var(--warning-color); border-color: var(--warning-color); color: #111; }
 .protected-item-toggle:disabled { opacity: 0.65; }
