@@ -61,7 +61,7 @@ A modern web application for automatically finding and uploading high-quality po
 
 ## 📋 Requirements
 
-- **Python 3.10+** on macOS or Linux (the single-worker lock uses POSIX file locking)
+- **Python 3.10+** on Windows, macOS, or Linux
 - **Jellyfin Server** (including Jellyfin 12.x)
 - **ThePosterDB Credentials** (free registration required)
 - **Chrome / Chromium** for Selenium-based TPDb browsing
@@ -110,6 +110,22 @@ python app.py
 ```
 
 Visit `http://localhost:5001` in your web browser, or use your configured `WEB_PORT`.
+
+### Windows (PowerShell)
+
+Install Python 3.10+ and Google Chrome, then run these commands from the cloned repository:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item config_example.py config.py
+notepad config.py
+.\.venv\Scripts\python.exe app.py
+```
+
+If you already have `config.py`, keep it and skip the copy command. Save your credentials before starting the app, then open `http://localhost:5001`. Stop the app with Ctrl+C. The virtual environment does not need to be activated. If your Python installation does not include the `py` launcher, use `python` for the first command.
+
+The single-worker safeguard uses Windows file locking on Windows and POSIX file locking on macOS/Linux. Keep the state directory on a local disk and run one web process per database.
 
 ### Docker
 
@@ -301,7 +317,7 @@ python -m unittest discover -v
 node --test tests/frontend.test.cjs
 ```
 
-Tests use disposable state and fake media services, not local credentials. CI runs the backend on Python 3.10/3.12 and frontend checks on Node 22.
+Tests use disposable state and fake media services, not local credentials. CI runs the backend on Windows and Linux with Python 3.10/3.12 and frontend checks on Node 22.
 
 An optional real-browser smoke test covers restoring selections, sorting, partial uploads, exact-target retries, lazy previews, and mobile layout:
 

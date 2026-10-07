@@ -1,4 +1,5 @@
 .env
+.venv/
 config.py
 logs/
 cache/
