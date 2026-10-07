@@ -126,7 +126,8 @@ class JobQueue:
             and (target_filter == 'all' or (target_filter == 'queued' and item['id'] in ids)
                  or (target_filter == 'no-poster' and not item.get('thumbnail_url'))
                  or (target_filter == 'movies' and item.get('type') == 'Movie')
-                 or (target_filter == 'series' and item.get('type') == 'Series'))
+                 or (target_filter == 'series' and item.get('type') == 'Series')
+                 or (target_filter == 'collections' and item.get('type') == 'BoxSet'))
         ]
         job['prepared'] = True
         job['total_items'] = len(job['tasks'])
