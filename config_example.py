@@ -31,6 +31,11 @@ class Config:
     TPDB_EMAIL = os.environ.get("TPDB_EMAIL", "")
     TPDB_PASSWORD = os.environ.get("TPDB_PASSWORD", "")
 
+    # Browser used to browse ThePosterDB. Leave empty to auto-detect; set these when
+    # Chromium/chromedriver are not on PATH (e.g. snap: /snap/bin/chromium.chromedriver).
+    CHROME_BINARY = os.environ.get("CHROME_BINARY", "")
+    CHROMEDRIVER_PATH = os.environ.get("CHROMEDRIVER_PATH", "")
+
     # TMDB Configuration
     TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 
