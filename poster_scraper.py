@@ -1397,6 +1397,118 @@ def _jellyfin_get_all_items(url, headers, page_size=JELLYFIN_PAGE_SIZE):
     return items
 
 
+def get_jellyfin_collection_children(boxset_id):
+    """Return the movies inside a Jellyfin collection (BoxSet)."""
+    if not Config.JELLYFIN_URL or not Config.JELLYFIN_API_KEY or not boxset_id:
+        return []
+    url = (
+        f"{Config.JELLYFIN_URL}/Items?ParentId={boxset_id}&IncludeItemTypes=Movie&Recursive=true"
+        "&Fields=Id,Name,ProductionYear,ImageTags,ProviderIds&SortBy=ProductionYear,SortName&SortOrder=Ascending"
+    )
+    try:
+        children = []
+        for item in _jellyfin_get_all_items(url, get_jellyfin_headers(Accept="application/json")):
+            if item.get('Type', 'Movie') != 'Movie' or not item.get('Id'):
+                continue
+            tag = (item.get('ImageTags') or {}).get('Primary')
+            children.append({
+                'id': item['Id'],
+                'title': item.get('Name'),
+                'year': item.get('ProductionYear'),
+                'has_poster': bool(tag),
+                'thumbnail_url': (f"{Config.JELLYFIN_URL}/Items/{item['Id']}/Images/Primary?maxWidth=300&quality=85&tag={tag}"
+                                  if tag else None),
+            })
+        return children
+    except Exception as e:
+        raise RuntimeError(f'Could not fetch movies for Jellyfin collection {boxset_id}') from e
+
+
+def parse_tpdb_set_posters(html):
+    """Parse a TPDb set page into typed poster entries (collection / movie / show / season / ...)."""
+    soup = BeautifulSoup(html or '', 'html.parser')
+    posters, seen = [], set()
+    for poster_link in soup.select(ITEM_POSTER_SELECTOR):
+        poster_url = _tpdb_absolute_url(poster_link.get('href'))
+        if not poster_url or poster_url in seen:
+            continue
+        seen.add(poster_url)
+        metadata = _extract_tpdb_card_metadata(poster_link)
+        title = metadata.get('tpdb_title') or ''
+        posters.append({
+            'url': poster_url,
+            'poster_type': (metadata.get('tpdb_poster_type') or '').lower(),
+            'title': title,
+            'year': extract_title_year(title),
+            'tpdb_poster_id': metadata.get('tpdb_poster_id'),
+            'set_id': metadata.get('set_id'),
+            'set_url': metadata.get('set_url'),
+            'uploader': metadata.get('uploader'),
+            'preview_url': metadata.get('preview_url'),
+        })
+    return posters
+
+
+def get_tpdb_set_posters(set_url):
+    """Load a TPDb set page with the logged-in browser and return its typed posters."""
+    for attempt in range(2):
+        with selenium_lock:
+            if not selenium_driver:
+                setup_selenium_and_login()
+            try:
+                _open_tpdb_page_with_delay(set_url)
+                current_url = selenium_driver.current_url
+                if _is_login_url(current_url):
+                    raise TPDBSessionExpired("TPDb session expired while loading set page.")
+                _raise_if_rate_limited(selenium_driver.page_source, current_url, "set_page")
+                _wait_for_item_posters_ready(selenium_driver, timeout=15)
+                return parse_tpdb_set_posters(selenium_driver.page_source)
+            except TPDBSessionExpired:
+                if attempt:
+                    raise
+                logging.warning("TPDb session expired on set page %s; re-authenticating.", set_url)
+                setup_selenium_and_login(force=True)
+    return []
+
+
+def match_collection_set(collection_title, children, set_posters):
+    """Pair a TPDb set's posters with a Jellyfin collection and its movies.
+
+    Movies match on normalised title + year (exact only). The collection poster is the
+    set's collection card whose title matches the Jellyfin collection, or the only one.
+    """
+    collection_cards = [poster for poster in set_posters if poster['poster_type'] == 'collection']
+    wanted = _comparison_title(strip_title_year(collection_title), True)
+    collection_poster = next((poster for poster in collection_cards
+                              if _comparison_title(strip_title_year(poster['title']), True) == wanted), None)
+    if not collection_poster and len({poster['url'] for poster in collection_cards}) == 1:
+        collection_poster = collection_cards[0]
+
+    movie_posters = {}
+    for poster in set_posters:
+        if poster['poster_type'] != 'movie' or not poster['year']:
+            continue
+        key = (normalize_title_for_comparison(strip_title_year(poster['title'])), poster['year'])
+        movie_posters.setdefault(key, poster)
+
+    matches, unmatched_children, used = [], [], set()
+    for child in children:
+        key = (normalize_title_for_comparison(strip_title_year(child.get('title') or '')),
+               str(child['year']) if child.get('year') else None)
+        poster = movie_posters.get(key) if key[1] else None
+        if poster:
+            matches.append({'child': child, 'poster': poster})
+            used.add(poster['url'])
+        else:
+            unmatched_children.append(child)
+    return {
+        'collection_poster': collection_poster,
+        'matches': matches,
+        'unmatched_children': unmatched_children,
+        'unmatched_posters': [poster for poster in movie_posters.values() if poster['url'] not in used],
+    }
+
+
 def get_jellyfin_seasons(series_id):
     """Return eligible Jellyfin seasons for a Series item, including Specials unless future-dated."""
     if not Config.JELLYFIN_URL or not Config.JELLYFIN_API_KEY or not series_id:

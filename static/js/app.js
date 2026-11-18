@@ -72,6 +72,13 @@ function initAutoBatchSeasonSettings() {
     const savedReplaceSeasonPosters = localStorage.getItem('jpm_replace_season_posters');
     includeInput.checked = savedIncludeSeasonPosters === 'true';
     replaceInput.checked = savedReplaceSeasonPosters === 'true';
+    const collectionMoviesInput = document.getElementById('includeCollectionMoviesAutoBatch');
+    if (collectionMoviesInput) {
+        collectionMoviesInput.checked = localStorage.getItem('jpm_include_collection_movies') === 'true';
+        collectionMoviesInput.addEventListener('change', () => {
+            localStorage.setItem('jpm_include_collection_movies', collectionMoviesInput.checked ? 'true' : 'false');
+        });
+    }
     if (placeholderInput) {
         placeholderInput.checked = localStorage.getItem('jpm_save_placeholder_seasons') === 'true';
         placeholderInput.addEventListener('change', () => {
@@ -233,6 +240,8 @@ let manualQueueCurrentItemId = null;
 let posterSearchProgressTimer = null;
 let posterSearchGroups = [];
 let currentPosterSelection = null;
+let lastPosterDisplayArgs = null;
+let collectionSetReview = null;
 let currentPosterSearchItem = null;
 let currentPosterEligibleSeasons = [];
 let currentPosterSearchFromCache = false;
@@ -780,6 +789,7 @@ function updatePosterSelectionFooter() {
 
 // Display posters in modal (image-only, no author/download box)
 function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], tpdbMappingUrl = '', fromCache = false) {
+    lastPosterDisplayArgs = Array.from(arguments);
     const modalBody = document.getElementById('posterModalBody');
     const modalTitle = document.querySelector('#posterModal .modal-title');
     const modalFooter = document.getElementById('posterModalFooter');
@@ -852,8 +862,110 @@ function displayPosters(item, posters, posterGroups = [], eligibleSeasons = [], 
 
     if (posterModal) posterModal.show();
     bindTpdbOverrideControl();
+    bindCollectionSetReviewLinks(modalBody);
     hydratePosterPreviewImages(modalBody);
 }
+
+function bindCollectionSetReviewLinks(root) {
+    root.querySelectorAll('.collection-set-review-link').forEach(link => {
+        link.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            openCollectionSetReview(link.dataset.posterUrl, link.dataset.setUrl);
+        });
+    });
+}
+
+function collectionMovieLabel(movie) {
+    return movie.year ? `${movie.title} (${movie.year})` : (movie.title || 'Movie');
+}
+
+async function openCollectionSetReview(primaryUrl, setUrl) {
+    const item = currentPosterSearchItem;
+    const modalBody = document.getElementById('posterModalBody');
+    if (!item || !modalBody) return;
+    modalBody.innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary mb-3" role="status"></div>
+            <p class="text-muted mb-0">Reading the TPDb set and matching it to the movies in ${escapeHtml(item.title)}...</p>
+        </div>`;
+    try {
+        const response = await fetch(`/item/${encodeURIComponent(item.id)}/collection-set?set_url=${encodeURIComponent(setUrl)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not read the TPDb set');
+        collectionSetReview = { primaryUrl, data };
+        renderCollectionSetReview();
+    } catch (error) {
+        showAlert('Failed to load the TPDb set: ' + error.message, 'danger');
+        backToPosterList();
+    }
+}
+
+function backToPosterList() {
+    collectionSetReview = null;
+    if (lastPosterDisplayArgs) displayPosters(...lastPosterDisplayArgs);
+}
+
+function renderCollectionSetReview() {
+    const modalBody = document.getElementById('posterModalBody');
+    const { primaryUrl, data } = collectionSetReview;
+    const matches = data.matches || [];
+    const childCount = (data.children || []).length;
+    const rows = matches.map((match, index) => {
+        const movie = match.child;
+        const poster = match.poster;
+        return `
+            <div class="col-lg-3 col-md-4 col-sm-6 mb-3">
+                <label class="card h-100 collection-set-match ${movie.protected ? 'opacity-75' : ''}">
+                    ${renderPosterImageFrame({ url: poster.url, preview_url: poster.preview_url, preview_needs_load: true }, collectionMovieLabel(movie))}
+                    <div class="card-body p-2">
+                        <div class="form-check mb-0">
+                            <input class="form-check-input collection-set-match-input" type="checkbox" data-index="${index}" ${movie.protected ? '' : 'checked'}>
+                            <span class="form-check-label small">${escapeHtml(collectionMovieLabel(movie))}</span>
+                        </div>
+                        ${movie.protected ? '<small class="text-warning d-block"><i class="fas fa-lock me-1"></i>Protected: stays unchanged</small>' : ''}
+                        ${movie.has_poster ? '<small class="text-muted d-block">Replaces the current poster</small>' : ''}
+                    </div>
+                </label>
+            </div>`;
+    }).join('');
+    const unmatchedChildren = data.unmatched_children || [];
+    const unmatchedPosters = data.unmatched_posters || [];
+    modalBody.innerHTML = `
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="collectionSetBackBtn"><i class="fas fa-arrow-left me-1"></i>Back</button>
+            <h6 class="mb-0"><i class="fas fa-layer-group me-2"></i>Apply set to ${escapeHtml(currentPosterSearchItem.title)}</h6>
+            <a class="small" href="${escapeHtml(data.set_url)}" target="_blank" rel="noopener">TPDb Set</a>
+        </div>
+        <p class="small text-muted">
+            The collection gets the poster you picked. Movies are matched to the set by exact title and year:
+            ${matches.length} of ${childCount} movie${childCount === 1 ? '' : 's'} matched.
+        </p>
+        ${matches.length ? `<div class="row">${rows}</div>` : '<div class="alert alert-info">No movies in this collection matched a poster in the set.</div>'}
+        ${unmatchedChildren.length ? `
+            <div class="small text-muted mb-1"><strong>No poster in this set:</strong>
+                ${unmatchedChildren.map(movie => escapeHtml(collectionMovieLabel(movie))).join(', ')}</div>` : ''}
+        ${unmatchedPosters.length ? `
+            <div class="small text-muted"><strong>Set posters not in your collection:</strong>
+                ${unmatchedPosters.map(poster => escapeHtml(poster.title)).join(', ')}</div>` : ''}
+        <div class="d-flex justify-content-end mt-3">
+            <button type="button" class="btn btn-success" id="collectionSetUseBtn"><i class="fas fa-check-double me-1"></i>Use this selection</button>
+        </div>`;
+    document.getElementById('collectionSetBackBtn').addEventListener('click', backToPosterList);
+    document.getElementById('collectionSetUseBtn').addEventListener('click', () => {
+        const childPosters = {};
+        modalBody.querySelectorAll('.collection-set-match-input:checked').forEach(input => {
+            const match = matches[Number(input.dataset.index)];
+            if (match) childPosters[match.child.id] = { url: match.poster.url, title: collectionMovieLabel(match.child) };
+        });
+        currentPosterSelection = { type: 'collection_set', series_poster_url: primaryUrl, child_posters: childPosters };
+        updatePosterSelectionFooter();
+        const count = Object.keys(childPosters).length;
+        showAlert(`Collection poster plus ${count} movie poster${count === 1 ? '' : 's'} selected. Queue or upload to apply.`, 'success');
+    });
+    hydratePosterPreviewImages(modalBody);
+}
+
 
 function renderPosterCacheIndicator(fromCache) {
     if (!fromCache) return '';
@@ -1046,9 +1158,13 @@ function bindTpdbOverrideControl() {
 
 function renderSinglePosterMetadata(poster) {
     const uploader = poster.uploader || 'Unknown uploader';
-    const setLink = poster.set_url
+    let setLink = poster.set_url
         ? `<a href="${escapeHtml(poster.set_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">TPDb Set</a>`
         : '';
+    if (poster.set_url && currentPosterSearchItem?.type === 'Collection') {
+        setLink += ` &bull; <a href="#" class="collection-set-review-link" data-poster-url="${escapeHtml(poster.url)}"
+            data-set-url="${escapeHtml(poster.set_url)}" title="Also apply this set's posters to the movies in the collection">Whole set</a>`;
+    }
     if (!uploader && !setLink) return '';
 
     return `
@@ -1535,7 +1651,8 @@ function hasCurrentPosterSelection() {
     if (typeof currentPosterSelection === 'string') return currentPosterSelection.length > 0;
     return Boolean(
         currentPosterSelection?.series_poster_url ||
-        Object.keys(currentPosterSelection?.season_posters || {}).length > 0
+        Object.keys(currentPosterSelection?.season_posters || {}).length > 0 ||
+        Object.keys(currentPosterSelection?.child_posters || {}).length > 0
     );
 }
 
@@ -2047,8 +2164,10 @@ function renderBatchResultMeta(result) {
     if (result.operation) details.push(formatOperationLabel(result.operation));
     if (result.timestamp) details.push(formatLogTimestamp(result.timestamp));
     if (result.season_results?.length) {
-        const successCount = result.season_results.filter(season => season.success).length;
-        details.push(`${successCount}/${result.season_results.length} seasons`);
+        const movies = result.season_results.filter(entry => entry.is_movie);
+        const seasons = result.season_results.filter(entry => !entry.is_movie);
+        if (seasons.length) details.push(`${seasons.filter(entry => entry.success).length}/${seasons.length} seasons`);
+        if (movies.length) details.push(`${movies.filter(entry => entry.success).length}/${movies.length} movies`);
     }
     if (!details.length) return '';
     return `<div class="small text-muted">${details.map(escapeHtml).join(' &middot; ')}</div>`;
@@ -3065,6 +3184,7 @@ async function startAutoBatchPoster(filter) {
         const includeSeasonPosters = Boolean(document.getElementById('includeSeasonPostersAutoBatch')?.checked);
         const replaceSeasonPosters = Boolean(document.getElementById('replaceSeasonPostersAutoBatch')?.checked);
         const savePlaceholderSeasons = includeSeasonPosters && Boolean(document.getElementById('savePlaceholderSeasonsAutoBatch')?.checked);
+        const includeCollectionMovies = Boolean(document.getElementById('includeCollectionMoviesAutoBatch')?.checked);
         const confirmNotes = [];
         if (skipProcessed) confirmNotes.push('Already processed items will be skipped.');
         if (includeSeasonPosters) {
@@ -3073,6 +3193,7 @@ async function startAutoBatchPoster(filter) {
                 'Season posters will be included only when a season is missing a poster.');
             if (savePlaceholderSeasons) confirmNotes.push('Posters for seasons not yet in Jellyfin will be saved and applied when they appear.');
         }
+        if (includeCollectionMovies) confirmNotes.push('Collections will also apply their set\'s posters to matching movies (protected movies are skipped).');
         if (libraryName) confirmNotes.push(`Library: ${libraryName}`);
 
         const confirmed = await showConfirmDialog({
@@ -3107,7 +3228,8 @@ async function startAutoBatchPoster(filter) {
             kind: 'auto', filter, library_id: libraryId, item_ids: queuedItemIds,
             skip_processed: skipProcessed, include_season_posters: includeSeasonPosters,
             replace_existing_season_posters: replaceSeasonPosters,
-            save_placeholder_seasons: savePlaceholderSeasons
+            save_placeholder_seasons: savePlaceholderSeasons,
+            include_collection_movies: includeCollectionMovies
         });
 
     } catch (err) {

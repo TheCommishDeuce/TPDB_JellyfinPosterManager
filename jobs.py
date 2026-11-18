@@ -160,6 +160,7 @@ class JobQueue:
                 'poster_url': next((target.get('url') for target in targets if target['target_id'] == item['id'] and target['status'] == 'success'), None),
                 'primary_uploaded': any(target['target_id'] == item['id'] and target['status'] == 'success' for target in targets),
                 'season_results': [dict(season_id=target['target_id'], season_title=target['title'],
+                                        is_movie=bool(target.get('child')),
                                         success=target['status'] == 'success', error=target.get('error'))
                                    for target in targets if target['target_id'] != item['id']],
                 'operation': job['kind'],
@@ -219,10 +220,17 @@ class JobQueue:
                         if self._cancelled(job):
                             break
                         # Protection can change after matching or while another target uploads.
-                        if item['id'] in self.store.values('protected') and not (
+                        protected_now = self.store.values('protected')
+                        if item['id'] in protected_now and not (
                             job['kind'] == 'manual' and item['id'] in job['options'].get('confirmed_protected_ids', [])
                         ):
                             target.update(status='skipped', error='Protected item')
+                            continue
+                        # Movies inside a collection keep their own protection.
+                        if target.get('child') and target['target_id'] in protected_now and not (
+                            job['kind'] == 'manual' and target['target_id'] in job['options'].get('confirmed_protected_ids', [])
+                        ):
+                            target.update(status='skipped', error='Protected movie')
                             continue
                         target['status'] = 'uploading'
                         job.update(phase='applying', message=f"Uploading {target['title']} for {item.get('title', item['id'])}")

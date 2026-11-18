@@ -48,6 +48,9 @@ class PosterService:
         seasons = selection.get('season_posters') or {}
         if not isinstance(seasons, dict) or (seasons and item.get('type') != 'Series'):
             raise ValueError('Invalid season selection')
+        children = selection.get('child_posters') or {}
+        if not isinstance(children, dict) or (children and item.get('type') != 'Collection'):
+            raise ValueError('Invalid collection movie selection')
         targets = []
         if primary:
             targets.append({'target_id': item['id'], 'title': 'Primary', 'url': primary})
@@ -57,6 +60,12 @@ class PosterService:
             url = season.get('url') if isinstance(season, dict) else season
             title = season.get('title') if isinstance(season, dict) else 'Season'
             targets.append({'target_id': season_id, 'title': title or 'Season', 'url': url})
+        for child_id, child in children.items():
+            if not isinstance(child_id, str) or not child_id or child_id == item['id'] or child_id in seasons:
+                raise ValueError('Invalid collection movie ID')
+            url = child.get('url') if isinstance(child, dict) else child
+            title = child.get('title') if isinstance(child, dict) else 'Movie'
+            targets.append({'target_id': child_id, 'title': title or 'Movie', 'url': url, 'child': True})
         if not targets:
             raise ValueError('Choose at least one poster')
         for target in targets:
@@ -67,9 +76,33 @@ class PosterService:
         return targets
 
     def validate_seasons(self, item, targets):
-        season_ids = {target['target_id'] for target in targets if target['target_id'] != item['id']}
-        if season_ids and not season_ids.issubset({season['id'] for season in scraper.get_jellyfin_seasons(item['id'])}):
+        """Every non-primary target must be an eligible season of this series or a movie in this collection."""
+        child_ids = {target['target_id'] for target in targets if target['target_id'] != item['id']}
+        if not child_ids:
+            return
+        if item.get('type') == 'Collection':
+            if not child_ids.issubset({child['id'] for child in scraper.get_jellyfin_collection_children(item['id'])}):
+                raise ValueError('Selected movies do not belong to this collection')
+        elif not child_ids.issubset({season['id'] for season in scraper.get_jellyfin_seasons(item['id'])}):
             raise ValueError('Selected seasons do not belong to this series or are not eligible')
+
+    validate_targets = validate_seasons
+
+    def collection_set_preview(self, item, set_url):
+        """Match a TPDb set to a Jellyfin collection and its movies, for review before upload."""
+        if item.get('type') != 'Collection':
+            raise ValueError('Whole-set matching is only available for collections')
+        set_url = normalize_tpdb_page(set_url, 'set')
+        if not set_url:
+            raise ValueError('Choose a TPDb set')
+        children = scraper.get_jellyfin_collection_children(item['id'])
+        result = scraper.match_collection_set(item.get('title') or '', children, scraper.get_tpdb_set_posters(set_url))
+        protected = self.store.values('protected')
+        for match in result['matches']:
+            match['child']['protected'] = match['child']['id'] in protected
+        for child in result['unmatched_children']:
+            child['protected'] = child['id'] in protected
+        return dict(result, set_url=set_url, children=children)
 
     def preferred_uploaders(self):
         try:
@@ -147,6 +180,8 @@ class PosterService:
             raise NeedsReview('No unambiguous primary poster match. Choose a poster or correct the TPDb page.')
         primary = group['show_posters'][0]
         targets = self.targets(item, primary['url'])
+        if item.get('type') == 'Collection' and options.get('include_collection_movies'):
+            targets.extend(self.collection_movie_targets(item, primary))
         if seasons and options.get('save_placeholder_seasons'):
             self.save_pending_seasons(item, group.get('unmatched_season_posters', []), primary.get('set_id'))
         placeholders = {target['target_id']: target for target in self.pending_targets(
@@ -167,6 +202,27 @@ class PosterService:
                 'status': 'pending' if poster else 'review',
                 'error': None if poster else 'No matching season poster in the chosen set. Manual selection required.',
             })
+        return targets
+
+    def collection_movie_targets(self, item, primary):
+        """Auto mode: exact title+year matches from the chosen collection poster's set only."""
+        if not primary.get('set_url'):
+            return []
+        children = scraper.get_jellyfin_collection_children(item['id'])
+        result = scraper.match_collection_set(item.get('title') or '', children,
+                                              scraper.get_tpdb_set_posters(primary['set_url']))
+        protected = self.store.values('protected')
+        targets = []
+        for match in result['matches']:
+            child, poster = match['child'], match['poster']
+            try:
+                validate_image_url(poster['url'], 'tpdb')
+            except ValueError:
+                continue
+            skipped = child['id'] in protected
+            targets.append({'target_id': child['id'], 'title': child.get('title') or 'Movie', 'url': poster['url'],
+                            'child': True, 'status': 'skipped' if skipped else 'pending',
+                            'error': 'Protected item' if skipped else None})
         return targets
 
     def retry_tasks(self, item_ids=None):
