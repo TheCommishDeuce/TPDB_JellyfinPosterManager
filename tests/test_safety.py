@@ -68,6 +68,23 @@ class SecurityTests(unittest.TestCase):
             with Image.open(path) as image:
                 self.assertEqual(image.format, 'JPEG')
 
+    def test_download_keeps_jpeg_bytes_unchanged(self):
+        buffer = io.BytesIO()
+        Image.new('RGB', (3, 3), (0, 128, 255)).save(buffer, format='JPEG', quality=80)
+        original = buffer.getvalue()
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'poster.jpg')
+            with patch.object(scraper, 'fetch_tpdb_image', return_value=(original, 'image/jpeg')):
+                self.assertTrue(scraper.download_image_with_cookies('https://theposterdb.com/image', path))
+            with open(path, 'rb') as handle:
+                self.assertEqual(handle.read(), original)
+
+    def test_download_rejects_undecodable_jpeg(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'poster.jpg')
+            with patch.object(scraper, 'fetch_tpdb_image', return_value=(b'\xff\xd8not-a-jpeg', 'image/jpeg')):
+                self.assertFalse(scraper.download_image_with_cookies('https://theposterdb.com/image', path))
+
     def test_automatic_fuzzy_match_is_review_not_fallback_upload(self):
         driver = Mock()
         driver.current_url = 'https://theposterdb.com/search'

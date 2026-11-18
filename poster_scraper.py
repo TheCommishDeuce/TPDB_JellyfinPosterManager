@@ -330,7 +330,8 @@ def get_tpdb_cookie_jar():
 def fetch_tpdb_image(url):
     return fetch_image(url, 'tpdb', cookies=get_tpdb_cookie_jar(), headers={
         'User-Agent': 'Mozilla/5.0', 'Referer': Config.TPDB_BASE_URL + '/',
-        'Accept': 'image/webp,image/png,image/jpeg,image/avif',
+        # Prefer lossless/JPEG originals so uploads don't go through a lossy WebP->JPEG round trip.
+        'Accept': 'image/jpeg,image/png;q=0.9,image/webp;q=0.5,image/avif;q=0.4',
     })
 
 
@@ -338,8 +339,15 @@ def download_image_with_cookies(url, save_path):
     try:
         image_bytes, _ = fetch_tpdb_image(url)
         os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
-        # Upload paths are JPEG, so convert the contents as well as the extension.
+        # Uploads are JPEG for compatibility with every Jellyfin client. Upright JPEGs are
+        # stored byte-for-byte; other formats (WebP, AVIF, PNG, ...) are converted once.
         with Image.open(BytesIO(image_bytes)) as image:
+            image.load()
+            orientation = image.getexif().get(0x0112, 1)
+            if image.format == 'JPEG' and image.mode in ('RGB', 'L') and orientation == 1:
+                with open(save_path, 'wb') as handle:
+                    handle.write(image_bytes)
+                return True
             image = ImageOps.exif_transpose(image).convert('RGB')
             image.save(save_path, format='JPEG', quality=95)
         return True
