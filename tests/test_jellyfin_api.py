@@ -60,5 +60,57 @@ class JellyfinApiCompatibilityTests(unittest.TestCase):
         self.assertEqual([item['id'] for item in items], ['newer', 'older', 'missing'])
 
 
+    @staticmethod
+    def _paged_server(total_items, cap, report_total=True):
+        """Mimic a Jellyfin-compatible server (e.g. Silo) that caps each page at ``cap`` items."""
+        from urllib.parse import parse_qs, urlsplit
+        all_items = [{'Id': f'id{i:04d}', 'Name': f'Item {i:04d}', 'Type': 'Movie'} for i in range(total_items)]
+        calls = []
+
+        def get(url, **_kwargs):
+            query = parse_qs(urlsplit(url).query)
+            start = int(query.get('StartIndex', ['0'])[0])
+            calls.append(start)
+            page = all_items[start:start + cap]
+            body = {'Items': page}
+            if report_total:
+                body['TotalRecordCount'] = total_items
+            response = Mock()
+            response.raise_for_status.return_value = None
+            response.json.return_value = body
+            return response
+        return get, calls
+
+    def test_items_follow_pagination_when_server_caps_page_size(self):
+        get, calls = self._paged_server(150, cap=72)
+        with patch.object(poster_scraper.requests, 'get', side_effect=get):
+            items = poster_scraper.get_jellyfin_items(libraries=[{'id': 'lib', 'name': 'Movies'}])
+        self.assertEqual(len(items), 150)
+        self.assertEqual(calls, [0, 72, 144])
+
+    def test_items_paging_without_total_stops_on_empty_page(self):
+        get, calls = self._paged_server(150, cap=72, report_total=False)
+        with patch.object(poster_scraper.requests, 'get', side_effect=get):
+            items = poster_scraper.get_jellyfin_items(libraries=[{'id': 'lib', 'name': 'Movies'}])
+        self.assertEqual(len(items), 150)
+        self.assertEqual(calls, [0, 72, 144, 150])
+
+    def test_stock_jellyfin_full_response_needs_one_request(self):
+        get, calls = self._paged_server(150, cap=10_000)
+        with patch.object(poster_scraper.requests, 'get', side_effect=get):
+            items = poster_scraper.get_jellyfin_items(item_type='movies', libraries=[])
+        self.assertEqual(len(items), 150)
+        self.assertEqual(calls, [0])
+
+    def test_server_ignoring_start_index_does_not_loop(self):
+        page = [{'Id': 'a', 'Name': 'A', 'Type': 'Movie'}, {'Id': 'b', 'Name': 'B', 'Type': 'Movie'}]
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {'Items': page}
+        with patch.object(poster_scraper.requests, 'get', return_value=response) as get:
+            items = poster_scraper.get_jellyfin_items(item_type='movies', libraries=[])
+        self.assertEqual([item['id'] for item in items], ['a', 'b'])
+        self.assertEqual(get.call_count, 2)
+
 if __name__ == '__main__':
     unittest.main()
