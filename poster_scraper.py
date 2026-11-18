@@ -3,14 +3,13 @@ import json
 from io import BytesIO
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from webdriver_manager.chrome import ChromeDriverManager
 import time
 import re
 import os
@@ -181,6 +180,52 @@ def _get_selenium_current_url():
         return None
 
 
+class BrowserUnavailable(RuntimeError):
+    """Chrome/Chromium or its driver could not be started."""
+
+
+def _configured_path(*names):
+    for name in names:
+        value = os.environ.get(name) or getattr(Config, name, None)
+        if value:
+            return name, os.path.expanduser(str(value).strip())
+    return None, None
+
+
+def _chrome_binary():
+    name, path = _configured_path("CHROME_BINARY")
+    if path and not os.path.isfile(path):
+        raise BrowserUnavailable(f"{name}={path} does not exist. Point it at your Chrome/Chromium executable or unset it.")
+    return path
+
+
+def _chrome_service():
+    """Build a ChromeDriver service, honouring CHROMEDRIVER_PATH / SE_CHROMEDRIVER.
+
+    Without either, Selenium Manager locates (or downloads) a matching driver itself.
+    """
+    log_output = None if getattr(Config, "DEBUG", False) else os.devnull
+    name, path = _configured_path("CHROMEDRIVER_PATH", "SE_CHROMEDRIVER")
+    if path:
+        if not (os.path.isfile(path) and os.access(path, os.X_OK)):
+            raise BrowserUnavailable(f"{name}={path} is not an executable chromedriver.")
+        return Service(executable_path=path, log_output=log_output)
+    return Service(log_output=log_output)
+
+
+def _start_chrome(chrome_options, chrome_binary):
+    service = _chrome_service()
+    try:
+        return webdriver.Chrome(options=chrome_options, service=service)
+    except (WebDriverException, OSError) as error:
+        detail = (getattr(error, "msg", None) or str(error) or type(error).__name__).strip().splitlines()[0]
+        raise BrowserUnavailable(
+            "Could not start headless Chrome for ThePosterDB "
+            f"(browser: {chrome_binary or 'auto-detect'}, driver: {getattr(service, 'path', None) or 'auto-detect'}): {detail}. "
+            "Install Chromium and a matching chromedriver, then set CHROME_BINARY / CHROMEDRIVER_PATH if they are not on PATH."
+        ) from error
+
+
 def setup_selenium_and_login(force=False):
     """
     Initialize a singleton Selenium driver and log into ThePosterDB.
@@ -196,7 +241,7 @@ def setup_selenium_and_login(force=False):
         created_driver = False
         if not selenium_driver:
             chrome_options = Options()
-            chrome_binary = os.environ.get("CHROME_BINARY")
+            chrome_binary = _chrome_binary()
             if chrome_binary:
                 chrome_options.binary_location = chrome_binary
             chrome_options.add_argument("--headless=new")
@@ -221,11 +266,7 @@ def setup_selenium_and_login(force=False):
                 excluded_switches.append("enable-logging")
             chrome_options.add_experimental_option("excludeSwitches", excluded_switches)
             chrome_options.add_experimental_option("useAutomationExtension", False)
-            chrome_service = None
-            if not getattr(Config, "DEBUG", False):
-                chrome_service = Service(log_output=os.devnull)
-
-            selenium_driver = webdriver.Chrome(options=chrome_options, service=chrome_service)
+            selenium_driver = _start_chrome(chrome_options, chrome_binary)
             selenium_driver.set_page_load_timeout(30)
             try:
                 selenium_driver.execute_cdp_cmd(

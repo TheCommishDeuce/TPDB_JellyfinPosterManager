@@ -4,6 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     CHROME_BINARY=/usr/bin/chromium \
+    CHROMEDRIVER_PATH=/usr/bin/chromedriver \
     HOME=/home/appuser \
     WEB_HOST=0.0.0.0 \
     WEB_PORT=5001 \

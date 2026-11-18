@@ -78,6 +78,18 @@ git clone https://github.com/TheCommishDeuce/TPDB_JellyfinPosterManager
 pip install -r requirements.txt
 ```
 
+The app drives a headless Chromium to browse ThePosterDB, so a native (non-Docker) install also needs a browser **and a matching chromedriver**:
+
+| Distro | Install |
+|---|---|
+| Debian / Ubuntu (apt) | `sudo apt install chromium chromium-driver` |
+| Ubuntu (snap Chromium) | `sudo snap install chromium`, then set `CHROMEDRIVER_PATH=/snap/bin/chromium.chromedriver` |
+| Arch / CachyOS | `sudo pacman -S chromium` (includes `chromedriver`) |
+| Fedora | `sudo dnf install chromium chromedriver` |
+| macOS | `brew install --cask chromium` and `brew install chromedriver` |
+
+If Chromium or chromedriver are not on `PATH`, set `CHROME_BINARY` and/or `CHROMEDRIVER_PATH` (environment variables or `config.py`). With neither set, Selenium Manager tries to locate or download a matching driver. If the browser can't start, the UI shows the real error (for example a Chrome/driver version mismatch) instead of a timeout.
+
 ### 3. Configuration
 Rename `config_example.py` to `config.py` in the project root and update it with your settings, see example configuration below:
 

@@ -161,6 +161,9 @@ def create_app(config=None, store=None, job_queue=None):
             return jsonify(success=False, error=error.description), error.code
         if isinstance(error, scraper.TPDBRateLimited):
             status = 429
+        elif isinstance(error, scraper.BrowserUnavailable):
+            logging.error('%s', error)
+            status = 503
         elif isinstance(error, PermissionError):
             status = 403
         elif isinstance(error, LookupError):
