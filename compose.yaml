@@ -16,6 +16,7 @@ services:
       TPDB_EMAIL: ${TPDB_EMAIL:?Set TPDB_EMAIL in .env}
       TPDB_PASSWORD: ${TPDB_PASSWORD:?Set TPDB_PASSWORD in .env}
       TMDB_API_KEY: ${TMDB_API_KEY:-}
+      INCLUDE_COLLECTIONS: ${INCLUDE_COLLECTIONS:-false}
       SECRET_KEY: ${SECRET_KEY:?Set a long random SECRET_KEY in .env}
       DEBUG: ${DEBUG:-false}
       TPDB_BASE_URL: ${TPDB_BASE_URL:-https://theposterdb.com}

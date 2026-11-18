@@ -91,7 +91,7 @@ def create_app(config=None, store=None, job_queue=None):
 
     def auto_options(data):
         target_filter = data.get('filter', 'no-poster')
-        if target_filter not in ('all', 'queued', 'no-poster', 'movies', 'series'):
+        if target_filter not in ('all', 'queued', 'no-poster', 'movies', 'series', 'collections'):
             raise ValueError('Unknown batch filter')
         return {
             'filter': target_filter, 'library_id': data.get('library_id') or '',

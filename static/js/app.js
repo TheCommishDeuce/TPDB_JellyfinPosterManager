@@ -264,7 +264,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Filter and Sort Functions
 function filterContent(type, updateUrl = true) {
-    const filterId = type === 'movies' ? 'filterMovies' : type === 'series' ? 'filterSeries' : 'filterAll';
+    const filterId = { movies: 'filterMovies', series: 'filterSeries', collections: 'filterCollections' }[type] || 'filterAll';
     const filterInput = document.getElementById(filterId);
     if (filterInput) filterInput.checked = true;
 
@@ -277,7 +277,7 @@ function filterContent(type, updateUrl = true) {
     if (type === 'all') {
         url.searchParams.delete('type');
     } else {
-        url.searchParams.set('type', type); // keep 'movies'/'series'
+        url.searchParams.set('type', type); // keep 'movies'/'series'/'collections'
     }
     if (selectedLibrary) {
         url.searchParams.set('library', selectedLibrary);
@@ -292,9 +292,7 @@ function updateLibraryFilterOptions(type = getCurrentContentFilter()) {
     const libraryFilter = document.getElementById('libraryFilter');
     if (!libraryFilter) return '';
 
-    let domType = type;
-    if (type === 'movies') domType = 'movie';
-    if (type === 'series') domType = 'series';
+    const domType = contentFilterDomType(type);
 
     const matchingLibraryIds = new Set(
         Array.from(document.querySelectorAll('.item-card-wrapper'))
@@ -309,7 +307,9 @@ function updateLibraryFilterOptions(type = getCurrentContentFilter()) {
                 ? 'All Movie Libraries'
                 : type === 'series'
                     ? 'All Series Libraries'
-                    : 'All Libraries';
+                    : type === 'collections'
+                        ? 'All Collection Libraries'
+                        : 'All Libraries';
             option.hidden = false;
             option.disabled = false;
             return;
@@ -328,9 +328,7 @@ function updateLibraryFilterOptions(type = getCurrentContentFilter()) {
 }
 
 function applyGridFilters(type = getCurrentContentFilter(), selectedLibrary = document.getElementById('libraryFilter')?.value || '') {
-    let domType = type;
-    if (type === 'movies') domType = 'movie';
-    if (type === 'series') domType = 'series';
+    const domType = contentFilterDomType(type);
 
     const items = document.querySelectorAll('.item-card-wrapper');
     const visibleLibraryIds = new Set();
@@ -369,7 +367,11 @@ function applyGridFilters(type = getCurrentContentFilter(), selectedLibrary = do
 
 function getCurrentContentFilter() {
     const currentType = document.querySelector('input[name="contentFilter"]:checked')?.id;
-    return currentType === 'filterMovies' ? 'movies' : currentType === 'filterSeries' ? 'series' : 'all';
+    return { filterMovies: 'movies', filterSeries: 'series', filterCollections: 'collections' }[currentType] || 'all';
+}
+
+function contentFilterDomType(type) {
+    return { movies: 'movie', series: 'series', collections: 'collection' }[type] || type;
 }
 
 function matchesGridStatusFilters(item) {
@@ -3014,7 +3016,8 @@ async function startAutoBatchPoster(filter) {
             'all': 'Automatically find and upload posters for ALL items?',
             'queued': `Automatically find and upload posters for ${queuedItemIds.length} queued item${queuedItemIds.length === 1 ? '' : 's'}?`,
             'movies': 'Automatically find and upload posters for all Movies?',
-            'series': 'Automatically find and upload posters for all Series?'
+            'series': 'Automatically find and upload posters for all Series?',
+            'collections': 'Automatically find and upload posters for all Collections?'
         }[filter] || 'Start automatic poster upload?';
         const librarySelect = document.getElementById('libraryFilter');
         const libraryId = librarySelect?.value || '';

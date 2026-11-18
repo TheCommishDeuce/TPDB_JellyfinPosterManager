@@ -18,7 +18,7 @@ A modern web application for automatically finding and uploading high-quality po
 - Automatically searches ThePosterDB for high-quality movie and TV series posters
 - Uses Jellyfin and TMDB metadata to improve title, year, movie, and series matching
 - Groups TPDb poster sets and shows compact set metadata such as uploader and source links
-- Supports movie, series, and season poster discovery
+- Supports movie, series, season, and movie collection poster discovery
 - Remembers corrected TPDb entry pages and can reuse cached picker/set results for faster repeat searches
 
 ### 🚀 **Batch Operations**
@@ -111,6 +111,8 @@ The example file also includes additional settings, however the defaults are usu
 `JELLYFIN_URL` may be entered with or without a trailing slash; the app normalizes it on startup. API keys are sent using Jellyfin's `Authorization: MediaBrowser Token="…"` format, as required by Jellyfin 12.
 
 Set `WEB_PORT` in `config.py` if you want to run the web app on a port other than `5001`.
+
+**Movie collections** (Jellyfin BoxSets) are searched in TPDb's *Collections* section. They appear automatically in movie libraries when Jellyfin's *Group movies into collections* display option is on. To also list your separate *Collections* library, set `INCLUDE_COLLECTIONS = True` (or `INCLUDE_COLLECTIONS=true` for Docker).
 
 The default `WEB_HOST` is `127.0.0.1`. This is a **single-user local application**, not an authenticated multi-user service. Do not expose it publicly. Changing the bind address requires an authenticated reverse proxy and a trusted network.
 
@@ -258,7 +260,7 @@ Manual uploads use the same worker and results panel as automatic batches. The g
 
 ### Filtering and Sorting
 
-- Use the **All/Movies/Series** buttons to filter content
+- Use the **All/Movies/Series/Collections** buttons to filter content
 - Use the library dropdown to limit the grid and Auto-Get runs to one Jellyfin library
 - Use the **Filter** dropdown to show processed, failed, queued, or protected items
 - Use the **Sort by** dropdown to organize items by:
