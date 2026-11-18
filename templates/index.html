@@ -126,6 +126,13 @@
                                             Collections only
                                         </a>
                                     </li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="startAutoBatchPoster('pending-seasons')">
+                                            <i class="fas fa-hourglass-half me-2 text-secondary"></i>
+                                            Apply saved season placeholders
+                                        </a>
+                                    </li>
                                 </ul>
                             </div>
                             <button class="btn btn-outline-secondary" type="button" id="lastAutoBatchResultsBtn" onclick="showLastAutoBatchResults()" title="Last Results" aria-label="Last Results" disabled>
@@ -147,10 +154,16 @@
                                         <input class="form-check-input" type="checkbox" role="switch" id="includeSeasonPostersAutoBatch">
                                         <label class="form-check-label small" for="includeSeasonPostersAutoBatch">Include season posters</label>
                                     </div>
-                                    <div class="form-check form-switch mb-0">
+                                    <div class="form-check form-switch mb-2">
                                         <input class="form-check-input" type="checkbox" role="switch" id="replaceSeasonPostersAutoBatch">
                                         <label class="form-check-label small" for="replaceSeasonPostersAutoBatch">Replace season posters</label>
                                     </div>
+                                    <div class="form-check form-switch mb-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="savePlaceholderSeasonsAutoBatch">
+                                        <label class="form-check-label small" for="savePlaceholderSeasonsAutoBatch"
+                                               title="Keep the set's posters for seasons you don't have yet (e.g. Specials) and apply them when the season appears">Save posters for missing seasons</label>
+                                    </div>
+                                    <small class="text-muted d-block mt-1" id="pendingSeasonsSummary"></small>
                                     <hr class="my-2">
                                     <label class="form-label small fw-semibold mb-1" for="preferredUploadersInput">Preferred uploaders</label>
                                     <textarea class="form-control form-control-sm" id="preferredUploadersInput" rows="3"

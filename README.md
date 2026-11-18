@@ -234,6 +234,8 @@ For a database backup, stop the app and copy `APP_STATE_DIR` including any SQLit
 4. Follow the shared **Poster jobs** panel, or use **Cancel** to stop before the next individual upload
 5. Review the saved results, or explicitly resume unfinished work after an interruption
 
+**Season placeholders:** with *Include season posters* on, enable *Save posters for missing seasons* to keep the chosen set's posters for seasons you don't have yet (for example Specials). Jellyfin can't hold artwork for a season that doesn't exist, so they're stored locally and applied automatically the next time that series is processed with season posters on, or on demand via **Auto-Get → Apply saved season placeholders**.
+
 Automatic matching requires one exact title/year candidate unless a saved TPDb correction is available. Season posters come from the selected primary poster's set; missing coverage goes to review instead of silently mixing sets. Existing season posters are preserved by default.
 
 ### Manual Poster Selection

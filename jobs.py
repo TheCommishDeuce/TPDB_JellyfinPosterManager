@@ -119,6 +119,7 @@ class JobQueue:
         ids = set(options.get('item_ids', []))
         processed = {entry['item_id'] for entry in self.store.processed_items(limit=1000000)} if options.get('skip_processed') else set()
         protected = self.store.values('protected')
+        pending_ids = {entry['item_id'] for entry in self.service.pending_seasons()} if target_filter == 'pending-seasons' else set()
         job['tasks'] = [
             {'item': item} for item in items
             if item['id'] not in protected and item['id'] not in processed
@@ -127,7 +128,8 @@ class JobQueue:
                  or (target_filter == 'no-poster' and not item.get('thumbnail_url'))
                  or (target_filter == 'movies' and item.get('type') == 'Movie')
                  or (target_filter == 'series' and item.get('type') == 'Series')
-                 or (target_filter == 'collections' and item.get('type') == 'Collection'))
+                 or (target_filter == 'collections' and item.get('type') == 'Collection')
+                 or (target_filter == 'pending-seasons' and item['id'] in pending_ids))
         ]
         job['prepared'] = True
         job['total_items'] = len(job['tasks'])
@@ -228,6 +230,8 @@ class JobQueue:
                         try:
                             success = self.service.upload(target)
                             target.update(status='success' if success else 'failed', error=None if success else 'Jellyfin rejected the upload')
+                            if success and target.get('pending_key'):
+                                self.service.clear_pending_season(target['pending_key'])
                         except Exception as error:
                             target.update(status='failed', error=str(error))
                         # Commit the outcome even if cancellation arrived during the upload.

@@ -65,15 +65,23 @@ function initTheme() {
 function initAutoBatchSeasonSettings() {
     const includeInput = document.getElementById('includeSeasonPostersAutoBatch');
     const replaceInput = document.getElementById('replaceSeasonPostersAutoBatch');
+    const placeholderInput = document.getElementById('savePlaceholderSeasonsAutoBatch');
     if (!includeInput || !replaceInput) return;
 
     const savedIncludeSeasonPosters = localStorage.getItem('jpm_include_season_posters');
     const savedReplaceSeasonPosters = localStorage.getItem('jpm_replace_season_posters');
     includeInput.checked = savedIncludeSeasonPosters === 'true';
     replaceInput.checked = savedReplaceSeasonPosters === 'true';
+    if (placeholderInput) {
+        placeholderInput.checked = localStorage.getItem('jpm_save_placeholder_seasons') === 'true';
+        placeholderInput.addEventListener('change', () => {
+            localStorage.setItem('jpm_save_placeholder_seasons', placeholderInput.checked ? 'true' : 'false');
+        });
+    }
 
     const syncReplaceState = () => {
         replaceInput.disabled = !includeInput.checked;
+        if (placeholderInput) placeholderInput.disabled = !includeInput.checked;
     };
 
     includeInput.addEventListener('change', () => {
@@ -125,6 +133,33 @@ async function initPreferredUploaders() {
             saveBtn.disabled = false;
         }
     });
+}
+
+async function refreshPendingSeasonsSummary() {
+    const summary = document.getElementById('pendingSeasonsSummary');
+    if (!summary) return;
+    try {
+        const response = await fetch('/pending-seasons');
+        const data = await response.json();
+        const count = Array.isArray(data.pending) ? data.pending.length : 0;
+        summary.innerHTML = count
+            ? `${count} placeholder${count === 1 ? '' : 's'} waiting &bull; <a href="#" id="clearPendingSeasonsLink">Clear</a>`
+            : '';
+        document.getElementById('clearPendingSeasonsLink')?.addEventListener('click', async event => {
+            event.preventDefault();
+            const confirmed = await showConfirmDialog({
+                title: 'Clear season placeholders?',
+                message: `Forget ${count} saved poster${count === 1 ? '' : 's'} for seasons not yet in Jellyfin?`,
+                confirmText: 'Clear',
+                variant: 'danger'
+            });
+            if (!confirmed) return;
+            await fetch('/pending-seasons', { method: 'DELETE' });
+            refreshPendingSeasonsSummary();
+        });
+    } catch (error) {
+        console.error('Could not load season placeholders:', error);
+    }
 }
 
 function initSeriesSeasonCounts() {
@@ -217,6 +252,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
     initAutoBatchSeasonSettings();
     initPreferredUploaders();
+    refreshPendingSeasonsSummary();
     initTpdbPickerCacheSettings();
     initSeriesSeasonCounts();
 
@@ -2853,6 +2889,7 @@ function formatPhaseLabel(phase) {
 }
 
 function setAutoBatchRunning(isRunning) {
+    if (!isRunning) refreshPendingSeasonsSummary();
     const autoBtn = document.getElementById('autoPosterBtn');
     const cancelBtn = document.getElementById('cancelAutoBatchBtn');
 
@@ -3017,7 +3054,8 @@ async function startAutoBatchPoster(filter) {
             'queued': `Automatically find and upload posters for ${queuedItemIds.length} queued item${queuedItemIds.length === 1 ? '' : 's'}?`,
             'movies': 'Automatically find and upload posters for all Movies?',
             'series': 'Automatically find and upload posters for all Series?',
-            'collections': 'Automatically find and upload posters for all Collections?'
+            'collections': 'Automatically find and upload posters for all Collections?',
+            'pending-seasons': 'Upload saved placeholder posters for seasons that now exist in Jellyfin?'
         }[filter] || 'Start automatic poster upload?';
         const librarySelect = document.getElementById('libraryFilter');
         const libraryId = librarySelect?.value || '';
@@ -3026,12 +3064,14 @@ async function startAutoBatchPoster(filter) {
         const skipProcessed = Boolean(document.getElementById('skipProcessedAutoBatch')?.checked);
         const includeSeasonPosters = Boolean(document.getElementById('includeSeasonPostersAutoBatch')?.checked);
         const replaceSeasonPosters = Boolean(document.getElementById('replaceSeasonPostersAutoBatch')?.checked);
+        const savePlaceholderSeasons = includeSeasonPosters && Boolean(document.getElementById('savePlaceholderSeasonsAutoBatch')?.checked);
         const confirmNotes = [];
         if (skipProcessed) confirmNotes.push('Already processed items will be skipped.');
         if (includeSeasonPosters) {
             confirmNotes.push(replaceSeasonPosters ?
                 'Season posters will be included and existing season posters may be replaced.' :
                 'Season posters will be included only when a season is missing a poster.');
+            if (savePlaceholderSeasons) confirmNotes.push('Posters for seasons not yet in Jellyfin will be saved and applied when they appear.');
         }
         if (libraryName) confirmNotes.push(`Library: ${libraryName}`);
 
@@ -3066,7 +3106,8 @@ async function startAutoBatchPoster(filter) {
         await enqueuePosterJob({
             kind: 'auto', filter, library_id: libraryId, item_ids: queuedItemIds,
             skip_processed: skipProcessed, include_season_posters: includeSeasonPosters,
-            replace_existing_season_posters: replaceSeasonPosters
+            replace_existing_season_posters: replaceSeasonPosters,
+            save_placeholder_seasons: savePlaceholderSeasons
         });
 
     } catch (err) {
