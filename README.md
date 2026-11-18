@@ -52,7 +52,7 @@ A modern web application for automatically finding and uploading high-quality po
 - Inline toasts, confirmation dialogs, status badges, and poster previews
 
 ### 🔧 **Advanced Features**
-- Automatic image format conversion (WebP/AVIF → JPEG)
+- Uploads are always JPEG for maximum Jellyfin client compatibility: JPEG originals are uploaded unchanged, other formats (WebP/AVIF/PNG) are converted once at quality 95
 - Smart error handling and retry logic
 - SQLite-backed selections, search queue, jobs, target outcomes, protected items, and TPDb corrections
 - Lightweight picker-response cache with lazy-loaded previews and configurable cleanup
