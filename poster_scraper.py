@@ -1256,6 +1256,43 @@ def _parse_jellyfin_datetime(value):
         return None
 
 
+JELLYFIN_PAGE_SIZE = 200
+JELLYFIN_MAX_PAGES = 1000
+
+
+def _jellyfin_get_all_items(url, headers, page_size=JELLYFIN_PAGE_SIZE):
+    """Fetch every item for an /Items-style query, following StartIndex/Limit paging.
+
+    Stock Jellyfin returns everything in one response, but compatible servers such as Silo
+    cap each page (e.g. at 72 items), so keep requesting until TotalRecordCount is reached.
+    """
+    items, seen = [], set()
+    start = 0
+    separator = '&' if '?' in url else '?'
+    for _ in range(JELLYFIN_MAX_PAGES):
+        response = requests.get(f"{url}{separator}StartIndex={start}&Limit={page_size}", headers=headers, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        page = data.get('Items') or []
+        added = 0
+        for item in page:
+            item_id = item.get('Id')
+            if item_id and item_id in seen:
+                continue
+            if item_id:
+                seen.add(item_id)
+            items.append(item)
+            added += 1
+        start += len(page)
+        total = data.get('TotalRecordCount')
+        # A short page is not the end: servers may cap Limit below what we asked for.
+        if not page or not added or (isinstance(total, int) and start >= total):
+            break
+    else:
+        logging.warning("Stopped paging Jellyfin items after %s pages: %s", JELLYFIN_MAX_PAGES, url)
+    return items
+
+
 def get_jellyfin_seasons(series_id):
     """Return eligible Jellyfin seasons for a Series item, including Specials unless future-dated."""
     if not Config.JELLYFIN_URL or not Config.JELLYFIN_API_KEY or not series_id:
@@ -1267,12 +1304,9 @@ def get_jellyfin_seasons(series_id):
         "?Fields=Id,Name,IndexNumber,PremiereDate,ImageTags"
     )
     try:
-        response = requests.get(seasons_url, headers=headers, timeout=15)
-        response.raise_for_status()
-        data = response.json()
         seasons = []
         now = datetime.utcnow()
-        for season in data.get('Items', []):
+        for season in _jellyfin_get_all_items(seasons_url, headers):
             premiere_date = _parse_jellyfin_datetime(season.get('PremiereDate'))
             if premiere_date and premiere_date > now:
                 continue
@@ -1417,11 +1451,9 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
                     f"?ParentId={library['id']}"
                     f"&IncludeItemTypes={include_types}&Recursive=true"
                     f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,Type,ParentId,ChildCount"
+                    f"&SortBy=SortName&SortOrder=Ascending"
                 )
-                response = requests.get(library_items_url, headers=headers, timeout=15)
-                response.raise_for_status()
-                library_data = response.json()
-                for item in library_data.get('Items', []):
+                for item in _jellyfin_get_all_items(library_items_url, headers):
                     item_type_label = "Movie" if item.get('Type') == 'Movie' else "Series"
                     items.append(build_item(item, item_type_label, fallback_library=library))
 
@@ -1445,13 +1477,8 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
                 f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,Type,ParentId,ChildCount"
                 f"&SortBy={sort_by_param}&SortOrder={sort_order}"
             )
-            response = requests.get(all_items_url, headers=headers, timeout=15)
-            response.raise_for_status()
-            all_data = response.json()
-
-            if 'Items' in all_data:
-                for item in all_data['Items']:
-                    items.append(build_item(item, "Movie" if item.get('Type') == 'Movie' else "Series"))
+            for item in _jellyfin_get_all_items(all_items_url, headers):
+                items.append(build_item(item, "Movie" if item.get('Type') == 'Movie' else "Series"))
             # Python-side sort for safety
             items.sort(key=lambda x: parse_date(x['date_created']), reverse=True)
 
@@ -1464,10 +1491,7 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
                     f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,ParentId"
                     f"&SortBy={sort_by_param}&SortOrder={sort_order}"
                 )
-                response = requests.get(movies_url, headers=headers, timeout=15)
-                response.raise_for_status()
-                movies_data = response.json()
-                for item in movies_data.get('Items', []):
+                for item in _jellyfin_get_all_items(movies_url, headers):
                     items.append(build_item(item, "Movie"))
 
             # Series
@@ -1478,10 +1502,7 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
                     f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,ParentId,ChildCount"
                     f"&SortBy={sort_by_param}&SortOrder={sort_order}"
                 )
-                response = requests.get(shows_url, headers=headers, timeout=15)
-                response.raise_for_status()
-                shows_data = response.json()
-                for item in shows_data.get('Items', []):
+                for item in _jellyfin_get_all_items(shows_url, headers):
                     items.append(build_item(item, "Series"))
     except Exception as e:
         raise RuntimeError('Could not load Jellyfin library items') from e

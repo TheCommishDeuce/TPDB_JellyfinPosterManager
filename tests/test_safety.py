@@ -46,6 +46,32 @@ class SecurityTests(unittest.TestCase):
         with patch('safe_http.requests.get', return_value=response), patch('safe_http.MAX_IMAGE_BYTES', 5), self.assertRaises(ValueError):
             fetch_image('https://theposterdb.com/image', 'tpdb')
 
+    def test_dashed_guid_item_ids_are_valid_jellyfin_images(self):
+        url = 'http://jellyfin.test/Items/02c10306-fd94-1900-0000-000000000000/Images/Primary?maxWidth=300&tag=abc'
+        self.assertEqual(validate_image_url(url, 'jellyfin'), url)
+
+    def test_generic_content_type_is_accepted_only_for_real_image_bytes(self):
+        jpeg = b'\xff\xd8\xff\xe0' + b'0' * 20
+        for header in ('application/octet-stream', 'image/jpg', ''):
+            response = Mock(status_code=200, headers={'Content-Type': header} if header else {})
+            response.iter_content.return_value = [jpeg]
+            with self.subTest(header=header), patch('safe_http.requests.get', return_value=response):
+                self.assertEqual(fetch_image('https://theposterdb.com/image', 'tpdb'), (jpeg, 'image/jpeg'))
+        response = Mock(status_code=200, headers={'Content-Type': 'application/octet-stream'})
+        response.iter_content.return_value = [b'<html>nope</html>']
+        with patch('safe_http.requests.get', return_value=response), self.assertRaises(ValueError):
+            fetch_image('https://theposterdb.com/image', 'tpdb')
+
+    def test_same_origin_jellyfin_redirect_is_followed(self):
+        redirect = Mock(status_code=302, headers={'Location': '/cache/images/abc.jpg'})
+        final = Mock(status_code=200, headers={'Content-Type': 'image/jpeg'})
+        final.iter_content.return_value = [b'\xff\xd8\xff']
+        with patch('safe_http.requests.get', side_effect=[redirect, final]) as get:
+            data, _ = fetch_image('http://jellyfin.test/Items/show/Images/Primary', 'jellyfin',
+                                  headers={'Authorization': 'test-key'})
+        self.assertEqual(data, b'\xff\xd8\xff')
+        self.assertEqual(get.call_args_list[1].args[0], 'http://jellyfin.test/cache/images/abc.jpg')
+
     def test_cookies_keep_domain_path_and_secure_flags(self):
         driver = Mock()
         driver.get_cookies.return_value = [
