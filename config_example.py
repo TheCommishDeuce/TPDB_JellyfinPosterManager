@@ -36,6 +36,10 @@ class Config:
     CHROME_BINARY = os.environ.get("CHROME_BINARY", "")
     CHROMEDRIVER_PATH = os.environ.get("CHROMEDRIVER_PATH", "")
 
+    # Also list items from Jellyfin "Collections" (boxsets) libraries. Collections already show up
+    # in movie libraries when "Group movies into collections" is enabled.
+    INCLUDE_COLLECTIONS = _env_bool("INCLUDE_COLLECTIONS")
+
     # TMDB Configuration
     TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 
