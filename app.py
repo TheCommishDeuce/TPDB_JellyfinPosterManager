@@ -99,6 +99,8 @@ def create_app(config=None, store=None, job_queue=None):
             'skip_processed': boolean(data, 'skip_processed'),
             'include_season_posters': boolean(data, 'include_season_posters'),
             'replace_existing_season_posters': boolean(data, 'replace_existing_season_posters'),
+            # Snapshot so a resumed job keeps choosing the same uploaders.
+            'preferred_uploaders': service.preferred_uploaders(),
         }
 
     def manual_tasks(ids, confirm_protected=False, direct=None):
@@ -229,7 +231,9 @@ def create_app(config=None, store=None, job_queue=None):
         # Disabling the cache never disables an authoritative user correction.
         mapping = override or normalize_tpdb_page(store.values('mapping').get(item_id, ''))
         use_cache = request.args.get('use_cache', 'true').lower() != 'false'
-        key = cache.key({'item': item, 'seasons': seasons, 'mapping': mapping, 'limit': limit, 'set': set_url})
+        preferred = service.preferred_uploaders()
+        key = cache.key({'item': item, 'seasons': seasons, 'mapping': mapping, 'limit': limit, 'set': set_url,
+                         'preferred_uploaders': preferred})
         cached = cache.get(key) if use_cache and not override else None
         if cached:
             return jsonify(dict(cached, from_cache=True))
@@ -240,7 +244,7 @@ def create_app(config=None, store=None, job_queue=None):
             tmdb_id=item.get('ProviderIds', {}).get('Tmdb'), eligible_seasons=seasons,
             max_posters=limit if item.get('type') == 'Series' else Config.MAX_POSTERS_PER_ITEM,
             requested_set_urls=[set_url] if set_url else None, tpdb_item_url=mapping,
-            include_base64=False,
+            include_base64=False, preferred_uploaders=preferred,
         )
         if override:
             store.set_value('mapping', item_id, override)
@@ -252,6 +256,13 @@ def create_app(config=None, store=None, job_queue=None):
         if use_cache:
             cache.put(key, payload)
         return jsonify(payload)
+
+    @app.route('/settings/preferred-uploaders', methods=['GET', 'PUT'])
+    def preferred_uploaders():
+        if request.method == 'PUT':
+            names = service.set_preferred_uploaders(body().get('uploaders', []))
+            return jsonify(success=True, uploaders=names)
+        return jsonify(uploaders=service.preferred_uploaders())
 
     @app.route('/item/<item_id>/seasons')
     def get_item_seasons(item_id):

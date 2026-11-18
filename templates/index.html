@@ -140,6 +140,14 @@
                                         <input class="form-check-input" type="checkbox" role="switch" id="replaceSeasonPostersAutoBatch">
                                         <label class="form-check-label small" for="replaceSeasonPostersAutoBatch">Replace season posters</label>
                                     </div>
+                                    <hr class="my-2">
+                                    <label class="form-label small fw-semibold mb-1" for="preferredUploadersInput">Preferred uploaders</label>
+                                    <textarea class="form-control form-control-sm" id="preferredUploadersInput" rows="3"
+                                              placeholder="One TPDb username per line, best first" spellcheck="false"></textarea>
+                                    <div class="d-flex align-items-center gap-2 mt-2">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" id="savePreferredUploadersBtn">Save</button>
+                                        <small class="text-muted" id="preferredUploadersStatus">Their sets are tried first.</small>
+                                    </div>
                                 </div>
                             </div>
                         </div>
