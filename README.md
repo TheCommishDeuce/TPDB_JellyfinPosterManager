@@ -112,7 +112,7 @@ The example file also includes additional settings, however the defaults are usu
 
 Set `WEB_PORT` in `config.py` if you want to run the web app on a port other than `5001`.
 
-**Movie collections** (Jellyfin BoxSets) are searched in TPDb's *Collections* section. They appear automatically in movie libraries when Jellyfin's *Group movies into collections* display option is on. To also list your separate *Collections* library, set `INCLUDE_COLLECTIONS = True` (or `INCLUDE_COLLECTIONS=true` for Docker).
+**Movie collections** (Jellyfin BoxSets) are searched in TPDb's *Collections* section. To also give the movies inside a collection matching artwork, use **Whole set** under a collection poster in the picker: it reads that TPDb set, matches its movie posters to the collection's movies by exact title and year, and lets you review and untick them before queueing or uploading. In Auto-Get, enable *Apply collection sets to their movies* to do the same automatically for exact matches. Protected movies are always skipped. They appear automatically in movie libraries when Jellyfin's *Group movies into collections* display option is on. To also list your separate *Collections* library, set `INCLUDE_COLLECTIONS = True` (or `INCLUDE_COLLECTIONS=true` for Docker).
 
 The default `WEB_HOST` is `127.0.0.1`. This is a **single-user local application**, not an authenticated multi-user service. Do not expose it publicly. Changing the bind address requires an authenticated reverse proxy and a trusted network.
 

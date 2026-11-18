@@ -100,6 +100,7 @@ def create_app(config=None, store=None, job_queue=None):
             'include_season_posters': boolean(data, 'include_season_posters'),
             'replace_existing_season_posters': boolean(data, 'replace_existing_season_posters'),
             'save_placeholder_seasons': boolean(data, 'save_placeholder_seasons'),
+            'include_collection_movies': boolean(data, 'include_collection_movies'),
             # Snapshot so a resumed job keeps choosing the same uploaders.
             'preferred_uploaders': service.preferred_uploaders(),
         }
@@ -267,6 +268,10 @@ def create_app(config=None, store=None, job_queue=None):
             names = service.set_preferred_uploaders(body().get('uploaders', []))
             return jsonify(success=True, uploaders=names)
         return jsonify(uploaders=service.preferred_uploaders())
+
+    @app.route('/item/<item_id>/collection-set')
+    def get_collection_set(item_id):
+        return jsonify(service.collection_set_preview(find_item(item_id), request.args.get('set_url')))
 
     @app.route('/pending-seasons', methods=['GET', 'DELETE'])
     def pending_seasons():
