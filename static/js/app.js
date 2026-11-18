@@ -86,6 +86,47 @@ function initAutoBatchSeasonSettings() {
     syncReplaceState();
 }
 
+let preferredUploaders = [];
+
+function isPreferredUploader(name) {
+    const key = String(name || '').toLocaleLowerCase();
+    return Boolean(key) && preferredUploaders.some(entry => entry.toLocaleLowerCase() === key);
+}
+
+async function initPreferredUploaders() {
+    const input = document.getElementById('preferredUploadersInput');
+    const saveBtn = document.getElementById('savePreferredUploadersBtn');
+    const status = document.getElementById('preferredUploadersStatus');
+    if (!input || !saveBtn) return;
+    try {
+        const response = await fetch('/settings/preferred-uploaders');
+        const data = await response.json();
+        preferredUploaders = Array.isArray(data.uploaders) ? data.uploaders : [];
+        input.value = preferredUploaders.join('\n');
+    } catch (error) {
+        console.error('Could not load preferred uploaders:', error);
+    }
+    saveBtn.addEventListener('click', async () => {
+        saveBtn.disabled = true;
+        try {
+            const response = await fetch('/settings/preferred-uploaders', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uploaders: input.value.split('\n') })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Could not save');
+            preferredUploaders = data.uploaders;
+            input.value = preferredUploaders.join('\n');
+            if (status) status.textContent = preferredUploaders.length ? `Saved ${preferredUploaders.length}.` : 'Cleared.';
+        } catch (error) {
+            showAlert('Failed to save preferred uploaders: ' + error.message, 'danger');
+        } finally {
+            saveBtn.disabled = false;
+        }
+    });
+}
+
 function initSeriesSeasonCounts() {
     const badges = document.querySelectorAll('[data-season-count-item-id]');
     if (!badges.length) return;
@@ -175,6 +216,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const themeBtn = document.getElementById('themeToggle');
     if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
     initAutoBatchSeasonSettings();
+    initPreferredUploaders();
     initTpdbPickerCacheSettings();
     initSeriesSeasonCounts();
 
@@ -974,7 +1016,7 @@ function renderSinglePosterMetadata(poster) {
     return `
         <div class="poster-card-meta">
             <div class="text-truncate" title="${escapeHtml(uploader)}">
-                <i class="fas fa-user me-1"></i>${escapeHtml(uploader)}
+                <i class="fas ${isPreferredUploader(poster.uploader) ? 'fa-star text-warning' : 'fa-user'} me-1"></i>${escapeHtml(uploader)}
             </div>
             ${setLink ? `
                 <small class="text-muted">

@@ -598,6 +598,24 @@ def _extract_tpdb_card_metadata(poster_link):
     }
 
 
+def _order_by_preferred_uploaders(poster_links, preferred_uploaders):
+    """Stable-sort TPDb cards so earlier entries in ``preferred_uploaders`` come first."""
+    poster_links = list(poster_links)
+    if not preferred_uploaders:
+        return poster_links
+    ranks = {}
+    for index, name in enumerate(preferred_uploaders):
+        ranks.setdefault(str(name).casefold(), index)
+    fallback = len(ranks)
+
+    def sort_key(entry):
+        index, link = entry
+        uploader = _extract_tpdb_card_metadata(link).get('uploader') or ''
+        return ranks.get(uploader.casefold(), fallback), index
+
+    return [link for _, link in sorted(enumerate(poster_links), key=sort_key)]
+
+
 def _tpdb_card_matches_item(metadata, expected_title_norm, expected_year=None):
     card_title = metadata.get('tpdb_title')
     if not card_title:
@@ -732,8 +750,13 @@ def search_tpdb_for_poster_groups(
     preview_max_size=TPDB_PREVIEW_MAX_SIZE,
     preview_quality=TPDB_PREVIEW_QUALITY,
     require_exact=False,
+    preferred_uploaders=None,
 ):
-    """Return grouped TPDb poster candidates plus a flat show-poster list."""
+    """Return grouped TPDb poster candidates plus a flat show-poster list.
+
+    ``preferred_uploaders`` (ordered, case-insensitive) moves those uploaders' cards and sets
+    to the front, so they are the ones kept when ``max_posters`` limits the sets considered.
+    """
     global selenium_driver
     eligible_seasons = eligible_seasons or []
     requested_set_urls = set(requested_set_urls or [])
@@ -903,7 +926,9 @@ def search_tpdb_for_poster_groups(
                         discovered_set_lookup = {}
                         discovered_set_order = {}
 
-                        for poster_link in item_soup.select(ITEM_POSTER_SELECTOR)[:set_discovery_limit]:
+                        item_cards = _order_by_preferred_uploaders(
+                            item_soup.select(ITEM_POSTER_SELECTOR)[:set_discovery_limit], preferred_uploaders)
+                        for poster_link in item_cards:
                             href = poster_link.get('href')
                             poster_url = _tpdb_absolute_url(href)
                             if not poster_url:

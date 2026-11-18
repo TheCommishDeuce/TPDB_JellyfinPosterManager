@@ -11,6 +11,29 @@ class NeedsReview(ValueError):
     pass
 
 
+MAX_PREFERRED_UPLOADERS = 50
+
+
+def normalize_preferred_uploaders(value):
+    """Validate an ordered list of TPDb usernames; trims and drops case-insensitive duplicates."""
+    if isinstance(value, str):
+        value = value.splitlines()
+    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
+        raise ValueError('Preferred uploaders must be a list of usernames')
+    names, seen = [], set()
+    for name in value:
+        name = name.strip().lstrip('@').strip()
+        if not name or name.casefold() in seen:
+            continue
+        if len(name) > 64 or any(char.isspace() and char != ' ' for char in name):
+            raise ValueError(f'Invalid uploader name: {name[:64]!r}')
+        seen.add(name.casefold())
+        names.append(name)
+    if len(names) > MAX_PREFERRED_UPLOADERS:
+        raise ValueError(f'At most {MAX_PREFERRED_UPLOADERS} preferred uploaders are supported')
+    return names
+
+
 class PosterService:
     def __init__(self, store):
         self.store = store
@@ -47,6 +70,17 @@ class PosterService:
         if season_ids and not season_ids.issubset({season['id'] for season in scraper.get_jellyfin_seasons(item['id'])}):
             raise ValueError('Selected seasons do not belong to this series or are not eligible')
 
+    def preferred_uploaders(self):
+        try:
+            return normalize_preferred_uploaders(self.store.values('prefs').get('preferred_uploaders') or [])
+        except ValueError:
+            return []
+
+    def set_preferred_uploaders(self, value):
+        names = normalize_preferred_uploaders(value)
+        self.store.set_value('prefs', 'preferred_uploaders', names or None)
+        return names
+
     def discover(self, item, options):
         seasons = scraper.get_jellyfin_seasons(item['id']) if options.get('include_season_posters') and item.get('type') == 'Series' else []
         mapping = normalize_tpdb_page(self.store.values('mapping').get(item['id']))
@@ -54,6 +88,7 @@ class PosterService:
             item['title'], item_year=item.get('year'), item_type=item.get('type'),
             tmdb_id=item.get('ProviderIds', {}).get('Tmdb'), eligible_seasons=seasons,
             max_posters=1, include_base64=False, tpdb_item_url=mapping, require_exact=not bool(mapping),
+            preferred_uploaders=options.get('preferred_uploaders', self.preferred_uploaders()),
         )
         group = result.get('best_group')
         if not group or not group.get('show_posters'):
