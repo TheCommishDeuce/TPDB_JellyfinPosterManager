@@ -91,7 +91,7 @@ def create_app(config=None, store=None, job_queue=None):
 
     def auto_options(data):
         target_filter = data.get('filter', 'no-poster')
-        if target_filter not in ('all', 'queued', 'no-poster', 'movies', 'series', 'collections'):
+        if target_filter not in ('all', 'queued', 'no-poster', 'movies', 'series', 'collections', 'pending-seasons'):
             raise ValueError('Unknown batch filter')
         return {
             'filter': target_filter, 'library_id': data.get('library_id') or '',
@@ -99,6 +99,7 @@ def create_app(config=None, store=None, job_queue=None):
             'skip_processed': boolean(data, 'skip_processed'),
             'include_season_posters': boolean(data, 'include_season_posters'),
             'replace_existing_season_posters': boolean(data, 'replace_existing_season_posters'),
+            'save_placeholder_seasons': boolean(data, 'save_placeholder_seasons'),
             # Snapshot so a resumed job keeps choosing the same uploaders.
             'preferred_uploaders': service.preferred_uploaders(),
         }
@@ -266,6 +267,19 @@ def create_app(config=None, store=None, job_queue=None):
             names = service.set_preferred_uploaders(body().get('uploaders', []))
             return jsonify(success=True, uploaders=names)
         return jsonify(uploaders=service.preferred_uploaders())
+
+    @app.route('/pending-seasons', methods=['GET', 'DELETE'])
+    def pending_seasons():
+        if request.method == 'DELETE':
+            key = request.args.get('key')
+            entries = service.pending_seasons()
+            keys = [entry['key'] for entry in entries if not key or entry['key'] == key]
+            if key and not keys:
+                raise LookupError('Unknown placeholder')
+            for entry_key in keys:
+                service.clear_pending_season(entry_key)
+            return jsonify(success=True, removed=len(keys))
+        return jsonify(pending=service.pending_seasons())
 
     @app.route('/item/<item_id>/seasons')
     def get_item_seasons(item_id):

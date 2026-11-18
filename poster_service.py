@@ -2,6 +2,7 @@
 import os
 import re
 import tempfile
+from datetime import datetime, timezone
 
 import poster_scraper as scraper
 from safe_http import ImageLoginRequired, normalize_tpdb_page, validate_image_url
@@ -81,7 +82,58 @@ class PosterService:
         self.store.set_value('prefs', 'preferred_uploaders', names or None)
         return names
 
+    # Placeholder season posters (#32): TPDb set posters for seasons Jellyfin doesn't have yet.
+    PENDING_NAMESPACE = 'pending_seasons'
+
+    def pending_seasons(self, item_id=None):
+        entries = []
+        for key, entry in self.store.values(self.PENDING_NAMESPACE).items():
+            if isinstance(entry, dict) and (item_id is None or entry.get('item_id') == item_id):
+                entries.append(dict(entry, key=key))
+        return entries
+
+    def save_pending_seasons(self, item, posters, set_id):
+        saved = 0
+        for poster in posters:
+            if set_id and poster.get('set_id') != set_id:
+                continue
+            season_key = str(poster.get('season_key') or '')
+            if not re.fullmatch(r'specials|\d{1,3}', season_key):
+                continue
+            try:
+                validate_image_url(poster.get('url'), 'tpdb')
+            except ValueError:
+                continue
+            self.store.set_value(self.PENDING_NAMESPACE, f"{item['id']}:{season_key}", {
+                'item_id': item['id'], 'item_title': item.get('title'), 'season_key': season_key,
+                'url': poster['url'], 'set_id': poster.get('set_id'), 'set_url': poster.get('set_url'),
+                'uploader': poster.get('uploader'), 'created': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            })
+            saved += 1
+        return saved
+
+    def clear_pending_season(self, key):
+        self.store.set_value(self.PENDING_NAMESPACE, key, None)
+
+    def pending_targets(self, item, seasons, replace_existing=False):
+        """Upload targets for placeholders whose season now exists in Jellyfin."""
+        by_key = {scraper._season_key_from_jellyfin(season): season for season in seasons}
+        targets = []
+        for entry in self.pending_seasons(item['id']):
+            season = by_key.get(entry['season_key'])
+            if not season or (season.get('has_poster') and not replace_existing):
+                continue
+            validate_image_url(entry['url'], 'tpdb')
+            targets.append({'target_id': season['id'], 'title': season.get('title', 'Season'), 'url': entry['url'],
+                            'status': 'pending', 'pending_key': entry['key']})
+        return targets
+
     def discover(self, item, options):
+        if options.get('filter') == 'pending-seasons':
+            seasons = scraper.get_jellyfin_seasons(item['id']) if item.get('type') == 'Series' else []
+            targets = self.pending_targets(item, seasons, options.get('replace_existing_season_posters'))
+            return targets or [{'target_id': item['id'], 'title': 'Placeholder seasons', 'url': None,
+                                'status': 'skipped', 'error': 'No placeholder season has appeared in Jellyfin yet'}]
         seasons = scraper.get_jellyfin_seasons(item['id']) if options.get('include_season_posters') and item.get('type') == 'Series' else []
         mapping = normalize_tpdb_page(self.store.values('mapping').get(item['id']))
         result = scraper.search_tpdb_for_poster_groups(
@@ -95,7 +147,15 @@ class PosterService:
             raise NeedsReview('No unambiguous primary poster match. Choose a poster or correct the TPDb page.')
         primary = group['show_posters'][0]
         targets = self.targets(item, primary['url'])
+        if seasons and options.get('save_placeholder_seasons'):
+            self.save_pending_seasons(item, group.get('unmatched_season_posters', []), primary.get('set_id'))
+        placeholders = {target['target_id']: target for target in self.pending_targets(
+            item, seasons, options.get('replace_existing_season_posters'))} if seasons else {}
         for season in seasons:
+            if season['id'] in placeholders:
+                # A saved placeholder wins: it's the set the user chose when the season didn't exist.
+                targets.append(placeholders[season['id']])
+                continue
             if season.get('has_poster') and not options.get('replace_existing_season_posters'):
                 continue
             poster = next((poster for poster in group.get('season_posters', [])

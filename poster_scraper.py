@@ -937,7 +937,18 @@ def _search_tpdb_for_poster_groups(
                             'covered_season_count': 0,
                             'covered_season_keys': [],
                             'available_sets': [],
+                            # Season posters for seasons Jellyfin doesn't have (yet), kept as placeholders.
+                            'unmatched_season_posters': [],
                         }
+
+                        def remember_unmatched_season(season_key, url, metadata):
+                            if any(entry['season_key'] == season_key and entry.get('set_id') == metadata.get('set_id')
+                                   for entry in group['unmatched_season_posters']):
+                                return
+                            group['unmatched_season_posters'].append({
+                                'season_key': season_key, 'url': url, 'set_id': metadata.get('set_id'),
+                                'set_url': metadata.get('set_url'), 'uploader': metadata.get('uploader'),
+                            })
                         discovered_set_urls = []
                         discovered_set_lookup = {}
                         discovered_set_order = {}
@@ -1001,7 +1012,9 @@ def _search_tpdb_for_poster_groups(
                                     metadata=metadata,
                                 ))
                                 poster_id += 1
-                            elif not season_key:
+                            elif season_key:
+                                remember_unmatched_season(season_key, poster_url, metadata)
+                            else:
                                 group['show_posters'].append(_poster_dict(
                                     poster_id,
                                     poster_url,
@@ -1088,6 +1101,8 @@ def _search_tpdb_for_poster_groups(
                                         ))
                                         poster_id += 1
                                         seen_poster_urls.add(poster_url)
+                                    elif season_key:
+                                        remember_unmatched_season(season_key, poster_url, metadata)
 
                         should_fallback_to_season_pages = season_by_key and (
                             not discovered_set_urls or not group['season_posters']
