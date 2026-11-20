@@ -47,10 +47,17 @@ def get_jellyfin_headers(**headers):
 # Global Selenium driver
 selenium_driver = None
 selenium_lock = threading.RLock()
+# Advanced (ID) search needs a TPDb Pro Lite/Pro account; cleared for the process once TPDb refuses it.
+tpdb_advanced_search_available = True
 
 SEARCH_RESULT_SELECTOR = "a.btn.btn-dark-lighter.flex-grow-1.text-truncate.py-2.text-left.position-relative"
 ITEM_POSTER_SELECTOR = "a.bg-transparent.border-0.text-white"
 TPDB_PAGE_REQUEST_DELAY_SEC = 1.25
+TPDB_ADVANCED_SEARCH_PATH = "/search/advanced/results"
+TPDB_ADVANCED_CATEGORIES = {"Movie": "Movies", "Series": "Shows", "Collection": "Collections"}
+TPDB_ADVANCED_MAX_PAGES = 5
+# TPDb can leave a TMDb-ID miss loading indefinitely; don't wait the full 30s page-load timeout.
+TPDB_ADVANCED_PAGE_LOAD_TIMEOUT_SEC = 10
 TPDB_IMAGE_PREVIEW_DELAY_SEC = 0.75
 TPDB_IMAGE_PREVIEW_RETRY_DELAY_SEC = 3
 TPDB_PREVIEW_MAX_SIZE = (160, 242)
@@ -737,6 +744,122 @@ def _open_tpdb_page_with_delay(url):
     selenium_driver.get(url)
 
 
+def _is_tpdb_not_found_page(page_source):
+    title = _extract_html_title(page_source).lower()
+    return title.startswith(("not found", "404")) or (not title and "file not found" in (page_source or "").lower())
+
+
+def _tpdb_id_candidate(title, url, index, is_collection):
+    """A search candidate from an ID lookup: authoritative, so it skips title/year scoring."""
+    display_title = format_title_year_spacing(title)
+    year = None if is_collection else extract_title_year(display_title)
+    return {
+        'title': display_title,
+        'year': year,
+        'score': 1.0,
+        'exact_title_match': True,
+        'exact_year_match': True,
+        'url': url,
+        'index': index,
+        # Set pages are filtered against TPDb's own title, not the (possibly different) Jellyfin one.
+        'match_title_norm': _comparison_title(strip_title_year(display_title), is_collection),
+        'match_year': year,
+    }
+
+
+def _load_tpdb_id_lookup_page(url, delay):
+    """Load an advanced-search page; return False if TPDb never finished loading it."""
+    selenium_driver.set_page_load_timeout(TPDB_ADVANCED_PAGE_LOAD_TIMEOUT_SEC)
+    try:
+        if delay:
+            _open_tpdb_page_with_delay(url)
+        else:
+            selenium_driver.get(url)
+    except TimeoutException:
+        return False
+    finally:
+        selenium_driver.set_page_load_timeout(30)  # setup_selenium_and_login's timeout
+    current_url = selenium_driver.current_url
+    if _is_login_url(current_url):
+        logging.warning("TPDb session expired on ID search page (%s).", current_url)
+        raise TPDBSessionExpired("TPDb session expired while loading ID search page.")
+    _raise_if_rate_limited(selenium_driver.page_source, current_url, "id_search_page")
+    return True
+
+
+def _find_tpdb_items_by_id(item_type, imdb_id=None, tmdb_id=None):
+    """Look an item up by IMDb ID, then TMDb ID, using TPDb's advanced search.
+
+    TPDb redirects a single match straight to its /posters/<id> page; several matches render
+    the same result cards as the text search, paginated with rel="next". Returns [] when no ID
+    matches, there are no usable IDs, or the account can't use advanced search.
+    Call with ``selenium_lock`` held.
+    """
+    global tpdb_advanced_search_available
+    category = TPDB_ADVANCED_CATEGORIES.get(item_type)
+    lookups = []
+    if imdb_id and re.fullmatch(r"tt\d+", str(imdb_id).strip()):
+        lookups.append(('imdb_id', str(imdb_id).strip()))
+    if tmdb_id and re.fullmatch(r"\d+", str(tmdb_id).strip()):
+        lookups.append(('tmdb_id', str(tmdb_id).strip()))
+    if not tpdb_advanced_search_available or not category or not lookups:
+        return []
+
+    is_collection = item_type == "Collection"
+    pages_loaded = 0
+    for id_param, id_value in lookups:
+        candidates = []
+        url = f"{Config.TPDB_BASE_URL}{TPDB_ADVANCED_SEARCH_PATH}?{urlencode({'category': category, id_param: id_value})}"
+        page_count = 0
+        while url and page_count < TPDB_ADVANCED_MAX_PAGES:
+            logging.info("TPDb ID search URL: %s", url)
+            loaded = _load_tpdb_id_lookup_page(url, delay=pages_loaded > 0)
+            pages_loaded += 1
+            page_count += 1
+            url = None
+            if not loaded:
+                logging.info("TPDb %s search for %s timed out; treating it as no match.", id_param, id_value)
+                break
+            current_url = selenium_driver.current_url
+            page_source = selenium_driver.page_source
+            path = urlsplit(current_url).path.rstrip('/')
+            if re.fullmatch(r"/posters/\d+", path):
+                item_url = _tpdb_absolute_url(urlunsplit(urlsplit(current_url)._replace(query='', fragment='')))
+                if item_url:
+                    title = _extract_html_title(page_source).split(" | ")[0]
+                    candidates.append(dict(_tpdb_id_candidate(title, item_url, 0, is_collection), preloaded=True))
+                break
+            ready = path == TPDB_ADVANCED_SEARCH_PATH and not _is_tpdb_not_found_page(page_source)
+            if ready:
+                try:
+                    _wait_for_search_results_ready(selenium_driver, timeout=15)
+                except TimeoutError:
+                    ready = False
+            if not ready:
+                tpdb_advanced_search_available = False
+                logging.warning("TPDb advanced search is unavailable at %s (it needs a Pro Lite or Pro account); "
+                                "using text search from now on.", current_url)
+                candidates = []
+                break
+            soup = BeautifulSoup(selenium_driver.page_source, 'html.parser')
+            for link in soup.select(SEARCH_RESULT_SELECTOR):
+                link_url = _tpdb_absolute_url(link.get('href'))
+                title_element = link.find(class_="text-truncate") or link.find("span") or link
+                if link_url:
+                    candidates.append(_tpdb_id_candidate(
+                        title_element.get_text(strip=True), link_url, len(candidates), is_collection))
+            next_link = soup.select_one('a[rel="next"]')
+            url = _tpdb_absolute_url(next_link.get('href')) if next_link else None
+        if candidates:
+            logging.info("TPDb %s %s matched %d page(s).", id_param, id_value, len(candidates))
+            return candidates
+        if not tpdb_advanced_search_available:
+            break
+    if pages_loaded:
+        time.sleep(TPDB_PAGE_REQUEST_DELAY_SEC)  # Space the text-search page load that follows.
+    return []
+
+
 def search_tpdb_for_poster_groups(item_title, *args, **kwargs):
     """Search TPDb; if a TMDB-derived title finds nothing usable, retry once with the Jellyfin title."""
     result = _search_tpdb_for_poster_groups(item_title, *args, **kwargs)
@@ -745,7 +868,7 @@ def search_tpdb_for_poster_groups(item_title, *args, **kwargs):
         return result
     logging.info("No usable TPDb match for TMDB title '%s'; retrying with Jellyfin title '%s'.",
                  result['search_query'], item_title)
-    fallback = _search_tpdb_for_poster_groups(item_title, *args, **dict(kwargs, tmdb_id=None))
+    fallback = _search_tpdb_for_poster_groups(item_title, *args, **dict(kwargs, tmdb_id=None, imdb_id=None))
     return fallback if fallback.get('best_group') else result
 
 
@@ -765,11 +888,13 @@ def _search_tpdb_for_poster_groups(
     preview_quality=TPDB_PREVIEW_QUALITY,
     require_exact=False,
     preferred_uploaders=None,
+    imdb_id=None,
 ):
     """Return grouped TPDb poster candidates plus a flat show-poster list.
 
     ``preferred_uploaders`` (ordered, case-insensitive) moves those uploaders' cards and sets
     to the front, so they are the ones kept when ``max_posters`` limits the sets considered.
+    ``imdb_id``/``tmdb_id`` are looked up on TPDb first; the text search runs only if neither matches.
     """
     global selenium_driver
     eligible_seasons = eligible_seasons or []
@@ -812,6 +937,8 @@ def _search_tpdb_for_poster_groups(
                         extract_title_year(search_query) or (str(item_year) if item_year else None))
                     expected_title = strip_title_year(search_query)
                     expected_title_norm = _comparison_title(expected_title, is_collection)
+                    id_candidates = [] if tpdb_item_url else _find_tpdb_items_by_id(
+                        item_type, imdb_id=imdb_id, tmdb_id=tmdb_id)
                     if tpdb_item_url:
                         candidates_to_check = [{
                             'title': search_query,
@@ -822,6 +949,11 @@ def _search_tpdb_for_poster_groups(
                             'url': tpdb_item_url,
                             'index': 0,
                         }]
+                    elif id_candidates:
+                        if require_exact and len(id_candidates) != 1:
+                            return {'posters': [], 'groups': [], 'best_group': None,
+                                    'review_needed': True, 'search_query': search_query}
+                        candidates_to_check = id_candidates[:max_groups]
                     else:
                         selenium_driver.get(search_url)
                         current_url = selenium_driver.current_url
@@ -911,7 +1043,8 @@ def _search_tpdb_for_poster_groups(
                             candidate['title'],
                             round(candidate['score'] * 100),
                         )
-                        _open_tpdb_page_with_delay(candidate['url'])
+                        if not candidate.get('preloaded'):  # An ID redirect already left us on this page.
+                            _open_tpdb_page_with_delay(candidate['url'])
                         current_url = selenium_driver.current_url
                         if _is_login_url(current_url):
                             logging.warning("TPDb session expired on item page for '%s' (%s).", item_title, current_url)
@@ -1057,7 +1190,8 @@ def _search_tpdb_for_poster_groups(
 
                                     metadata = _extract_tpdb_card_metadata(poster_link)
                                     metadata['source_url'] = candidate['url']
-                                    if not _tpdb_card_matches_item(metadata, expected_title_norm, expected_year):
+                                    if not _tpdb_card_matches_item(metadata, candidate.get('match_title_norm', expected_title_norm),
+                                                                   candidate.get('match_year', expected_year)):
                                         continue
                                     season_key = _extract_tpdb_season_key(poster_link)
                                     poster_type = (metadata.get('tpdb_poster_type') or '').lower()
