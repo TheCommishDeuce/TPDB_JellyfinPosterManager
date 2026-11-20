@@ -184,6 +184,31 @@ class BrowserUnavailable(RuntimeError):
     """Chrome/Chromium or its driver could not be started."""
 
 
+class TPDBLoginFailed(RuntimeError):
+    """ThePosterDB rejected the configured credentials, or they are missing."""
+
+
+def _login_page_error(driver):
+    """Best-effort read of the error TPDb shows on its sign-in form."""
+    try:
+        for element in driver.find_elements(By.CSS_SELECTOR, ".invalid-feedback, .alert-danger"):
+            text = (element.text or "").strip()
+            if text:
+                return text.splitlines()[0]
+    except Exception:
+        pass
+    return None
+
+
+def _login_failed(driver):
+    detail = _login_page_error(driver)
+    return TPDBLoginFailed(
+        "ThePosterDB login failed: still on the sign-in page after submitting credentials"
+        + (f" (TPDb says: {detail})" if detail else "")
+        + ". Check TPDB_EMAIL and TPDB_PASSWORD."
+    )
+
+
 def _configured_path(*names):
     for name in names:
         value = os.environ.get(name) or getattr(Config, name, None)
@@ -237,6 +262,9 @@ def setup_selenium_and_login(force=False):
         if selenium_driver and not force:
             logging.info("Selenium already initialized.")
             return
+
+        if not getattr(Config, "TPDB_EMAIL", "") or not getattr(Config, "TPDB_PASSWORD", ""):
+            raise TPDBLoginFailed("ThePosterDB credentials are not set. Set TPDB_EMAIL and TPDB_PASSWORD.")
 
         created_driver = False
         if not selenium_driver:
@@ -298,7 +326,17 @@ def setup_selenium_and_login(force=False):
             password_input.send_keys(Config.TPDB_PASSWORD)
             password_input.send_keys(Keys.RETURN)
 
-            WebDriverWait(selenium_driver, 20).until(lambda d: not _is_login_url(d.current_url))
+            try:
+                WebDriverWait(selenium_driver, 20).until(lambda d: not _is_login_url(d.current_url))
+            except TimeoutException:
+                # A challenge page is not a credentials problem; report it as a rate limit.
+                _raise_if_rate_limited(
+                    selenium_driver.page_source,
+                    selenium_driver.current_url,
+                    "login_submit",
+                    check_content_markers=False,
+                )
+                raise _login_failed(selenium_driver) from None
             # After sign-in, /feed is expected. Avoid content-marker checks here because
             # regular TPDb pages can include Cloudflare-related script text.
             _raise_if_rate_limited(
@@ -308,12 +346,17 @@ def setup_selenium_and_login(force=False):
                 check_content_markers=False,
             )
             if _is_login_url(selenium_driver.current_url):
-                raise RuntimeError("TPDb login failed: still on /login after submitting credentials.")
+                raise _login_failed(selenium_driver)
 
             if force:
                 logging.info("Selenium re-authenticated with ThePosterDB.")
             else:
                 logging.info("Selenium initialized and logged into ThePosterDB.")
+        except TPDBLoginFailed as error:
+            logging.error("%s", error)
+            if created_driver:
+                teardown_selenium()
+            raise
         except Exception:
             logging.exception("Failed to login to ThePosterDB (force=%s)", force)
             if created_driver:
@@ -1216,6 +1259,9 @@ def _search_tpdb_for_poster_groups(
             'best_group': best_group,
             'search_query': search_query,
         }
+    except TPDBLoginFailed:
+        # Already logged with an actionable message; a traceback adds nothing.
+        raise
     except Exception:
         logging.exception("Error during TPDb scraping: search_url=%s current_url=%s", search_url, _get_selenium_current_url())
         raise

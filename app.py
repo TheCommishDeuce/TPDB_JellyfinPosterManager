@@ -168,6 +168,8 @@ def create_app(config=None, store=None, job_queue=None):
         elif isinstance(error, scraper.BrowserUnavailable):
             logging.error('%s', error)
             status = 503
+        elif isinstance(error, scraper.TPDBLoginFailed):
+            status = 503
         elif isinstance(error, PermissionError):
             status = 403
         elif isinstance(error, LookupError):

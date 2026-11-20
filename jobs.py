@@ -204,7 +204,8 @@ class JobQueue:
                     if 'targets' not in task:
                         try:
                             task['targets'] = self.service.discover(item, job['options'])
-                        except scraper.TPDBRateLimited:
+                        except (scraper.TPDBRateLimited, scraper.TPDBLoginFailed):
+                            # Every remaining item would fail the same way; stop the job with the reason.
                             raise
                         except Exception as error:
                             task['targets'] = [dict(target_id=item['id'], title='Primary', url=None,
