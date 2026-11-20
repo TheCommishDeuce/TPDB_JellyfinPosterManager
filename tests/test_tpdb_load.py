@@ -34,6 +34,8 @@ class ChromeImageTests(unittest.TestCase):
             started.append(options)
             raise scraper.BrowserUnavailable('stop here')
         with patch.object(scraper, 'selenium_driver', None), patch.object(scraper, '_chrome_binary', return_value=None), \
+                patch.object(scraper.Config, 'TPDB_EMAIL', 'fixture@example.invalid', create=True), \
+                patch.object(scraper.Config, 'TPDB_PASSWORD', 'fixture-password', create=True), \
                 patch.object(scraper, '_start_chrome', side_effect=start):
             with self.assertRaises(scraper.BrowserUnavailable):
                 scraper.setup_selenium_and_login()
