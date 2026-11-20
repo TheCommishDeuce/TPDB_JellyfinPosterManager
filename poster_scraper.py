@@ -53,6 +53,15 @@ ITEM_POSTER_SELECTOR = "a.bg-transparent.border-0.text-white"
 TPDB_PAGE_REQUEST_DELAY_SEC = 1.25
 TPDB_IMAGE_PREVIEW_DELAY_SEC = 0.75
 TPDB_IMAGE_PREVIEW_RETRY_DELAY_SEC = 3
+# Every TPDb image request (picker thumbnails, previews, upload downloads) shares these limits.
+TPDB_IMAGE_MAX_CONCURRENT = 2
+TPDB_IMAGE_MIN_INTERVAL_SEC = 0.2
+TPDB_UPLOAD_IMAGE_INTERVAL_SEC = 0.75
+TPDB_IMAGE_RATE_LIMIT_PAUSE_SEC = 30
+tpdb_image_slots = threading.BoundedSemaphore(TPDB_IMAGE_MAX_CONCURRENT)
+tpdb_image_pacing_lock = threading.Lock()
+tpdb_image_next_start = 0.0
+tpdb_image_paused_until = 0.0
 TPDB_PREVIEW_MAX_SIZE = (160, 242)
 TPDB_PREVIEW_QUALITY = 85
 RATE_LIMIT_MARKERS = (
@@ -266,6 +275,8 @@ def setup_selenium_and_login(force=False):
                 excluded_switches.append("enable-logging")
             chrome_options.add_experimental_option("excludeSwitches", excluded_switches)
             chrome_options.add_experimental_option("useAutomationExtension", False)
+            # The scraper reads markup only; poster images would be ~30 extra TPDb requests per page.
+            chrome_options.add_experimental_option("prefs", {"profile.managed_default_content_settings.images": 2})
             selenium_driver = _start_chrome(chrome_options, chrome_binary)
             selenium_driver.set_page_load_timeout(30)
             try:
@@ -368,17 +379,48 @@ def get_tpdb_cookie_jar():
     return jar
 
 
-def fetch_tpdb_image(url):
-    return fetch_image(url, 'tpdb', cookies=get_tpdb_cookie_jar(), headers={
-        'User-Agent': 'Mozilla/5.0', 'Referer': Config.TPDB_BASE_URL + '/',
-        # Prefer lossless/JPEG originals so uploads don't go through a lossy WebP->JPEG round trip.
-        'Accept': 'image/jpeg,image/png;q=0.9,image/webp;q=0.5,image/avif;q=0.4',
-    })
+def _retry_after_seconds(response):
+    try:
+        return max(1, min(int(response.headers.get('Retry-After', '')), 600))
+    except (TypeError, ValueError):
+        return TPDB_IMAGE_RATE_LIMIT_PAUSE_SEC
+
+
+def fetch_tpdb_image(url, interval=TPDB_IMAGE_MIN_INTERVAL_SEC, wait_if_paused=False):
+    """Fetch a TPDb image, at most TPDB_IMAGE_MAX_CONCURRENT at a time and spaced by ``interval``.
+
+    After a 429, all TPDb image requests pause. Callers that can wait (uploads) sleep through the
+    pause; others (thumbnails) fail at once, so the browser's connections aren't held open.
+    """
+    global tpdb_image_next_start, tpdb_image_paused_until
+    with tpdb_image_slots:
+        with tpdb_image_pacing_lock:
+            now = time.monotonic()
+            if tpdb_image_paused_until > now and not wait_if_paused:
+                raise TPDBRateLimited('TPDb is rate limiting image requests; try again shortly.')
+            start = max(now, tpdb_image_next_start, tpdb_image_paused_until)
+            tpdb_image_next_start = start + interval
+        if start > now:
+            time.sleep(start - now)
+        try:
+            return fetch_image(url, 'tpdb', cookies=get_tpdb_cookie_jar(), headers={
+                'User-Agent': 'Mozilla/5.0', 'Referer': Config.TPDB_BASE_URL + '/',
+                # Prefer lossless/JPEG originals so uploads don't go through a lossy WebP->JPEG round trip.
+                'Accept': 'image/jpeg,image/png;q=0.9,image/webp;q=0.5,image/avif;q=0.4',
+            })
+        except requests.HTTPError as error:
+            if error.response is None or error.response.status_code != 429:
+                raise
+            pause = _retry_after_seconds(error.response)
+            with tpdb_image_pacing_lock:
+                tpdb_image_paused_until = max(tpdb_image_paused_until, time.monotonic() + pause)
+            logging.warning("TPDb is rate limiting image requests; pausing them for %ds.", pause)
+            raise TPDBRateLimited('TPDb is rate limiting image requests; try again shortly.') from error
 
 
 def download_image_with_cookies(url, save_path):
     try:
-        image_bytes, _ = fetch_tpdb_image(url)
+        image_bytes, _ = fetch_tpdb_image(url, interval=TPDB_UPLOAD_IMAGE_INTERVAL_SEC, wait_if_paused=True)
         os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
         # Uploads are JPEG for compatibility with every Jellyfin client. Upright JPEGs are
         # stored byte-for-byte; other formats (WebP, AVIF, PNG, ...) are converted once.
@@ -392,7 +434,7 @@ def download_image_with_cookies(url, save_path):
             image = ImageOps.exif_transpose(image).convert('RGB')
             image.save(save_path, format='JPEG', quality=95)
         return True
-    except ImageLoginRequired:
+    except (ImageLoginRequired, TPDBRateLimited):
         raise
     except Exception as e:
         logging.error('Error downloading poster: %s', e)
