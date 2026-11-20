@@ -876,6 +876,10 @@ def _find_tpdb_items_by_id(item_type, imdb_id=None, tmdb_id=None):
 def search_tpdb_for_poster_groups(item_title, *args, **kwargs):
     """Search TPDb; if a TMDB-derived title finds nothing usable, retry once with the Jellyfin title."""
     result = _search_tpdb_for_poster_groups(item_title, *args, **kwargs)
+    if result.get('id_match') and not result.get('best_group'):
+        # TPDb can link an ID to an empty page while an older duplicate holds the posters.
+        logging.info("TPDb ID match for '%s' had no usable posters; trying the text search.", item_title)
+        result = _search_tpdb_for_poster_groups(item_title, *args, **dict(kwargs, skip_id_lookup=True))
     if (result.get('best_group') or kwargs.get('tpdb_item_url') or not kwargs.get('tmdb_id')
             or not result.get('search_query') or result['search_query'] == item_title):
         return result
@@ -902,6 +906,7 @@ def _search_tpdb_for_poster_groups(
     require_exact=False,
     preferred_uploaders=None,
     imdb_id=None,
+    skip_id_lookup=False,
 ):
     """Return grouped TPDb poster candidates plus a flat show-poster list.
 
@@ -939,6 +944,7 @@ def _search_tpdb_for_poster_groups(
             max_posters,
             int(getattr(Config, "MAX_TPDB_SETS_PER_ITEM", Config.MAX_POSTERS_PER_ITEM))
         )
+        id_candidates = []
         for attempt in range(3):
             try:
                 with selenium_lock:
@@ -950,7 +956,7 @@ def _search_tpdb_for_poster_groups(
                         extract_title_year(search_query) or (str(item_year) if item_year else None))
                     expected_title = strip_title_year(search_query)
                     expected_title_norm = _comparison_title(expected_title, is_collection)
-                    id_candidates = [] if tpdb_item_url else _find_tpdb_items_by_id(
+                    id_candidates = [] if tpdb_item_url or skip_id_lookup else _find_tpdb_items_by_id(
                         item_type, imdb_id=imdb_id, tmdb_id=tmdb_id)
                     if tpdb_item_url:
                         candidates_to_check = [{
@@ -1365,6 +1371,7 @@ def _search_tpdb_for_poster_groups(
             'groups': groups,
             'best_group': best_group,
             'search_query': search_query,
+            'id_match': bool(id_candidates),
         }
     except Exception:
         logging.exception("Error during TPDb scraping: search_url=%s current_url=%s", search_url, _get_selenium_current_url())

@@ -168,6 +168,39 @@ class IdSearchFlowTests(TPDbIdSearchCase):
             'Some Other Film', item_year=2024, item_type='Movie', imdb_id='tt27489557', include_base64=False)
         self.assertEqual(result['best_group']['url'], ITEM_URL)
 
+    def bachelor_party_pages(self):
+        # TPDb links TMDb collection 1707799 to an empty page; an older duplicate has the posters.
+        id_url = ADVANCED + '?category=Collections&tmdb_id=1707799'
+        text_url = BASE + '/search?term=Bachelor+Party+Collection&section=collections'
+        empty_url, old_url = BASE + '/posters/4094767', BASE + '/posters/39146'
+        card = ('<a class="btn btn-dark-lighter flex-grow-1 text-truncate py-2 text-left position-relative" '
+                'href="{}">Bachelor Party Collection</a>')
+        pages = {
+            id_url: (empty_url, '<html><head><title>Bachelor Party Collection | The Poster Database (TPDb)</title></head>'
+                                '<body><p>Either no posters have been made for this item, or they\'ve all been filtered out.</p></body></html>'),
+            text_url: (text_url, '<html><head><title>Search</title></head><body>'
+                                 + card.format('/posters/39146') + card.format('/posters/4094767') + '</body></html>'),
+            old_url: (old_url, ITEM_PAGE),
+        }
+        return pages, id_url, text_url, old_url
+
+    def test_id_page_without_posters_falls_through_to_text_search(self):
+        pages, id_url, text_url, old_url = self.bachelor_party_pages()
+        driver = self.use_driver(pages)
+        result = scraper.search_tpdb_for_poster_groups(
+            'Bachelor Party Collection', item_type='Collection', tmdb_id='1707799', include_base64=False)
+        self.assertEqual(driver.visited, [id_url, text_url, old_url])
+        self.assertEqual(result['best_group']['url'], old_url)
+
+    def test_id_page_without_posters_and_duplicate_pages_need_review_in_batch_mode(self):
+        pages, id_url, text_url, _ = self.bachelor_party_pages()
+        driver = self.use_driver(pages)
+        result = scraper.search_tpdb_for_poster_groups(
+            'Bachelor Party Collection', item_type='Collection', tmdb_id='1707799',
+            require_exact=True, include_base64=False)
+        self.assertEqual(driver.visited, [id_url, text_url])
+        self.assertTrue(result['review_needed'])
+
     def test_wrong_collection_id_falls_back_to_the_jellyfin_title_in_batch_mode(self):
         # Jellyfin identified "[REC] Collection" as TMDb collection 140758 (the Decoys collection).
         id_url = ADVANCED + '?category=Collections&tmdb_id=140758'
