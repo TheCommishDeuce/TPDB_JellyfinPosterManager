@@ -519,6 +519,14 @@ def _poster_link_text(poster_link):
 
 
 def _extract_tpdb_season_key(poster_link):
+    # Movie and collection posters never belong to a season, however their title reads
+    # (e.g. "...Star Wars Holiday Special..."). TPDb types season posters as "show", so
+    # those still need the text checks below.
+    card = _poster_card_container(poster_link)
+    overlay = card.select_one('.overlay[data-poster-type]') if card else None
+    if overlay and overlay.get('data-poster-type', '').lower() in ('movie', 'collection'):
+        return None
+
     text = _poster_link_text(poster_link).lower()
     if re.search(r"\b(specials?|season\s+0|s00)\b", text):
         return "specials"
