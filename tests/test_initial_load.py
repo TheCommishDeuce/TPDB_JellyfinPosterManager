@@ -129,6 +129,48 @@ class HomePageCacheTests(OfflineCase):
             self.client.get(f"/item/{ITEM['id']}/seasons")
         self.assertEqual(self.get_items.call_count, 1)
 
+    def lookup(self, item_id):
+        """Open an item the way the picker does; return which threads fetched the library."""
+        fetched_by = []
+        listing = self.get_items.return_value
+
+        def fetch(**_kwargs):
+            fetched_by.append(threading.current_thread().name)
+            return listing
+        self.get_items.side_effect = fetch
+        with patch.object(scraper, 'get_jellyfin_seasons', return_value=[]):
+            response = self.client.get(f"/item/{item_id}/seasons")
+        for thread in threading.enumerate():
+            if thread.name == 'library-refresh':
+                thread.join(timeout=5)
+        self.get_items.side_effect = None
+        return response, fetched_by
+
+    def test_item_lookup_after_fresh_window_does_not_wait_for_jellyfin(self):
+        self.home()
+        self.now += app_module.LIBRARY_FRESH_SEC + 1
+        response, fetched_by = self.lookup(ITEM['id'])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(fetched_by, ['library-refresh'])
+
+    def test_item_lookup_after_an_upload_does_not_wait_for_jellyfin(self):
+        self.home()
+        with patch.object(scraper, 'jellyfin_upload_count', scraper.jellyfin_upload_count + 1):
+            response, fetched_by = self.lookup(ITEM['id'])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(fetched_by, ['library-refresh'])
+
+    def test_unknown_item_or_old_listing_is_fetched_before_answering(self):
+        self.home()
+        self.get_items.return_value = [ITEM, OTHER, dict(ITEM, id='new', title='Just Added')]
+        self.now += app_module.LIBRARY_FRESH_SEC + 1
+        response, fetched_by = self.lookup('new')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(fetched_by, [threading.current_thread().name])
+        self.now += app_module.LIBRARY_STALE_SEC + 1
+        response, fetched_by = self.lookup(ITEM['id'])
+        self.assertEqual(fetched_by, [threading.current_thread().name])
+
 
 class GzipTests(OfflineCase):
     def setUp(self):

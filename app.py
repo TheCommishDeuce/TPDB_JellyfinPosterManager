@@ -85,6 +85,17 @@ def create_app(config=None, store=None, job_queue=None):
         return load_library(0 if refresh else LIBRARY_FRESH_SEC)[1]
 
     def find_item(item_id):
+        # A lookup by ID doesn't need fresh image tags, so a listing from before the latest upload
+        # (or up to LIBRARY_STALE_SEC old) answers it at once and refreshes in the background;
+        # clicks must not wait on a full Jellyfin listing. Unknown IDs still get a fresh listing.
+        listing = library['items']
+        if listing is not None and time.monotonic() - library['fetched'] < LIBRARY_STALE_SEC:
+            item = next((item for item in listing if item['id'] == item_id), None)
+            if item:
+                age = library_age()
+                if age is None or age >= LIBRARY_FRESH_SEC:
+                    refresh_library_in_background()
+                return item
         item = next((item for item in items() if item['id'] == item_id), None)
         if not item:
             raise LookupError('Jellyfin item not found')
