@@ -767,6 +767,19 @@ def _tpdb_id_candidate(title, url, index, is_collection):
     }
 
 
+def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection):
+    """Whether an ID match's TPDb title is the Jellyfin item's own title (and year, for non-collections).
+
+    Jellyfin's provider IDs can be wrong (e.g. a "[REC] Collection" identified as the Decoys
+    collection), so unattended uploads only trust an ID match that also agrees on the title.
+    """
+    item_title_norm = _comparison_title(strip_title_year(item_title or ''), is_collection)
+    if not item_title_norm or candidate.get('match_title_norm') != item_title_norm:
+        return False
+    item_year = None if is_collection else (extract_title_year(item_title or '') or (str(item_year) if item_year else None))
+    return not (item_year and candidate.get('match_year') and candidate['match_year'] != item_year)
+
+
 def _load_tpdb_id_lookup_page(url, delay):
     """Load an advanced-search page; return False if TPDb never finished loading it."""
     selenium_driver.set_page_load_timeout(TPDB_ADVANCED_PAGE_LOAD_TIMEOUT_SEC)
@@ -950,7 +963,10 @@ def _search_tpdb_for_poster_groups(
                             'index': 0,
                         }]
                     elif id_candidates:
-                        if require_exact and len(id_candidates) != 1:
+                        if require_exact and (len(id_candidates) != 1 or not _id_match_agrees_with_item(
+                                id_candidates[0], item_title, item_year, is_collection)):
+                            logging.info("TPDb ID match for '%s' needs review: %s", item_title,
+                                         ', '.join(candidate['title'] for candidate in id_candidates[:3]))
                             return {'posters': [], 'groups': [], 'best_group': None,
                                     'review_needed': True, 'search_query': search_query}
                         candidates_to_check = id_candidates[:max_groups]

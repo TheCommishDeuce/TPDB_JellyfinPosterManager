@@ -147,6 +147,46 @@ class IdSearchFlowTests(TPDbIdSearchCase):
         result = self.search(imdb_id='tt27489557', require_exact=True)
         self.assertTrue(result['review_needed'])
 
+    def test_batch_mode_trusts_an_id_match_whose_title_agrees(self):
+        self.use_driver({IMDB_URL: (ITEM_URL, ITEM_PAGE)})
+        result = self.search(imdb_id='tt27489557', require_exact=True)
+        self.assertEqual(result['best_group']['url'], ITEM_URL)
+
+    def test_batch_mode_reviews_an_id_match_for_another_title_or_year(self):
+        for title, year in (('Some Other Film', 2024), ('Abigail', 2019)):
+            with self.subTest(title=title, year=year):
+                self.use_driver({IMDB_URL: (ITEM_URL, ITEM_PAGE)})
+                result = scraper.search_tpdb_for_poster_groups(
+                    title, item_year=year, item_type='Movie', imdb_id='tt27489557',
+                    require_exact=True, include_base64=False)
+                self.assertTrue(result['review_needed'])
+                self.assertIsNone(result['best_group'])
+
+    def test_picker_still_offers_an_id_match_for_another_title(self):
+        self.use_driver({IMDB_URL: (ITEM_URL, ITEM_PAGE)})
+        result = scraper.search_tpdb_for_poster_groups(
+            'Some Other Film', item_year=2024, item_type='Movie', imdb_id='tt27489557', include_base64=False)
+        self.assertEqual(result['best_group']['url'], ITEM_URL)
+
+    def test_wrong_collection_id_falls_back_to_the_jellyfin_title_in_batch_mode(self):
+        # Jellyfin identified "[REC] Collection" as TMDb collection 140758 (the Decoys collection).
+        id_url = ADVANCED + '?category=Collections&tmdb_id=140758'
+        text_url = BASE + '/search?term=%5BREC%5D+Collection&section=collections'
+        rec_url = BASE + '/posters/222'
+        driver = self.use_driver({
+            # The wrong page has posters of its own, so without the guard they would be uploaded.
+            id_url: (BASE + '/posters/111', ITEM_PAGE.replace('<title> Abigail (2024) |', '<title> Decoys Collection |', 1)),
+            text_url: (text_url, TEXT_RESULTS.replace('/posters/1842083', '/posters/222').replace('Abigail (2024)', '[REC] Collection')),
+            rec_url: (rec_url, ITEM_PAGE),
+        })
+        with patch.object(scraper, '_resolve_tpdb_search_query',
+                          side_effect=lambda title, **kwargs: 'Decoys Collection' if kwargs.get('tmdb_id') else title):
+            result = scraper.search_tpdb_for_poster_groups(
+                '[REC] Collection', item_year=2007, item_type='Collection', tmdb_id='140758',
+                require_exact=True, include_base64=False)
+        self.assertEqual(driver.visited, [id_url, text_url, rec_url])
+        self.assertEqual(result['best_group']['url'], rec_url)
+
 
 class IdLookupTests(TPDbIdSearchCase):
     def test_parses_item_redirect_fixture(self):
