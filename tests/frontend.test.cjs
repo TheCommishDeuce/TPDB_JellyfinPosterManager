@@ -54,6 +54,24 @@ test('a transient polling failure does not forget the active job', async () => {
     assert.equal(vm.runInContext('autoBatchPollTimer', context), 1);
 });
 
+test('the loading popup is armed before the picker cache check', async () => {
+    const context = browser();
+    const events = [];
+    let respond;
+    context.window = {};
+    context.startDelayedPosterSearchLoading = () => { events.push('loading armed'); return () => events.push('loading stopped'); };
+    context.applyPosterSearchData = () => events.push('posters shown');
+    context.fetch = (url) => {
+        events.push(url.includes('cache_only=true') ? 'cache check' : 'search');
+        return new Promise(resolve => { respond = () => resolve({ ok: true, json: async () => ({ from_cache: true, item: {} }) }); });
+    };
+    const pending = context.loadPosters('movie');
+    assert.deepEqual(events, ['loading armed', 'cache check']); // A slow cache check still shows the popup.
+    respond();
+    await pending;
+    assert.deepEqual(events, ['loading armed', 'cache check', 'loading stopped', 'posters shown']);
+});
+
 test('upload flows do not reload the page and discard other work', () => {
     const source = fs.readFileSync('static/js/app.js', 'utf8');
     assert.doesNotMatch(source, /window\.location\.reload/);

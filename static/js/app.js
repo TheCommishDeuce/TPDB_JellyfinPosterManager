@@ -691,15 +691,18 @@ async function loadPosters(itemId, setLimit = 3) {
     let stopLoading = null;
 
     try {
+        // Arm the (delayed) loading popup before the cache check too: that request can wait on
+        // Jellyfin, and the click should never look ignored.
+        stopLoading = startDelayedPosterSearchLoading(itemType);
         if (getTpdbPickerCachePreference()) {
             const cachedData = await fetchPostersForItem(itemId, setLimit, '', { cacheOnly: true });
             if (cachedData.from_cache) {
+                stopLoading();
                 applyPosterSearchData(cachedData, setLimit, '', true);
                 return;
             }
         }
 
-        stopLoading = startDelayedPosterSearchLoading(itemType);
         const data = await fetchPostersForItem(itemId, setLimit);
 
         if (stopLoading) stopLoading();

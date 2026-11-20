@@ -1,5 +1,6 @@
 """Flask adapters for the shared poster service and durable job queue."""
 import atexit
+import gzip
 import logging
 import os
 import signal
@@ -18,6 +19,11 @@ from safe_http import fetch_image, normalize_tpdb_page, origin, validate_image_u
 from state_store import StateStore, timestamp
 
 Config = scraper.Config
+LIBRARY_FRESH_SEC = 30
+LIBRARY_STALE_SEC = 600
+GZIP_MIMETYPES = {'text/html', 'application/json'}
+GZIP_MIN_BYTES = 1024
+GZIP_LEVEL = 5
 
 
 def create_app(config=None, store=None, job_queue=None):
@@ -44,17 +50,52 @@ def create_app(config=None, store=None, job_queue=None):
     app.extensions.update(poster_store=store, poster_service=service, poster_jobs=queue)
     if job_queue is None:
         atexit.register(queue.close)
-    library = {'items': [], 'expires': 0}
-    library_lock = threading.Lock()
+    # Listing a large Jellyfin library takes seconds. Reuse a listing for LIBRARY_FRESH_SEC; the home
+    # page also shows one up to LIBRARY_STALE_SEC old while it refreshes in the background. Items are
+    # kept in Jellyfin's order and sorted per request. An artwork upload makes the listing stale
+    # (its image tags change).
+    library = {'items': None, 'libraries': [], 'fetched': 0.0, 'uploads': None}
+    library_lock = threading.Lock()  # One Jellyfin fetch at a time.
+
+    def library_age():
+        if library['items'] is None or library['uploads'] != scraper.jellyfin_upload_count:
+            return None
+        return time.monotonic() - library['fetched']
+
+    def load_library(max_age=LIBRARY_FRESH_SEC):
+        with library_lock:
+            age = library_age()
+            if age is None or age >= max_age:
+                uploads = scraper.jellyfin_upload_count
+                libraries = scraper.get_jellyfin_libraries()
+                all_items = scraper.get_jellyfin_items(sort_by=None, libraries=libraries)
+                library.update(items=all_items, libraries=libraries, fetched=time.monotonic(), uploads=uploads)
+            return library['libraries'], library['items']
+
+    def refresh_library_in_background():
+        def refresh():
+            try:
+                load_library()
+            except Exception:
+                logging.exception("Background Jellyfin library refresh failed")
+        if not library_lock.locked():
+            threading.Thread(target=refresh, name='library-refresh', daemon=True).start()
 
     def items(refresh=False):
-        with library_lock:
-            if refresh or time.monotonic() >= library['expires']:
-                library['items'] = scraper.get_jellyfin_items()
-                library['expires'] = time.monotonic() + 30
-            return library['items']
+        return load_library(0 if refresh else LIBRARY_FRESH_SEC)[1]
 
     def find_item(item_id):
+        # A lookup by ID doesn't need fresh image tags, so a listing from before the latest upload
+        # (or up to LIBRARY_STALE_SEC old) answers it at once and refreshes in the background;
+        # clicks must not wait on a full Jellyfin listing. Unknown IDs still get a fresh listing.
+        listing = library['items']
+        if listing is not None and time.monotonic() - library['fetched'] < LIBRARY_STALE_SEC:
+            item = next((item for item in listing if item['id'] == item_id), None)
+            if item:
+                age = library_age()
+                if age is None or age >= LIBRARY_FRESH_SEC:
+                    refresh_library_in_background()
+                return item
         item = next((item for item in items() if item['id'] == item_id), None)
         if not item:
             raise LookupError('Jellyfin item not found')
@@ -159,6 +200,20 @@ def create_app(config=None, store=None, job_queue=None):
         if request_origin and origin(request_origin) != origin(request.host_url):
             return jsonify(error='Cross-origin requests are not allowed'), 403
 
+    @app.after_request
+    def gzip_response(response):
+        # The home page lists the whole library (tens of MB for big ones) and is very repetitive markup.
+        if (response.mimetype not in GZIP_MIMETYPES or response.direct_passthrough or response.is_streamed
+                or 'Content-Encoding' in response.headers
+                or 'gzip' not in request.headers.get('Accept-Encoding', '').lower()):
+            return response
+        data = response.get_data()
+        if len(data) >= GZIP_MIN_BYTES:
+            response.set_data(gzip.compress(data, compresslevel=GZIP_LEVEL))
+            response.headers['Content-Encoding'] = 'gzip'
+        response.vary.add('Accept-Encoding')
+        return response
+
     @app.errorhandler(Exception)
     def api_error(error):
         if isinstance(error, HTTPException):
@@ -188,10 +243,18 @@ def create_app(config=None, store=None, job_queue=None):
         error = None
         try:
             server_info = scraper.get_jellyfin_server_info()
-            libraries = scraper.get_jellyfin_libraries()
-            all_items = scraper.get_jellyfin_items(sort_by=sort_by, libraries=libraries)
-            with library_lock:
-                library.update(items=all_items, expires=time.monotonic() + 30)
+            age = library_age()
+            if age is not None and age < LIBRARY_STALE_SEC:
+                libraries, cached_items = library['libraries'], library['items']
+                if age >= LIBRARY_FRESH_SEC:
+                    refresh_library_in_background()
+            else:
+                libraries, cached_items = load_library()
+            if libraries:
+                all_items = scraper.sort_jellyfin_items(list(cached_items), sort_by)
+            else:
+                # Without libraries Jellyfin does the sorting, so the order depends on sort_by.
+                all_items = scraper.get_jellyfin_items(sort_by=sort_by, libraries=libraries)
             if not server_info.get('connected', True):
                 error = 'Could not connect to Jellyfin. Check the server URL and API key.'
         except Exception as exc:
