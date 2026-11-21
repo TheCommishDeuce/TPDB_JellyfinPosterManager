@@ -672,7 +672,8 @@ def _resolve_tpdb_search_query(item_title, item_type=None, tmdb_id=None):
     if tmdb_id and tmdb_type:
         try:
             tmdb_response = requests.get(
-                f"https://api.themoviedb.org/3/{tmdb_type}/{tmdb_id}?api_key={Config.TMDB_API_KEY}&language=en-US",
+                f"https://api.themoviedb.org/3/{tmdb_type}/{tmdb_id}",
+                params={"api_key": Config.TMDB_API_KEY, "language": "en-US"},
                 timeout=10
             )
             tmdb_response.raise_for_status()
@@ -691,7 +692,9 @@ def _resolve_tpdb_search_query(item_title, item_type=None, tmdb_id=None):
                 search_query = f'{tmdb_title} ({year})' if year else tmdb_title
                 logging.debug(f"Using TMDB title for TPDb search: {search_query}")
         except Exception as e:
-            logging.warning(f"TMDB lookup failed for {item_title} ({item_type}): {e}; falling back to Jellyfin title.")
+            # requests puts the full URL, API key included, in its error messages.
+            error = str(e).replace(Config.TMDB_API_KEY, "<redacted>") if Config.TMDB_API_KEY else str(e)
+            logging.warning(f"TMDB lookup failed for {item_title} ({item_type}): {error}; falling back to Jellyfin title.")
     return search_query
 
 
