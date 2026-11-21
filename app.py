@@ -1,6 +1,7 @@
 """Flask adapters for the shared poster service and durable job queue."""
 import atexit
 import logging
+import logging.handlers
 import os
 import signal
 import threading
@@ -477,6 +478,11 @@ def create_app(config=None, store=None, job_queue=None):
     return app
 
 
+# app.log rotates instead of growing forever: at most LOG_MAX_BYTES * (LOG_BACKUP_COUNT + 1) on disk.
+LOG_MAX_BYTES = 10 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
+
+
 def handle_shutdown_signal(signum, frame):
     logging.info('Shutdown requested by signal %s', signum)
     raise SystemExit(0)
@@ -486,7 +492,8 @@ def main():
     os.makedirs(Config.LOG_DIR, exist_ok=True)
     logging.basicConfig(level=logging.DEBUG if Config.DEBUG else logging.INFO,
                         format='%(asctime)s %(levelname)s %(message)s',
-                        handlers=[logging.StreamHandler(), logging.FileHandler(os.path.join(Config.LOG_DIR, 'app.log'))])
+                        handlers=[logging.StreamHandler(), logging.handlers.RotatingFileHandler(
+                            os.path.join(Config.LOG_DIR, 'app.log'), maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT)])
     app = create_app()
     host = getattr(Config, 'WEB_HOST', '127.0.0.1')
     if host not in ('localhost', '127.0.0.1', '::1'):
