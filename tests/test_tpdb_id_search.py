@@ -172,6 +172,15 @@ class IdSearchFlowTests(TPDbIdSearchCase):
             require_exact=True, include_base64=False)
         self.assertEqual(result['best_group']['url'], ITEM_URL)
 
+    def test_batch_mode_allows_an_id_match_with_a_country_tag_or_possessive(self):
+        for title in ('Abigail (US)', "Universal's Abigail"):
+            with self.subTest(title=title):
+                self.use_driver({IMDB_URL: (ITEM_URL, ITEM_PAGE)})
+                result = scraper.search_tpdb_for_poster_groups(
+                    title, item_year=2024, item_type='Movie', imdb_id='tt27489557',
+                    require_exact=True, include_base64=False)
+                self.assertEqual(result['best_group']['url'], ITEM_URL)
+
     def test_batch_mode_reviews_an_id_match_for_another_title_or_year(self):
         for title, year in (('Some Other Film', 2024), ('Abigail', 2019), ('Abigail: Part Two', 2024)):
             with self.subTest(title=title, year=year):
