@@ -776,9 +776,11 @@ def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection):
     Jellyfin's provider IDs can be wrong (e.g. a "[REC] Collection" identified as the Decoys
     collection), so unattended uploads only trust an ID match that also agrees on the title.
     The year may be one off: TPDb often uses the wide-release year where Jellyfin has the premiere's.
+    A series prefix may be missing on TPDb ("The Simpsons: The Good, the Bart, and the Loki").
     """
-    item_title_norm = _comparison_title(strip_title_year(item_title or ''), is_collection)
-    if not item_title_norm or candidate.get('match_title_norm') != item_title_norm:
+    titles = {_comparison_title(strip_title_year(title), is_collection)
+              for title in (item_title or '', (item_title or '').split(': ', 1)[-1])} - {''}
+    if candidate.get('match_title_norm') not in titles:
         return False
     item_year = None if is_collection else (extract_title_year(item_title or '') or (str(item_year) if item_year else None))
     if not (item_year and candidate.get('match_year')):
