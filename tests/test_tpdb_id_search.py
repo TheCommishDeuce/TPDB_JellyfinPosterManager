@@ -17,6 +17,11 @@ TMDB_URL = ADVANCED + '?category=Movies&tmdb_id=1111873'
 TEXT_URL = BASE + '/search?term=Abigail&section=movies'
 ITEM_URL = BASE + '/posters/1842083'
 LOGIN_URL = BASE + '/login'
+PROFILE_URL = BASE + '/user/example'
+LOGGED_IN_PAGE = (
+    '<html><body><div class="dropdown-menu dropdown-menu-right" aria-labelledby="navbarDropdown">'
+    f'<a href="{PROFILE_URL}">Profile</a><a href="{BASE}/logout">Sign Out</a></div></body></html>'
+)
 
 
 def fixture(name):
@@ -77,6 +82,7 @@ class TPDbIdSearchCase(unittest.TestCase):
         for patcher in (
             patch.object(scraper.time, 'sleep'),
             patch.object(scraper, 'tpdb_advanced_search_available', True),
+            patch.object(scraper, 'tpdb_account_checked', True),
             patch.object(scraper, '_resolve_tpdb_search_query', side_effect=lambda title, **kwargs: title),
             patch.object(scraper.Config, 'TPDB_BASE_URL', BASE),
             patch.object(scraper.Config, 'TPDB_SEARCH_URL_TEMPLATE', BASE + '/search?term={query}'),
@@ -288,6 +294,37 @@ class IdLookupTests(TPDbIdSearchCase):
         self.assertFalse(scraper.tpdb_advanced_search_available)
         self.assertEqual(scraper._find_tpdb_items_by_id('Movie', imdb_id='tt27489557'), [])
         self.assertEqual(driver.visited, [IMDB_URL])
+
+    def account_driver(self, profile_badge):
+        badge = f'<img class="img-badge-x img-badge" title="{profile_badge}">' if profile_badge else ''
+        driver = self.use_driver({PROFILE_URL: (PROFILE_URL, f'<html><body>{badge}</body></html>'),
+                                  IMDB_URL: (ITEM_URL, ITEM_PAGE)})
+        driver.page_source = LOGGED_IN_PAGE
+        return driver
+
+    def test_pro_badge_on_the_profile_allows_id_search(self):
+        driver = self.account_driver('Pro Subscriber')
+        with patch.object(scraper, 'tpdb_account_checked', False):
+            candidates = scraper._find_tpdb_items_by_id('Movie', imdb_id='tt27489557')
+        self.assertEqual(driver.visited, [PROFILE_URL, IMDB_URL])
+        self.assertEqual(candidates[0]['url'], ITEM_URL)
+
+    def test_no_badge_skips_id_search_for_the_session(self):
+        driver = self.account_driver(None)
+        with patch.object(scraper, 'tpdb_account_checked', False):
+            self.assertEqual(scraper._find_tpdb_items_by_id('Movie', imdb_id='tt27489557'), [])
+            self.assertFalse(scraper.tpdb_advanced_search_available)
+            self.assertEqual(scraper._find_tpdb_items_by_id('Movie', imdb_id='tt27489557'), [])
+        self.assertEqual(driver.visited, [PROFILE_URL])
+
+    def test_unknown_badge_or_missing_profile_link_still_tries_id_search(self):
+        for badge, page in (('Top Uploader', LOGGED_IN_PAGE), ('Pro Subscriber', '<html></html>')):
+            with self.subTest(badge=badge):
+                driver = self.account_driver(badge)
+                driver.page_source = page
+                with patch.object(scraper, 'tpdb_account_checked', False):
+                    self.assertEqual(scraper._find_tpdb_items_by_id('Movie', imdb_id='tt27489557')[0]['url'], ITEM_URL)
+                self.assertEqual(driver.visited[-1], IMDB_URL)
 
     def test_malformed_ids_are_not_looked_up(self):
         driver = self.use_driver({})

@@ -50,6 +50,8 @@ selenium_driver = None
 selenium_lock = threading.RLock()
 # Advanced (ID) search needs a TPDb Pro Lite/Pro account; cleared for the process once TPDb refuses it.
 tpdb_advanced_search_available = True
+# Checked once per process from the profile badge, before the first ID search.
+tpdb_account_checked = False
 
 SEARCH_RESULT_SELECTOR = "a.btn.btn-dark-lighter.flex-grow-1.text-truncate.py-2.text-left.position-relative"
 ITEM_POSTER_SELECTOR = "a.bg-transparent.border-0.text-white"
@@ -807,6 +809,28 @@ def _load_tpdb_id_lookup_page(url, delay):
     return True
 
 
+def _tpdb_account_has_pro():
+    """Whether the logged-in account has a TPDb Pro badge: True, False, or None if it can't tell.
+
+    The username dropdown links to the profile, which shows the badge (e.g. "Pro Subscriber").
+    Call with ``selenium_lock`` held, while a logged-in TPDb page is open.
+    """
+    soup = BeautifulSoup(selenium_driver.page_source or '', 'html.parser')
+    profile = next((link for link in soup.select('.dropdown-menu[aria-labelledby="navbarDropdown"] a')
+                    if link.get_text(strip=True) == 'Profile'), None)
+    profile_url = _tpdb_absolute_url(profile.get('href')) if profile else None
+    if not profile_url:
+        return None
+    _open_tpdb_page_with_delay(profile_url)
+    if _is_login_url(selenium_driver.current_url):
+        raise TPDBSessionExpired("TPDb session expired while loading the profile page.")
+    titles = [(badge.get('title') or '').lower() for badge in
+              BeautifulSoup(selenium_driver.page_source or '', 'html.parser').select('img.img-badge')]
+    if any('pro' in title for title in titles):
+        return True
+    return False if not titles else None  # An unknown badge: let the ID search find out.
+
+
 def _find_tpdb_items_by_id(item_type, imdb_id=None, tmdb_id=None):
     """Look an item up by IMDb ID, then TMDb ID, using TPDb's advanced search.
 
@@ -815,7 +839,7 @@ def _find_tpdb_items_by_id(item_type, imdb_id=None, tmdb_id=None):
     matches, there are no usable IDs, or the account can't use advanced search.
     Call with ``selenium_lock`` held.
     """
-    global tpdb_advanced_search_available
+    global tpdb_advanced_search_available, tpdb_account_checked
     category = TPDB_ADVANCED_CATEGORIES.get(item_type)
     lookups = []
     if imdb_id and re.fullmatch(r"tt\d+", str(imdb_id).strip()):
@@ -824,6 +848,20 @@ def _find_tpdb_items_by_id(item_type, imdb_id=None, tmdb_id=None):
         lookups.append(('tmdb_id', str(tmdb_id).strip()))
     if not tpdb_advanced_search_available or not category or not lookups:
         return []
+    if not tpdb_account_checked:
+        tpdb_account_checked = True
+        try:
+            has_pro = _tpdb_account_has_pro()
+        except TPDBSessionExpired:
+            raise
+        except Exception as error:
+            logging.warning("Could not check the TPDb account's Pro badge: %s", error)
+            has_pro = None
+        if has_pro is False:
+            tpdb_advanced_search_available = False
+            logging.info("TPDb account has no Pro badge; using text search only.")
+            return []
+        logging.info("TPDb account %s; trying ID search.", "has a Pro badge" if has_pro else "badge unknown")
 
     is_collection = item_type == "Collection"
     pages_loaded = 0
