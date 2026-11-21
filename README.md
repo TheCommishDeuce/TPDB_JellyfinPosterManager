@@ -30,6 +30,7 @@ A modern web application for automatically finding and uploading high-quality po
 - Live progress, cancellation between individual uploads, saved results, and explicit resume after interruption
 - Separate primary/season outcomes; retries reuse only failed targets and their original posters
 - Uncertain automatic matches remain for manual review instead of replacing artwork
+- **Preferred uploaders** (Auto-Get settings, one TPDb username per line, best first): their posters are picked first, and every page of a TPDb entry is read to find them
 
 ### 🎨 **Manual Selection**
 - Browse multiple poster options for each item
