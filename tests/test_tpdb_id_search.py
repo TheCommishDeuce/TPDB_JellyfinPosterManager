@@ -1,6 +1,6 @@
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from bs4 import BeautifulSoup
 from selenium.common.exceptions import TimeoutException
@@ -8,6 +8,9 @@ from selenium.common.exceptions import TimeoutException
 import poster_scraper as scraper
 from picker_cache import PickerCache
 from tests.test_workflows import OfflineCase
+
+# The search tests patch this out; keep the real one for the TMDb lookup test.
+resolve_tpdb_search_query = scraper._resolve_tpdb_search_query
 
 FIXTURES = os.path.join(os.path.dirname(__file__), 'fixtures')
 BASE = 'https://theposterdb.com'
@@ -180,6 +183,23 @@ class IdSearchFlowTests(TPDbIdSearchCase):
                     title, item_year=2024, item_type='Movie', imdb_id='tt27489557',
                     require_exact=True, include_base64=False)
                 self.assertEqual(result['best_group']['url'], ITEM_URL)
+
+    def test_batch_mode_allows_an_id_match_when_the_title_is_one_of_tmdbs_names(self):
+        for names, needs_review in (({'Abigail', 'Magic Forest'}, False), ({'Abigail', 'Something Else'}, True)):
+            with self.subTest(names=names), patch.dict(scraper.tmdb_names, {('movie', '1111873'): names}, clear=True):
+                self.use_driver({IMDB_URL: (ITEM_URL, ITEM_PAGE)})
+                result = scraper.search_tpdb_for_poster_groups(
+                    'Magic Forest', item_year=2024, item_type='Movie', imdb_id='tt27489557', tmdb_id='1111873',
+                    require_exact=True, include_base64=False)
+                self.assertEqual(result.get('review_needed', False), needs_review)
+
+    def test_tmdb_names_come_from_the_search_title_lookup(self):
+        response = Mock(json=Mock(return_value={'title': 'Abigail', 'original_title': 'Abigail', 'release_date': '2024-04-18',
+                                                'alternative_titles': {'titles': [{'title': 'Magic Forest'}]}}))
+        with patch.object(scraper.requests, 'get', return_value=response) as get, patch.dict(scraper.tmdb_names, clear=True):
+            resolve_tpdb_search_query('Abigail', item_type='Movie', tmdb_id='1111873')
+            self.assertEqual(scraper.tmdb_names[('movie', '1111873')], {'Abigail', 'Magic Forest'})
+        self.assertIn('append_to_response=alternative_titles', get.call_args.args[0])
 
     def test_batch_mode_reviews_an_id_match_for_another_title_or_year(self):
         for title, year in (('Some Other Film', 2024), ('Abigail', 2019), ('Abigail: Part Two', 2024)):

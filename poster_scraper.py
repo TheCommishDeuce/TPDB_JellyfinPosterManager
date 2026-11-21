@@ -52,6 +52,8 @@ selenium_lock = threading.RLock()
 tpdb_advanced_search_available = True
 # Checked once per process from the profile badge, before the first ID search.
 tpdb_account_checked = False
+# TMDb's names for an item (title, original title, alternative titles), kept from the search-title lookup.
+tmdb_names = {}
 
 SEARCH_RESULT_SELECTOR = "a.btn.btn-dark-lighter.flex-grow-1.text-truncate.py-2.text-left.position-relative"
 ITEM_POSTER_SELECTOR = "a.bg-transparent.border-0.text-white"
@@ -681,12 +683,22 @@ def _resolve_tpdb_search_query(item_title, item_type=None, tmdb_id=None):
     search_query = item_title
     if tmdb_id and tmdb_type:
         try:
+            # Alternative titles come in the same response, for the ID title check.
+            extra = "&append_to_response=alternative_titles" if tmdb_type in ("movie", "tv") else ""
             tmdb_response = requests.get(
-                f"https://api.themoviedb.org/3/{tmdb_type}/{tmdb_id}?api_key={Config.TMDB_API_KEY}&language=en-US",
+                f"https://api.themoviedb.org/3/{tmdb_type}/{tmdb_id}?api_key={Config.TMDB_API_KEY}&language=en-US{extra}",
                 timeout=10
             )
             tmdb_response.raise_for_status()
             tmdb_data = tmdb_response.json()
+            alternatives = tmdb_data.get("alternative_titles") or {}
+            tmdb_names[(tmdb_type, str(tmdb_id))] = {
+                name for name in [
+                    tmdb_data.get("name"), tmdb_data.get("title"),
+                    tmdb_data.get("original_name"), tmdb_data.get("original_title"),
+                    *(entry.get("title") for entry in alternatives.get("results") or alternatives.get("titles") or []),
+                ] if name
+            }
             if tmdb_type == "tv":
                 tmdb_title = tmdb_data.get("name")
                 year = (tmdb_data.get("first_air_date") or "")[:4]
@@ -770,7 +782,7 @@ def _tpdb_id_candidate(title, url, index, is_collection):
     }
 
 
-def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection):
+def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection, other_names=()):
     """Whether an ID match's TPDb title is the Jellyfin item's own title (and year, for non-collections).
 
     Jellyfin's provider IDs can be wrong (e.g. a "[REC] Collection" identified as the Decoys
@@ -779,6 +791,8 @@ def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection):
     A series prefix may be missing on TPDb ("The Simpsons: The Good, the Bart, and the Loki"), and
     either side may add a country tag ("Accused (US)"), a ": The Series" suffix ("Blade: The Series"),
     or a possessive of up to three words ("Disney's Adventures of ...", "Anne Rice's Mayfair Witches").
+    ``other_names`` are TMDb's names for the ID: the Jellyfin title may be any of them ("Blade" is a
+    listed title of "Blade: The Series"), as long as the TPDb title is one of them too.
     """
     def variants(title):
         title = re.sub(r"\s*\((?:US|UK|AU|CA|NZ)\)\s*$", "", strip_title_year(title or ''))
@@ -786,7 +800,9 @@ def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection):
         names = {_comparison_title(name, is_collection) for name in (title, title.split(': ', 1)[-1])}
         return {re.sub(r"^(?:\w+ ){0,2}\w+ s ", "", name) for name in names} | names
 
-    if not (variants(item_title) - {''}) & variants(candidate.get('title')):
+    item_names, tpdb_names = variants(item_title) - {''}, variants(candidate.get('title'))
+    known_names = set().union(*(variants(name) for name in other_names)) - {''}
+    if not item_names & tpdb_names and not (item_names & known_names and tpdb_names & known_names):
         return False
     item_year = None if is_collection else (extract_title_year(item_title or '') or (str(item_year) if item_year else None))
     if not (item_year and candidate.get('match_year')):
@@ -1024,8 +1040,10 @@ def _search_tpdb_for_poster_groups(
                             'index': 0,
                         }]
                     elif id_candidates:
+                        tmdb_type = {"Movie": "movie", "Series": "tv", "Collection": "collection"}.get(item_type)
                         if require_exact and (len(id_candidates) != 1 or not _id_match_agrees_with_item(
-                                id_candidates[0], item_title, item_year, is_collection)):
+                                id_candidates[0], item_title, item_year, is_collection,
+                                tmdb_names.get((tmdb_type, str(tmdb_id)), ()))):
                             logging.info("TPDb ID match for '%s' needs review: %s", item_title,
                                          ', '.join(candidate['title'] for candidate in id_candidates[:3]))
                             return {'posters': [], 'groups': [], 'best_group': None,
