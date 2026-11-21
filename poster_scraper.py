@@ -420,7 +420,11 @@ def fetch_tpdb_image(url, interval=TPDB_IMAGE_MIN_INTERVAL_SEC, wait_if_paused=F
 
 def download_image_with_cookies(url, save_path):
     try:
-        image_bytes, _ = fetch_tpdb_image(url, interval=TPDB_UPLOAD_IMAGE_INTERVAL_SEC, wait_if_paused=True)
+        try:
+            image_bytes, _ = fetch_tpdb_image(url, interval=TPDB_UPLOAD_IMAGE_INTERVAL_SEC, wait_if_paused=True)
+        except TPDBRateLimited:
+            # The 429 set the pause; wait it out and try this poster once more instead of failing it.
+            image_bytes, _ = fetch_tpdb_image(url, interval=TPDB_UPLOAD_IMAGE_INTERVAL_SEC, wait_if_paused=True)
         os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
         # Uploads are JPEG for compatibility with every Jellyfin client. Upright JPEGs are
         # stored byte-for-byte; other formats (WebP, AVIF, PNG, ...) are converted once.

@@ -115,6 +115,12 @@ class TPDbImagePacingTests(OfflineCase):
             # Once the pause is over, thumbnails load again.
             self.assertEqual(self.client.get('/thumbnail?url=' + IMAGE_URL).status_code, 200)
 
+    def test_an_upload_that_hits_the_rate_limit_waits_and_tries_again(self):
+        with patch.object(scraper, 'fetch_image', side_effect=[rate_limited('5'), (jpeg_bytes(), 'image/jpeg')]) as fetch:
+            self.assertTrue(scraper.download_image_with_cookies(IMAGE_URL, os.path.join(self.temp.name, 'p.jpg')))
+        self.assertEqual(fetch.call_count, 2)
+        self.assertGreaterEqual(sum(self.sleeps), 5)
+
     def test_rate_limited_upload_reports_the_rate_limit(self):
         with patch.object(scraper, 'fetch_image', side_effect=rate_limited('bogus')):
             with self.assertRaises(scraper.TPDBRateLimited):
