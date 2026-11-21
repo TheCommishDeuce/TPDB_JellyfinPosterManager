@@ -54,6 +54,14 @@ test('a transient polling failure does not forget the active job', async () => {
     assert.equal(vm.runInContext('autoBatchPollTimer', context), 1);
 });
 
+test('the processed tooltip lists season posters as sorted ranges', () => {
+    const context = browser();
+    context.formatLogTimestamp = () => 'now';
+    const tooltip = context.formatProcessedItemTooltip({ poster_targets: { series_poster: true,
+        season_titles: ['Season 36', 'Season 35', 'Season 34', 'Season 33', 'Specials', 'Season 8', 'Season 1'] } });
+    assert.equal(tooltip, 'Series poster\nSeason posters: 1, 8, 33\u201336, Specials\nProcessed now');
+});
+
 test('upload flows do not reload the page and discard other work', () => {
     const source = fs.readFileSync('static/js/app.js', 'utf8');
     assert.doesNotMatch(source, /window\.location\.reload/);
