@@ -288,6 +288,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     if (cm && bootstrap?.Modal) confirmModal = new bootstrap.Modal(cm);
 
+    // Jobs first, so the job panel doesn't queue behind the other startup requests.
+    resumeAutoBatchProgressOnLoad();
+
     // Initialize counters/buttons
     updateUploadAllButton();
     initManualQueueControls();
@@ -302,7 +305,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const libraryFilter = document.getElementById('libraryFilter');
     if (libraryFilter) libraryFilter.value = urlParams.get('library') || '';
     filterContent(urlParams.get('type') || 'all', false);
-    resumeAutoBatchProgressOnLoad();
 
     console.log('Jellyfin Poster Manager initialized');
 });
@@ -691,15 +693,18 @@ async function loadPosters(itemId, setLimit = 3) {
     let stopLoading = null;
 
     try {
+        // Arm the (delayed) loading popup before the cache check too: that request can wait on
+        // Jellyfin, and the click should never look ignored.
+        stopLoading = startDelayedPosterSearchLoading(itemType);
         if (getTpdbPickerCachePreference()) {
             const cachedData = await fetchPostersForItem(itemId, setLimit, '', { cacheOnly: true });
             if (cachedData.from_cache) {
+                stopLoading();
                 applyPosterSearchData(cachedData, setLimit, '', true);
                 return;
             }
         }
 
-        stopLoading = startDelayedPosterSearchLoading(itemType);
         const data = await fetchPostersForItem(itemId, setLimit);
 
         if (stopLoading) stopLoading();

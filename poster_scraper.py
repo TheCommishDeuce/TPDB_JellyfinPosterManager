@@ -15,6 +15,7 @@ import re
 import os
 import hashlib
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import threading
 from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
@@ -1338,6 +1339,9 @@ def upload_image_to_jellyfin_improved(item_id, image_path):
         response = requests.post(url, headers=headers, data=encoded_data, timeout=30)
 
         if response.status_code in [200, 204]:
+            global jellyfin_upload_count
+            jellyfin_upload_count += 1
+            jellyfin_uploaded_items[item_id] = jellyfin_upload_count
             logging.info("Artwork uploaded successfully.")
             return True
 
@@ -1360,8 +1364,17 @@ def _parse_jellyfin_datetime(value):
         return None
 
 
-JELLYFIN_PAGE_SIZE = 200
+# Jellyfin re-runs the whole query for every page, so ask for everything at once; servers that
+# cap the page size (e.g. Silo) still get paged by _jellyfin_get_all_items.
+JELLYFIN_PAGE_SIZE = 10000
 JELLYFIN_MAX_PAGES = 1000
+JELLYFIN_MAX_PARALLEL_LIBRARIES = 4
+# Only the Primary image tag is used, and per-user data isn't; leaving them out halves the payload.
+JELLYFIN_ITEM_QUERY_OPTIONS = "&EnableImageTypes=Primary&ImageTypeLimit=1&EnableUserData=false"
+# Bumped on every successful artwork upload. Each uploaded item keeps the count from its latest upload,
+# so a cached library listing knows which cards have new artwork since it was fetched.
+jellyfin_upload_count = 0
+jellyfin_uploaded_items = {}
 
 
 def _jellyfin_get_all_items(url, headers, page_size=JELLYFIN_PAGE_SIZE):
@@ -1616,6 +1629,21 @@ def _include_collections():
     return bool(getattr(Config, 'INCLUDE_COLLECTIONS', False))
 
 
+def sort_jellyfin_items(items, sort_by):
+    """Sort built items in place the way the grid orders them; ``None`` keeps Jellyfin's order."""
+    if sort_by is None:
+        return items
+    if sort_by == 'library':
+        items.sort(key=lambda x: ((x.get('library_name') or '').lower(), (x.get('title') or '').lower()))
+    elif sort_by == 'year':
+        items.sort(key=lambda x: ((x.get('year') or 0), (x.get('title') or '').lower()))
+    elif sort_by == 'date_added':
+        items.sort(key=lambda x: _parse_jellyfin_datetime(x['date_created']) or datetime.min, reverse=True)
+    else:
+        items.sort(key=lambda x: (x.get('title') or '').lower())
+    return items
+
+
 def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
     """
     Fetch a list of movies and TV shows from Jellyfin with thumbnail URLs.
@@ -1674,6 +1702,7 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
             include_types = {'movies': "Movie", 'series': "Series", 'collections': "BoxSet"}.get(item_type, "Movie,Series,BoxSet")
             seen_ids = set()
 
+            library_queries = []
             for library in libraries:
                 library_types = include_types
                 if library.get('type') == 'boxsets':
@@ -1681,28 +1710,28 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
                     if 'BoxSet' not in include_types:
                         continue
                     library_types = "BoxSet"
-                library_items_url = (
+                library_queries.append((library, (
                     f"{Config.JELLYFIN_URL}/Items"
                     f"?ParentId={library['id']}"
                     f"&IncludeItemTypes={library_types}&Recursive=true"
-                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,Type,ParentId,ChildCount"
+                    f"&Fields=Id,Name,ProductionYear,ImageTags,ProviderIds,DateCreated,Type,ParentId,ChildCount{JELLYFIN_ITEM_QUERY_OPTIONS}"
                     f"&SortBy=SortName&SortOrder=Ascending"
-                )
-                for item in _jellyfin_get_all_items(library_items_url, headers):
+                )))
+
+            # Each library is one slow query on the Jellyfin side, so fetch them side by side.
+            # Results are merged in library order, so de-duplication is the same as fetching serially.
+            library_results = []
+            if library_queries:
+                with ThreadPoolExecutor(max_workers=min(len(library_queries), JELLYFIN_MAX_PARALLEL_LIBRARIES)) as pool:
+                    library_results = list(pool.map(lambda query: _jellyfin_get_all_items(query[1], headers), library_queries))
+            for (library, _), library_items in zip(library_queries, library_results):
+                for item in library_items:
                     if item.get('Id') in seen_ids:
                         continue
                     seen_ids.add(item.get('Id'))
                     items.append(build_item(item, _jellyfin_type_label(item), fallback_library=library))
 
-            if sort_by == 'library':
-                items.sort(key=lambda x: ((x.get('library_name') or '').lower(), (x.get('title') or '').lower()))
-            elif sort_by == 'year':
-                items.sort(key=lambda x: ((x.get('year') or 0), (x.get('title') or '').lower()))
-            elif sort_by == 'date_added':
-                items.sort(key=lambda x: parse_date(x['date_created']), reverse=True)
-            else:
-                items.sort(key=lambda x: (x.get('title') or '').lower())
-
+            sort_jellyfin_items(items, sort_by)
             logging.info(f"Total items fetched: {len(items)}")
             return items
 
@@ -1711,7 +1740,7 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
             all_items_url = (
                 f"{Config.JELLYFIN_URL}/Items"
                 f"?IncludeItemTypes=Movie,Series{',BoxSet' if _include_collections() else ''}&Recursive=true"
-                f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,Type,ParentId,ChildCount"
+                f"&Fields=Id,Name,ProductionYear,ImageTags,ProviderIds,DateCreated,Type,ParentId,ChildCount{JELLYFIN_ITEM_QUERY_OPTIONS}"
                 f"&SortBy={sort_by_param}&SortOrder={sort_order}"
             )
             for item in _jellyfin_get_all_items(all_items_url, headers):
@@ -1725,7 +1754,7 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
                 movies_url = (
                     f"{Config.JELLYFIN_URL}/Items"
                     f"?IncludeItemTypes=Movie&Recursive=true"
-                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,ParentId"
+                    f"&Fields=Id,Name,ProductionYear,ImageTags,ProviderIds,DateCreated,ParentId{JELLYFIN_ITEM_QUERY_OPTIONS}"
                     f"&SortBy={sort_by_param}&SortOrder={sort_order}"
                 )
                 for item in _jellyfin_get_all_items(movies_url, headers):
@@ -1736,7 +1765,7 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
                 shows_url = (
                     f"{Config.JELLYFIN_URL}/Items"
                     f"?IncludeItemTypes=Series&Recursive=true"
-                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,ParentId,ChildCount"
+                    f"&Fields=Id,Name,ProductionYear,ImageTags,ProviderIds,DateCreated,ParentId,ChildCount{JELLYFIN_ITEM_QUERY_OPTIONS}"
                     f"&SortBy={sort_by_param}&SortOrder={sort_order}"
                 )
                 for item in _jellyfin_get_all_items(shows_url, headers):
@@ -1747,7 +1776,7 @@ def get_jellyfin_items(item_type=None, sort_by='name', libraries=None):
                 collections_url = (
                     f"{Config.JELLYFIN_URL}/Items"
                     f"?IncludeItemTypes=BoxSet&Recursive=true"
-                    f"&Fields=Id,Name,ProductionYear,Path,ImageTags,ProviderIds,DateCreated,ParentId"
+                    f"&Fields=Id,Name,ProductionYear,ImageTags,ProviderIds,DateCreated,ParentId{JELLYFIN_ITEM_QUERY_OPTIONS}"
                     f"&SortBy={sort_by_param}&SortOrder={sort_order}"
                 )
                 for item in _jellyfin_get_all_items(collections_url, headers):
