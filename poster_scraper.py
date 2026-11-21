@@ -777,11 +777,12 @@ def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection):
     collection), so unattended uploads only trust an ID match that also agrees on the title.
     The year may be one off: TPDb often uses the wide-release year where Jellyfin has the premiere's.
     A series prefix may be missing on TPDb ("The Simpsons: The Good, the Bart, and the Loki"), and
-    either side may add a country tag ("Accused (US)") or a possessive of up to three words
-    ("Disney's Adventures of ...", "Anne Rice's Mayfair Witches").
+    either side may add a country tag ("Accused (US)"), a ": The Series" suffix ("Blade: The Series"),
+    or a possessive of up to three words ("Disney's Adventures of ...", "Anne Rice's Mayfair Witches").
     """
     def variants(title):
         title = re.sub(r"\s*\((?:US|UK|AU|CA|NZ)\)\s*$", "", strip_title_year(title or ''))
+        title = re.sub(r"\s*[:-]\s*The Series$", "", title, flags=re.IGNORECASE)
         names = {_comparison_title(name, is_collection) for name in (title, title.split(': ', 1)[-1])}
         return {re.sub(r"^(?:\w+ ){0,2}\w+ s ", "", name) for name in names} | names
 

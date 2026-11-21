@@ -173,7 +173,7 @@ class IdSearchFlowTests(TPDbIdSearchCase):
         self.assertEqual(result['best_group']['url'], ITEM_URL)
 
     def test_batch_mode_allows_an_id_match_with_a_country_tag_or_possessive(self):
-        for title in ('Abigail (US)', "Universal's Abigail", "Radio Silence's Abigail"):
+        for title in ('Abigail (US)', "Universal's Abigail", "Radio Silence's Abigail", 'Abigail: The Series'):
             with self.subTest(title=title):
                 self.use_driver({IMDB_URL: (ITEM_URL, ITEM_PAGE)})
                 result = scraper.search_tpdb_for_poster_groups(
