@@ -1,4 +1,5 @@
 import gzip
+import re
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -116,6 +117,18 @@ class HomePageCacheTests(OfflineCase):
             self.get_items.return_value = [ITEM]
             self.assertNotIn('Another', self.home())
         self.assertEqual(self.get_items.call_count, 2)
+
+    def test_type_and_library_filters_are_applied_in_the_page(self):
+        film = dict(ITEM, id='film', title='Film', type='Movie', library_id='films', library_name='Films')
+        show = dict(ITEM, library_id='lib', library_name='Shows')
+        self.get_items.return_value = [film, show]
+        hidden = lambda html: re.findall(r'class="[^"]*\bhidden\b[^"]*"[^>]*?data-(?:item|library)-id="([^"]+)"', html)
+        self.assertEqual(sorted(hidden(self.home('?type=series'))), ['film', 'films'])
+        self.assertEqual(sorted(hidden(self.home('?type=movies&library=films'))), ['lib', 'show'])
+        self.assertEqual(sorted(hidden(self.home('?type=series&library=films'))), ['film', 'films'])  # Not a series library.
+        self.assertEqual(hidden(self.home()), [])
+        self.assertIn('<span id="visibleItemCount">1</span></strong><span id="itemCountTotalText"> of <strong>2</strong>',
+                      self.home('?type=movies'))
 
     def test_cached_listing_is_sorted_per_request(self):
         html = self.home('?sort=name')

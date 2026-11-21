@@ -263,9 +263,17 @@ def create_app(config=None, store=None, job_queue=None):
         except Exception as exc:
             server_info, libraries, all_items = {'name': 'Jellyfin Server'}, [], []
             error = str(exc)
+        # The page arrives already filtered, instead of showing every card until the script hides them.
+        dom_type = {'movies': 'movie', 'series': 'series', 'collections': 'collection'}.get(item_type)
+        of_type = [item for item in all_items if not dom_type or item.get('type', '').lower() == dom_type]
+        if current_library not in {item.get('library_id') for item in of_type}:
+            current_library = None  # Same as the page script: a library without items of this type isn't selected.
+        shown = [item for item in of_type if not current_library or item.get('library_id') == current_library]
         return render_template('index.html', items=all_items, libraries=libraries,
                                server_info=server_info, current_filter=item_type,
-                               current_library=current_library, current_sort=sort_by, error=error)
+                               current_library=current_library, current_sort=sort_by, error=error,
+                               shown_ids={item['id'] for item in shown},
+                               shown_libraries={item.get('library_id') or '' for item in shown})
 
     @app.route('/selections')
     def selections():
