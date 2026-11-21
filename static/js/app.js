@@ -288,6 +288,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     if (cm && bootstrap?.Modal) confirmModal = new bootstrap.Modal(cm);
 
+    // Jobs first, so the job panel doesn't queue behind the other startup requests.
+    resumeAutoBatchProgressOnLoad();
+
     // Initialize counters/buttons
     updateUploadAllButton();
     initManualQueueControls();
@@ -302,7 +305,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const libraryFilter = document.getElementById('libraryFilter');
     if (libraryFilter) libraryFilter.value = urlParams.get('library') || '';
     filterContent(urlParams.get('type') || 'all', false);
-    resumeAutoBatchProgressOnLoad();
 
     console.log('Jellyfin Poster Manager initialized');
 });

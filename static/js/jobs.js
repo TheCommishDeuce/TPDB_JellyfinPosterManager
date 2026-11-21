@@ -1,6 +1,8 @@
 // All upload modes use the same durable queue and progress UI.
 let jobQueueLoading = false;
 const displayedJobUpdates = new Map();
+const checkedJobResults = new Map(); // job_id -> how many of its results were already checked for new artwork
+const refreshedArtwork = new Set();
 let jobQueueInitialized = false;
 
 async function restoreSelections() {
@@ -92,13 +94,13 @@ function renderJobQueue(jobs) {
             <div class="btn-group btn-group-sm">
                 ${!job.done ? `<button class="btn btn-outline-danger" data-job-action="cancel" data-job-id="${escapeHtml(job.job_id)}">Cancel</button>` : ''}
                 ${job.resumable ? `<button class="btn btn-outline-primary" data-job-action="resume" data-job-id="${escapeHtml(job.job_id)}">Resume unfinished</button>` : ''}
-                ${job.results?.length ? `<button class="btn btn-outline-secondary" data-job-action="results" data-job-id="${escapeHtml(job.job_id)}">Results</button>` : ''}
+                ${job.result_count ? `<button class="btn btn-outline-secondary" data-job-action="results" data-job-id="${escapeHtml(job.job_id)}">Results</button>` : ''}
             </div>
         </div>`).join('');
     list.querySelectorAll('[data-job-action]').forEach(button => button.addEventListener('click', async () => {
         const job = jobs.find(job => job.job_id === button.dataset.jobId);
         if (button.dataset.jobAction === 'results') {
-            showBatchResults(job.results);
+            showBatchResults(await loadJobResults(job.job_id));
             return;
         }
         const action = button.dataset.jobAction;
@@ -124,6 +126,26 @@ function renderJobQueue(jobs) {
     }));
 }
 
+async function loadJobResults(jobId, start = 0) {
+    const response = await fetch(`/jobs/${encodeURIComponent(jobId)}/results?start=${start}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not load job results');
+    return data.results || [];
+}
+
+// Only results added since the last check are loaded. The last one checked may still have been in progress.
+async function refreshNewJobArtwork(job) {
+    const start = Math.max((checkedJobResults.get(job.job_id) || 0) - 1, 0);
+    const results = await loadJobResults(job.job_id, start);
+    checkedJobResults.set(job.job_id, start + results.length);
+    for (const result of results) {
+        const key = `${job.job_id}:${result.item_id}`;
+        if (!result.primary_uploaded || refreshedArtwork.has(key)) continue;
+        refreshedArtwork.add(key);
+        await refreshGridArtwork(result.item_id);
+    }
+}
+
 async function loadJobQueue() {
     if (jobQueueLoading) return;
     jobQueueLoading = true;
@@ -137,15 +159,12 @@ async function loadJobQueue() {
         renderJobQueue(jobs);
         let outcomesChanged = false;
         for (const job of jobs) {
-            const revision = JSON.stringify(job.results);
+            const revision = `${job.status}:${job.result_count}:${job.completed_targets}`;
             if (displayedJobUpdates.get(job.job_id) !== revision) {
                 outcomesChanged = true;
                 displayedJobUpdates.set(job.job_id, revision);
-                if (jobQueueInitialized) {
-                    for (const result of job.results || []) {
-                        if (result.primary_uploaded) await refreshGridArtwork(result.item_id);
-                    }
-                }
+                if (jobQueueInitialized) await refreshNewJobArtwork(job);
+                else checkedJobResults.set(job.job_id, job.result_count || 0);
             }
         }
         jobQueueInitialized = true;

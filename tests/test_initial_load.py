@@ -205,5 +205,26 @@ class GzipTests(OfflineCase):
         self.assertNotIn('Content-Encoding', image.headers)
 
 
+class JobListTests(OfflineCase):
+    def _job_with_results(self, count):
+        job = self.queue.submit('auto', options={'filter': 'no-poster'})
+        job.update(results=[{'item_id': f'item{n}', 'primary_uploaded': True} for n in range(count)], done=True)
+        self.store.save_job(job)
+        return job['job_id']
+
+    def test_job_list_leaves_results_out(self):
+        self._job_with_results(500)
+        [job] = self.client.get('/jobs').get_json()['jobs']
+        self.assertNotIn('results', job)
+        self.assertEqual(job['result_count'], 500)
+
+    def test_results_load_per_job_from_an_offset(self):
+        job_id = self._job_with_results(3)
+        results = self.client.get(f'/jobs/{job_id}/results?start=1').get_json()['results']
+        self.assertEqual([result['item_id'] for result in results], ['item1', 'item2'])
+        self.assertEqual(len(self.client.get(f'/jobs/{job_id}/results').get_json()['results']), 3)
+        self.assertEqual(self.client.get('/jobs/missing/results').status_code, 404)
+
+
 if __name__ == '__main__':
     unittest.main()

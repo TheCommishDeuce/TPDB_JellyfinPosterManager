@@ -119,10 +119,13 @@ def create_app(config=None, store=None, job_queue=None):
             raise ValueError(f'{key} must be a list of item IDs')
         return value
 
-    def public_job(job):
+    def public_job(job, results=True):
         if not job:
             return None
         result = {key: value for key, value in job.items() if key not in ('tasks', 'options')}
+        if not results:
+            # The job list is polled every few seconds; results load per job when they're needed.
+            result['result_count'] = len(result.pop('results', None) or [])
         result['resumable'] = job.get('status') in ('interrupted', 'cancelled', 'failed') and (
             not job.get('prepared') or any('targets' not in task or any(
                 target['status'] == 'pending' for target in task['targets']
@@ -425,7 +428,7 @@ def create_app(config=None, store=None, job_queue=None):
             all_jobs = store.jobs()
             open_jobs = [job for job in all_jobs if not job['done'] or public_job(job)['resumable']]
             finished = [job for job in all_jobs if job['done'] and not public_job(job)['resumable']][:100]
-            return jsonify(jobs=[public_job(job) for job in open_jobs + finished])
+            return jsonify(jobs=[public_job(job, results=False) for job in open_jobs + finished])
         data = body()
         kind = data.get('kind')
         if kind == 'auto':
@@ -449,6 +452,14 @@ def create_app(config=None, store=None, job_queue=None):
         if not job:
             raise LookupError('Job not found')
         return jsonify(success=True, job=public_job(job))
+
+    @app.route('/jobs/<job_id>/results')
+    def job_results(job_id):
+        job = store.get_job(job_id)
+        if not job:
+            raise LookupError('Job not found')
+        start = max(request.args.get('start', 0, type=int), 0)
+        return jsonify(success=True, results=job.get('results', [])[start:])
 
     @app.route('/batch-auto-poster/cancel/<job_id>', methods=['POST'])
     @app.route('/jobs/<job_id>/cancel', methods=['POST'])

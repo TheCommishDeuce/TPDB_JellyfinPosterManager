@@ -54,6 +54,33 @@ test('a transient polling failure does not forget the active job', async () => {
     assert.equal(vm.runInContext('autoBatchPollTimer', context), 1);
 });
 
+test('job polls only refresh artwork for results added since the last poll', async () => {
+    const context = browser();
+    const requested = [];
+    const refreshed = [];
+    let job = { job_id: 'run', status: 'running', done: false, result_count: 2, completed_targets: 2 };
+    const results = [{ item_id: 'a', primary_uploaded: true }, { item_id: 'b', primary_uploaded: true }];
+    context.fetch = async (url) => {
+        requested.push(url);
+        if (url === '/jobs') return { ok: true, json: async () => ({ jobs: [job] }) };
+        const start = Number(new URL(url, 'http://x').searchParams.get('start'));
+        return { ok: true, json: async () => ({ results: results.slice(start) }) };
+    };
+    context.refreshGridArtwork = async (itemId) => refreshed.push(itemId);
+    context.restoreSelections = async () => {};
+    for (const name of ['loadFailedItems', 'loadProcessedItems', 'loadProtectedItems', 'loadLatestAutoBatchResults',
+        'setAutoBatchRunning', 'updateAutoBatchProgress', 'saveActiveAutoBatchJob', 'renderJobQueue']) context[name] = () => {};
+    await context.loadJobQueue();
+    assert.deepEqual(refreshed, []); // Artwork already on the page when it loaded is current.
+    results.push({ item_id: 'c', primary_uploaded: true }, { item_id: 'd', primary_uploaded: false });
+    job = { ...job, result_count: 4, completed_targets: 4 };
+    await context.loadJobQueue();
+    assert.deepEqual(refreshed, ['b', 'c']); // b was the last result checked, so it may have been mid-upload.
+    await context.loadJobQueue();
+    assert.deepEqual(refreshed, ['b', 'c']); // Unchanged poll: nothing reloads.
+    assert.ok(requested.includes('/jobs/run/results?start=1'));
+});
+
 test('the loading popup is armed before the picker cache check', async () => {
     const context = browser();
     const events = [];
