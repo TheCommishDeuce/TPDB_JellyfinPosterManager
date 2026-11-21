@@ -493,7 +493,9 @@ def main():
         logging.warning('Non-local binding: put an authenticated reverse proxy in front of this single-user app.')
     previous_handler = signal.signal(signal.SIGTERM, handle_shutdown_signal)
     try:
-        app.run(host=host, port=int(getattr(Config, 'WEB_PORT', 5001)), debug=Config.DEBUG, use_reloader=False)
+        # DEBUG only makes logging verbose. Flask's debug mode would serve Werkzeug's interactive
+        # Python console (/console), and in Docker this app listens on every interface.
+        app.run(host=host, port=int(getattr(Config, 'WEB_PORT', 5001)), debug=False, use_reloader=False)
     finally:
         try:
             app.extensions['poster_jobs'].close()
