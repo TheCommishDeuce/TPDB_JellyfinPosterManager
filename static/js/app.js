@@ -2738,6 +2738,20 @@ async function toggleProtectedItem(itemId, button) {
     }
 }
 
+// "Season 36, Season 35, Season 33, Specials" becomes "33, 35-36, Specials" (en dash), like the failure messages.
+function formatSeasonList(titles) {
+    const numbers = [...new Set(titles.map(title => /^Season (\d+)$/.exec(title)?.[1]).filter(Boolean).map(Number))]
+        .sort((a, b) => a - b);
+    const others = [...new Set(titles.filter(title => !/^Season \d+$/.test(title)))];
+    const ranges = [];
+    for (const number of numbers) {
+        const last = ranges[ranges.length - 1];
+        if (last && number === last[1] + 1) last[1] = number;
+        else ranges.push([number, number]);
+    }
+    return [...ranges.map(([start, end]) => (start === end ? `${start}` : `${start}\u2013${end}`)), ...others].join(', ');
+}
+
 function formatProcessedItemTooltip(detail) {
     const timestamp = formatLogTimestamp(detail.timestamp);
     const targets = detail.poster_targets || {};
@@ -2751,7 +2765,7 @@ function formatProcessedItemTooltip(detail) {
 
     const seasonTitles = Array.isArray(targets.season_titles) ? targets.season_titles.filter(Boolean) : [];
     if (seasonTitles.length) {
-        parts.push(`Season posters: ${seasonTitles.join(', ')}`);
+        parts.push(`Season posters: ${formatSeasonList(seasonTitles)}`);
     } else if (Number(targets.season_count || 0) > 0) {
         const seasonCount = Number(targets.season_count);
         parts.push(`${seasonCount} season poster${seasonCount === 1 ? '' : 's'}`);
