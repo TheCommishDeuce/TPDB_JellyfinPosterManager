@@ -1341,6 +1341,7 @@ def upload_image_to_jellyfin_improved(item_id, image_path):
         if response.status_code in [200, 204]:
             global jellyfin_upload_count
             jellyfin_upload_count += 1
+            jellyfin_uploaded_items[item_id] = jellyfin_upload_count
             logging.info("Artwork uploaded successfully.")
             return True
 
@@ -1370,8 +1371,10 @@ JELLYFIN_MAX_PAGES = 1000
 JELLYFIN_MAX_PARALLEL_LIBRARIES = 4
 # Only the Primary image tag is used, and per-user data isn't; leaving them out halves the payload.
 JELLYFIN_ITEM_QUERY_OPTIONS = "&EnableImageTypes=Primary&ImageTypeLimit=1&EnableUserData=false"
-# Bumped on every successful artwork upload so cached library listings (with image tags) go stale.
+# Bumped on every successful artwork upload. Each uploaded item keeps the count from its latest upload,
+# so a cached library listing knows which cards have new artwork since it was fetched.
 jellyfin_upload_count = 0
+jellyfin_uploaded_items = {}
 
 
 def _jellyfin_get_all_items(url, headers, page_size=JELLYFIN_PAGE_SIZE):

@@ -63,6 +63,7 @@ class JellyfinListingTests(unittest.TestCase):
                 patch.object(scraper.os.path, 'exists', return_value=True):
             self.assertTrue(scraper.upload_image_to_jellyfin_improved('item', 'poster.jpg'))
             self.assertEqual(scraper.jellyfin_upload_count, 4)
+            self.assertEqual(scraper.jellyfin_uploaded_items['item'], 4)
 
 
 class HomePageCacheTests(OfflineCase):
@@ -111,12 +112,15 @@ class HomePageCacheTests(OfflineCase):
         self.assertNotIn('Another', self.home())
         self.assertEqual(self.get_items.call_count, 2)
 
-    def test_upload_makes_cached_listing_stale(self):
+    def test_upload_refreshes_that_card_without_refetching_the_listing(self):
         self.home()
-        with patch.object(scraper, 'jellyfin_upload_count', scraper.jellyfin_upload_count + 1):
-            self.get_items.return_value = [ITEM]
-            self.assertNotIn('Another', self.home())
-        self.assertEqual(self.get_items.call_count, 2)
+        count = scraper.jellyfin_upload_count + 1
+        with patch.object(scraper, 'jellyfin_upload_count', count), \
+                patch.object(scraper, 'jellyfin_uploaded_items', {'show': count, 'season': count}):
+            html = self.home()
+        self.assertEqual(self.get_items.call_count, 1)
+        self.assertIn(f'Items/show/Images/Primary%3FmaxWidth%3D300%26quality%3D85%26refresh%3D{count}', html)
+        self.assertNotIn('Items/other/Images/Primary', html)  # Not uploaded: still the listing's (no poster).
 
     def test_type_and_library_filters_are_applied_in_the_page(self):
         film = dict(ITEM, id='film', title='Film', type='Movie', library_id='films', library_name='Films')
@@ -171,7 +175,7 @@ class HomePageCacheTests(OfflineCase):
         with patch.object(scraper, 'jellyfin_upload_count', scraper.jellyfin_upload_count + 1):
             response, fetched_by = self.lookup(ITEM['id'])
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(fetched_by, ['library-refresh'])
+        self.assertEqual(fetched_by, [])
 
     def test_unknown_item_or_old_listing_is_fetched_before_answering(self):
         self.home()

@@ -52,13 +52,13 @@ def create_app(config=None, store=None, job_queue=None):
         atexit.register(queue.close)
     # Listing a large Jellyfin library takes seconds. Reuse a listing for LIBRARY_FRESH_SEC; the home
     # page also shows one up to LIBRARY_STALE_SEC old while it refreshes in the background. Items are
-    # kept in Jellyfin's order and sorted per request. An artwork upload makes the listing stale
-    # (its image tags change).
-    library = {'items': None, 'libraries': [], 'fetched': 0.0, 'uploads': None}
+    # kept in Jellyfin's order and sorted per request. Uploads don't refetch it: cards uploaded since
+    # the fetch get a fresh image URL instead (see with_uploaded_artwork).
+    library = {'items': None, 'libraries': [], 'fetched': 0.0, 'uploads': 0}
     library_lock = threading.Lock()  # One Jellyfin fetch at a time.
 
     def library_age():
-        if library['items'] is None or library['uploads'] != scraper.jellyfin_upload_count:
+        if library['items'] is None:
             return None
         return time.monotonic() - library['fetched']
 
@@ -80,6 +80,16 @@ def create_app(config=None, store=None, job_queue=None):
                 logging.exception("Background Jellyfin library refresh failed")
         if not library_lock.locked():
             threading.Thread(target=refresh, name='library-refresh', daemon=True).start()
+
+    def with_uploaded_artwork(listing):
+        # The listing's image tags predate these uploads; an untagged URL with the upload number shows the new poster.
+        uploaded = {item_id: number for item_id, number in scraper.jellyfin_uploaded_items.items()
+                    if number > library['uploads']}
+        if not uploaded:
+            return listing
+        return [dict(item, thumbnail_url=f"{Config.JELLYFIN_URL}/Items/{item['id']}/Images/Primary"
+                                         f"?maxWidth=300&quality=85&refresh={uploaded[item['id']]}")
+                if item['id'] in uploaded else item for item in listing]
 
     def items(refresh=False):
         return load_library(0 if refresh else LIBRARY_FRESH_SEC)[1]
@@ -254,7 +264,7 @@ def create_app(config=None, store=None, job_queue=None):
             else:
                 libraries, cached_items = load_library()
             if libraries:
-                all_items = scraper.sort_jellyfin_items(list(cached_items), sort_by)
+                all_items = scraper.sort_jellyfin_items(with_uploaded_artwork(cached_items), sort_by)
             else:
                 # Without libraries Jellyfin does the sorting, so the order depends on sort_by.
                 all_items = scraper.get_jellyfin_items(sort_by=sort_by, libraries=libraries)
