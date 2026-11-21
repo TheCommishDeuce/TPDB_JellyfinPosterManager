@@ -57,7 +57,7 @@ A modern web application for automatically finding and uploading high-quality po
 - SQLite-backed selections, search queue, jobs, target outcomes, protected items, and TPDb corrections
 - Lightweight picker-response cache with lazy-loaded previews and configurable cleanup
 - Restricted image proxies: destination and redirect checks, scoped cookies, image-type and size limits
-- Application logging and TPDb challenge debugging
+- Application logging (`logs/app.log`, rotated at 10 MB with 5 old files kept) and TPDb challenge debugging
 
 ## 📋 Requirements
 
