@@ -51,9 +51,12 @@ class SetPageSeasonTests(unittest.TestCase):
         def open_page(url):
             if '/set/' in url:
                 driver.page_source = set_page
+
         seasons = [{'id': f's{number}', 'title': f'Season {number}', 'number': number, 'is_special': False}
                    for number in (1, 2, 3)]
-        with patch.object(scraper, 'selenium_driver', driver),                 patch.object(scraper, '_open_tpdb_page_with_delay', side_effect=open_page),                 patch.object(scraper, '_wait_for_item_posters_ready'):
+        with patch.object(scraper, 'selenium_driver', driver), \
+                patch.object(scraper, '_open_tpdb_page_with_delay', side_effect=open_page), \
+                patch.object(scraper, '_wait_for_item_posters_ready'):
             result = scraper.search_tpdb_for_poster_groups(
                 'Example', item_year=2020, item_type='Series', eligible_seasons=seasons, max_posters=1,
                 include_base64=False, tpdb_item_url='https://theposterdb.com/posters/123')
