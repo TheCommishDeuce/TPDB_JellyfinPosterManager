@@ -1050,7 +1050,9 @@ def _search_tpdb_for_poster_groups(
                                     continue
 
                                 set_soup = BeautifulSoup(selenium_driver.page_source, 'html.parser')
-                                for poster_link in set_soup.select(ITEM_POSTER_SELECTOR)[:max(max_posters * max(len(season_by_key) + 1, 1), max_posters)]:
+                                # Read every card: the page is already loaded, and a set can hold more than one
+                                # show poster, which used to push the last season past a card limit.
+                                for poster_link in set_soup.select(ITEM_POSTER_SELECTOR):
                                     poster_url = _tpdb_absolute_url(poster_link.get('href'))
                                     if not poster_url or poster_url in seen_poster_urls:
                                         continue

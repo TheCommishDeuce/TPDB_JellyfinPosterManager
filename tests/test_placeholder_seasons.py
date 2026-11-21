@@ -42,6 +42,25 @@ class ScraperKeepsUnmatchedSeasonsTests(unittest.TestCase):
                          [('3', _poster(4), '9'), ('specials', _poster(3), '9')])
 
 
+class SetPageSeasonTests(unittest.TestCase):
+    def test_last_season_is_found_when_the_set_has_extra_show_posters(self):
+        set_page = ''.join([_card(1, '(2020)', 'Show'), _card(5, '(2020)', 'Show'),
+                            _card(2, 'Season 1'), _card(6, 'Season 2'), _card(4, 'Season 3')])
+        driver = Mock(current_url='https://theposterdb.com/posters/123', page_source=_card(1, '(2020)', 'Show'))
+
+        def open_page(url):
+            if '/set/' in url:
+                driver.page_source = set_page
+        seasons = [{'id': f's{number}', 'title': f'Season {number}', 'number': number, 'is_special': False}
+                   for number in (1, 2, 3)]
+        with patch.object(scraper, 'selenium_driver', driver),                 patch.object(scraper, '_open_tpdb_page_with_delay', side_effect=open_page),                 patch.object(scraper, '_wait_for_item_posters_ready'):
+            result = scraper.search_tpdb_for_poster_groups(
+                'Example', item_year=2020, item_type='Series', eligible_seasons=seasons, max_posters=1,
+                include_base64=False, tpdb_item_url='https://theposterdb.com/posters/123')
+        self.assertEqual(sorted(poster['season_id'] for poster in result['best_group']['season_posters']),
+                         ['s1', 's2', 's3'])
+
+
 class PlaceholderWorkflowTests(OfflineCase):
     def _group(self):
         return {'show_posters': [{'url': SELECTION['series_poster_url'], 'set_id': '9'}], 'season_posters': [],
