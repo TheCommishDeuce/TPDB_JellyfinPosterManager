@@ -14,6 +14,7 @@ import time
 import re
 import os
 import hashlib
+import html
 import base64
 from datetime import datetime
 import threading
@@ -772,12 +773,18 @@ def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection):
 
     Jellyfin's provider IDs can be wrong (e.g. a "[REC] Collection" identified as the Decoys
     collection), so unattended uploads only trust an ID match that also agrees on the title.
+    The year may be one off: TPDb often uses the wide-release year where Jellyfin has the premiere's.
     """
     item_title_norm = _comparison_title(strip_title_year(item_title or ''), is_collection)
     if not item_title_norm or candidate.get('match_title_norm') != item_title_norm:
         return False
     item_year = None if is_collection else (extract_title_year(item_title or '') or (str(item_year) if item_year else None))
-    return not (item_year and candidate.get('match_year') and candidate['match_year'] != item_year)
+    if not (item_year and candidate.get('match_year')):
+        return True
+    try:
+        return abs(int(candidate['match_year']) - int(item_year)) <= 1
+    except ValueError:
+        return candidate['match_year'] == item_year
 
 
 def _load_tpdb_id_lookup_page(url, delay):
@@ -839,7 +846,9 @@ def _find_tpdb_items_by_id(item_type, imdb_id=None, tmdb_id=None):
             if re.fullmatch(r"/posters/\d+", path):
                 item_url = _tpdb_absolute_url(urlunsplit(urlsplit(current_url)._replace(query='', fragment='')))
                 if item_url:
-                    title = _extract_html_title(page_source).split(" | ")[0]
+                    # Unescape (&amp;) and drop only TPDb's own suffix, since titles can contain " | " too.
+                    title = re.sub(r"\s*\|\s*The Poster Database\b.*$", "",
+                                   html.unescape(_extract_html_title(page_source)), flags=re.IGNORECASE)
                     candidates.append(dict(_tpdb_id_candidate(title, item_url, 0, is_collection), preloaded=True))
                 break
             ready = path == TPDB_ADVANCED_SEARCH_PATH and not _is_tpdb_not_found_page(page_source)

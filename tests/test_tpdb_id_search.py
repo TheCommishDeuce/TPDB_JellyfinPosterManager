@@ -152,6 +152,13 @@ class IdSearchFlowTests(TPDbIdSearchCase):
         result = self.search(imdb_id='tt27489557', require_exact=True)
         self.assertEqual(result['best_group']['url'], ITEM_URL)
 
+    def test_batch_mode_allows_an_id_match_one_year_off(self):
+        for year in (2023, 2025):
+            with self.subTest(year=year):
+                self.use_driver({IMDB_URL: (ITEM_URL, ITEM_PAGE)})
+                result = self.search(imdb_id='tt27489557', item_year=year, require_exact=True)
+                self.assertEqual(result['best_group']['url'], ITEM_URL)
+
     def test_batch_mode_reviews_an_id_match_for_another_title_or_year(self):
         for title, year in (('Some Other Film', 2024), ('Abigail', 2019)):
             with self.subTest(title=title, year=year):
@@ -230,6 +237,16 @@ class IdLookupTests(TPDbIdSearchCase):
         self.assertEqual(candidates[0]['year'], '2024')
         self.assertEqual(candidates[0]['url'], ITEM_URL)
         self.assertEqual(candidates[0]['score'], 1.0)
+
+    def test_redirect_title_is_unescaped_and_keeps_its_own_pipes(self):
+        for page_title, expected in (
+            ('Lilo &amp; Stitch (2025)', 'Lilo & Stitch (2025)'),
+            ('Taylor Swift | The Eras Tour | The Final Show (2025)', 'Taylor Swift | The Eras Tour | The Final Show (2025)'),
+        ):
+            with self.subTest(page_title=page_title):
+                page = ITEM_PAGE.replace('<title> Abigail (2024) |', f'<title> {page_title} |')
+                self.use_driver({IMDB_URL: (ITEM_URL, page)})
+                self.assertEqual(scraper._find_tpdb_items_by_id('Movie', imdb_id='tt27489557')[0]['title'], expected)
 
     def test_parses_results_list_fixture(self):
         self.use_driver({IMDB_URL: (IMDB_URL, RESULTS_LIST.replace('rel="next"', 'rel="nofollow"'))})
