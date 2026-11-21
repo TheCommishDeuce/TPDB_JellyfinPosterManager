@@ -1,0 +1,652 @@
+<html lang="en" class="h-100"><head>
+        <!-- Meta Attributes -->
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+        <meta name="csrf-token" content="fixture-token">
+
+        <!-- Page Title -->
+        <title>  Search |  The Poster Database  (TPDb)</title>
+
+        <meta name="keywords" content="tpdb, posters, theposterdb">
+<meta property="og:site_name" content="The Poster Database">
+<meta property="og:image" content="https//theposterdb.com/images/logos/tpdb_icon.png">
+
+<meta name="twitter:card" content="summary">
+<meta name="twitter:site" content="@ThePosterDb">
+<script type="application/ld+json"></script>
+
+        <!-- Include needed styles -->
+        <link href="/css/app.css" rel="stylesheet">
+
+        <!-- Include Favicon -->
+        <link rel="apple-touch-icon" sizes="180x180" href="/images/favicon/prod/apple-touch-icon.png?v=2020-11-25">
+	<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon/prod/favicon-32x32.png?v=2020-11-25">
+	<link rel="icon" type="image/png" sizes="194x194" href="/images/favicon/prod/favicon-194x194.png?v=2020-11-25">
+	<link rel="icon" type="image/png" sizes="192x192" href="/images/favicon/prod/android-chrome-192x192.png?v=2020-11-25">
+	<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon/prod/favicon-16x16.png?v=2020-11-25">
+	<link rel="manifest" href="/images/favicon/prod/site.webmanifest?v=2020-11-25">
+	<link rel="mask-icon" href="/images/favicon/prod/safari-pinned-tab.svg?v=2020-11-25" color="#111111">
+	<link rel="shortcut icon" href="/images/favicon/prod/favicon.ico?v=2020-11-25">
+	<meta name="apple-mobile-web-app-title" content="TPDb">
+	<meta name="application-name" content="TPDb">
+	<meta name="msapplication-TileColor" content="#111111">
+	<meta name="msapplication-TileImage" content="/images/favicon/prod/mstile-144x144.png?v=2020-11-25">
+	<meta name="msapplication-config" content="/images/favicon/prod/browserconfig.xml?v=2020-11-25">
+	<meta name="theme-color" content="#111111">
+        <script src="https://app.lemonsqueezy.com/js/lemon.js" defer="" type="text/javascript"></script>
+    <style data-cke="true"></style><style></style></head>
+
+    <body class="bg-dark text-white d-flex flex-column h-100">
+                    <nav class="navbar navbar-expand-xl fixed-top navbar-dark font-weight-bold text-uppercase py-3 bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="https://theposterdb.com">
+                                                <img src="/images/logos/tpdb_pro.svg" loading="lazy" height="30" alt="The Poster Database Pro Logo">
+                                        
+            
+            
+        </a>
+
+        <div>
+            <button class="navbar-toggler border-0 display-search-dropdown" type="button" data-action="search" data-identifier="search_for_poster_button_mobile">
+                <span class="fa fa-search"></span>
+            </button>
+
+                            <button class="navbar-toggler border-0 btn mt-n1" type="button">
+                    <a href="https://theposterdb.com/account/notifications" class="text-half-white text-decoration-none" data-action="search">
+                        <span class="d-flex notification-hover"><i class="fas fa-bell"></i><span class="badge badge-pill badge-primary rounded d-none ml-2" id="notification_bell_badge_mobile">0</span></span>
+                    </a>
+                </button>
+            
+            <button class="navbar-toggler border-0" type="button" data-toggle="collapse" data-target="#main_navbar_items" aria-controls="main_navbar_items" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="fa fa-bars"></span>
+            </button>
+        </div>
+
+        <div class="collapse navbar-collapse ml-xl-4" id="main_navbar_items">
+            <!-- Left Side Of Navbar -->
+            <ul class="navbar-nav mr-auto">
+                <li class="nav-item "><a class="nav-link" href="https://theposterdb.com/feed">Feed</a></li>                <li class="nav-item "><a class="nav-link" href="https://theposterdb.com/official">Official</a></li>
+                <li class="nav-item "><a class="nav-link" href="https://theposterdb.com/top">Top</a></li>
+                <li class="nav-item "><a class="nav-link" href="https://theposterdb.com/discover">Discover</a></li>
+                <li class="nav-item "><a class="nav-link" href="https://theposterdb.com/recent">Recent</a></li>
+                <li class="nav-item "><a class="nav-link" href="https://theposterdb.com/textless">Textless</a></li>
+                <li class="nav-item "><a class="nav-link" href="https://theposterdb.com/posters/requests">Requests</a></li>
+            </ul>
+
+            <!-- Right Side Of Navbar -->
+            <ul class="navbar-nav ml-auto">
+                <li class="nav-item d-none d-xl-block"><button class="btn no-focus nav-link show_search_mobile display-search-dropdown" type="button" data-toggle="collapse" data-action="search" data-identifier="search_for_poster_button_desktop"><i class="fa fa-search"></i></button></li>
+<li class="nav-item d-none d-xl-block"><a class="btn no-focus nav-link show_search_mobile display-search-dropdown" data-action="upload" data-identifier="upload_poster_button"><i class="fas fa-cloud-upload-alt"></i></a></li>
+    <li class="nav-item d-none d-xl-block notification-hover" id="notification_button"><a class="btn no-focus nav-link" href="https://theposterdb.com/account/notifications"><i class="fas fa-bell"></i><sup><span class="badge badge-pill badge-primary rounded d-none" id="notification_bell_badge_desktop">0</span></sup></a></li>
+
+    
+<!-- Authentication Links -->
+    <li class="nav-item dropdown user-nav-dropdown-icons" id="user-nav-options">
+        <a class="nav-link dropdown-toggle
+        " href="#" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" v-pre="">fixture@example.invalid <span class="carret"></span></a>
+
+        <div class="dropdown-menu dropdown-menu-right" aria-labelledby="navbarDropdown">
+            <a class="dropdown-item font-weight-bold " href="https://theposterdb.com/user/fixture@example.invalid"><i class="fas fa-address-card mr-1"></i> Profile</a>
+            <a class="dropdown-item font-weight-bold " href="https://theposterdb.com/dashboard"><i class="fas fa-columns mr-1"></i> Dashboard</a>
+            <a class="dropdown-item font-weight-bold " href="https://theposterdb.com/user/fixture@example.invalid/following"><i class="fas fa-users mr-1"></i> Following</a>
+            <a class="dropdown-item font-weight-bold " href="https://theposterdb.com/user/fixture@example.invalid/hidden"><i class="fas fa-user-slash mr-1"></i> Hidden</a>
+
+            <div class="dropdown-divider mx-3"></div>
+
+            <a class="dropdown-item font-weight-bold " href="https://theposterdb.com/account/settings"><i class="fas fa-cog mr-1"></i> Account Settings</a>
+            <a class="dropdown-item font-weight-bold " href="https://theposterdb.com/account/recyclebin"><i class="fas fa-recycle mr-1"></i> Recycle Bin</a>
+
+            
+            
+                                                <div class="dropdown-divider mx-3"></div>
+                    <a class="dropdown-item font-weight-bold" href="https://beta.theposterdb.com/search/advanced/results"><i class="fas fa-tools mr-1"></i> Beta Site</a>
+                            
+            <div class="dropdown-divider mx-3"></div>
+
+            <a class="dropdown-item font-weight-bold" href="https://theposterdb.com/logout" onclick="if (!window.__cfRLUnblockHandlers) return false; event.preventDefault(); document.getElementById('logout-form').submit();"><i class="fas fa-sign-out-alt mr-1"></i> Sign Out</a>
+
+            <form id="logout-form" action="https://theposterdb.com/logout" method="POST" style="display: none;">
+                <input type="hidden" name="_token" value="fixture-token" autocomplete="off">            </form>
+        </div>
+    </li>
+            </ul>
+        </div>
+    </div>
+</nav>        
+        <div id="toast_area">
+</div>
+
+<template id="sample_toast_notification">
+    <div class="toast" id="" role="alert" aria-live="assertive" aria-atomic="true" data-delay="5000">
+        <div class="toast-header">
+            <img src="/images/favicon/beta/apple-touch-icon.png" class="rounded mr-2" alt="TPDb Favicon">
+            <strong class="mr-auto">The Poster Database</strong>
+            <small>just now</small>
+        </div>
+
+        <div class="toast-body">
+            <p></p>
+            <a href="" class="stretched-link">Click here to check it out!</a>
+        </div>
+    </div>
+</template>
+        <main class="container-fluid p-0">
+            <div class="collapse position-fixed w-100 pb-4" id="collapseNavbarSearch" style="top: 73.0469px;">
+                <ul class="list-group bg-dark border-0">
+                    <li class="list-group-item rounded-0 bg-dark">
+                        <form action="https://theposterdb.com/search" method="get" class="form-dark container  p-0">
+    <div class="d-flex flex-row  justify-content-start ">
+        <div class="col-12  form-group m-0 p-0">
+            <div class="row no-gutters align-items-center">
+                <div class="col">
+                    <input name="term" type="text" id="search-term-nav" placeholder="What would you like to search for?" class="form-control input-search-transparent no-focus rounded-pill form-control-lg" value="" required="">
+                </div>
+
+                <div class="col-auto">
+                    <div class="d-flex flex-row justify-content-between ml-n5">
+                                                    <button class="btn btn-outline-secondary border-0 rounded-pill ml-n45 no-focus" type="button" data-toggle="collapse" data-target="#advanced-search-collapsenav" aria-expanded="false" aria-controls="advanced-search-collapsenav"><i class="fa fa-filter"></i></button>
+                            <button class="btn btn-outline-secondary border-0 rounded-pill ml-n5 mr-2 no-focus" type="submit"><i class="fa fa-search"></i></button>
+                                            </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="collapse" id="advanced-search-collapsenav">
+    <div class="card card-body bg-dark-lighter col-12  col-md-6 mt-2  container ">
+        <form class="form-dark" method="GET" name="advanced_search" action="https://theposterdb.com/search/advanced/results">
+            <div class="form-group row">
+                <label for="category" class="font-weight-bold col-sm-12 col-md-2 col-form-label">Category <span class="text-danger font-weight-bold">*</span></label>
+
+                <div class="col-sm-12 col-md-10">
+                    <div class="input-group">
+                        
+                        <div class="dropdown bootstrap-select category_search border border-secondary rounded-pill flex-grow-1"><select name="category" class="category_search border border-secondary rounded-pill flex-grow-1" id="category" title="Select Category" required=""><option class="bs-title-option" value=""></option>
+                                                                                                <option value="All">All</option>
+                                                                                                                                <option value="Categories">Categories</option>
+                                                                                                                                <option value="Collections">Collections</option>
+                                                                                                                                <option value="Companies">Companies</option>
+                                                                                                                                <option value="Movies" selected="">Movies</option>
+                                                                                                                                <option value="People">People</option>
+                                                                                                                                <option value="Shows">Shows</option>
+                                                                                    </select><button type="button" tabindex="-1" class="btn dropdown-toggle btn-light" data-toggle="dropdown" role="combobox" aria-owns="bs-select-1" aria-haspopup="listbox" aria-expanded="false" data-id="category" title="Movies"><div class="filter-option"><div class="filter-option-inner"><div class="filter-option-inner-inner">Movies</div></div> </div></button><div class="dropdown-menu "><div class="bs-searchbox"><input type="search" class="form-control" autocomplete="off" placeholder="Search Options" role="combobox" aria-label="Search" aria-controls="bs-select-1" aria-autocomplete="list"></div><div class="inner show" role="listbox" id="bs-select-1" tabindex="-1"><ul class="dropdown-menu inner show" role="presentation"></ul></div></div></div>
+
+                        <div class="input-group-append category_tpdb_toggle  d-none ">
+                            <div class="input-group-text border-secondary bg-dark-lighter text-white rounded-pill-right">
+                                <div class="custom-control custom-checkbox">
+                                    <input type="checkbox" name="tpdb_collection" class="custom-control-input" id="tpdb_collection">
+                                    <label class="custom-control-label font-weight-bold" for="tpdb_collection">TPDb Collections Only</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                                    </div>
+            </div>
+
+            <hr class="mt-0 pt-0">
+
+            <div class="form-group row">
+                <label for="term" class="font-weight-bold col-sm-12 col-md-2 col-form-label">Term</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <input type="text" name="term" value="" placeholder="Term" class="form-control">
+
+                                    </div>
+            </div>
+
+            <div class="form-group row">
+                <label for="term" class="font-weight-bold col-sm-12 col-md-2 col-form-label">Year</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <div class="input-group">
+                        <div class="dropdown bootstrap-select border border-secondary rounded-pill-left"><select name="year_filter" class="border border-secondary rounded-pill-left" id="year_filter">
+                            
+                                                                                                <option value="" selected="" disabled="">Select Year Filter</option>
+                                                                                                                                <option value="between">Between</option>
+                                                                                                                                <option value="empty">Empty</option>
+                                                                                                                                <option value="equals">Equals</option>
+                                                                                                                                <option value="greater_than">Greater Than</option>
+                                                                                                                                <option value="greater_than_or_equal">Greater Than Or Equal</option>
+                                                                                                                                <option value="less_than">Less Than</option>
+                                                                                                                                <option value="less_than_or_equal">Less Than Or Equal</option>
+                                                                                                                                <option value="not_equal">Not Equal</option>
+                                                                                    </select><button type="button" tabindex="-1" class="btn dropdown-toggle btn-light bs-placeholder" data-toggle="dropdown" role="combobox" aria-owns="bs-select-2" aria-haspopup="listbox" aria-expanded="false" data-id="year_filter" title="Select Year Filter"><div class="filter-option"><div class="filter-option-inner"><div class="filter-option-inner-inner">Select Year Filter</div></div> </div></button><div class="dropdown-menu "><div class="bs-searchbox"><input type="search" class="form-control" autocomplete="off" placeholder="Search Options" role="combobox" aria-label="Search" aria-controls="bs-select-2" aria-autocomplete="list"></div><div class="inner show" role="listbox" id="bs-select-2" tabindex="-1"><ul class="dropdown-menu inner show" role="presentation"></ul></div></div></div>
+
+                        <input type="number" name="yone" value="" placeholder="Min" min="1888" max="2076" class="form-control rounded-left-0  rounded-pill-right ">
+                        <input type="number" name="ytwo" value="" placeholder="Max" min="1888" max="2076" class="form-control rounded-left-0  d-none ">
+                    </div>
+
+                    
+                                    </div>
+            </div>
+
+            <div class="form-group row people_department_filter  d-none ">
+                <label for="department" class="font-weight-bold col-sm-12 col-md-2 col-form-label">Department</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <div class="input-group">
+                        
+                        <div class="dropdown bootstrap-select department_search border border-secondary rounded-pill flex-grow-1"><select name="department" class="department_search border border-secondary rounded-pill flex-grow-1" id="department" title="Select Department"><option class="bs-title-option" value=""></option>
+                                                                                                <option value="All">All</option>
+                                                                                                                                <option value="Empty">Empty</option>
+                                                                                                                                <option value="Acting">Acting</option>
+                                                                                                                                <option value="Actors">Actors</option>
+                                                                                                                                <option value="Art">Art</option>
+                                                                                                                                <option value="Camera">Camera</option>
+                                                                                                                                <option value="Costume &amp; Make-Up">Costume &amp; Make-Up</option>
+                                                                                                                                <option value="Creator">Creator</option>
+                                                                                                                                <option value="Crew">Crew</option>
+                                                                                                                                <option value="Directing">Directing</option>
+                                                                                                                                <option value="Editing">Editing</option>
+                                                                                                                                <option value="Lighting">Lighting</option>
+                                                                                                                                <option value="Production">Production</option>
+                                                                                                                                <option value="Sound">Sound</option>
+                                                                                                                                <option value="Visual Effects">Visual Effects</option>
+                                                                                                                                <option value="Writing">Writing</option>
+                                                                                    </select><button type="button" tabindex="-1" class="btn dropdown-toggle btn-light bs-placeholder" data-toggle="dropdown" role="combobox" aria-owns="bs-select-3" aria-haspopup="listbox" aria-expanded="false" data-id="department" title="Select Department"><div class="filter-option"><div class="filter-option-inner"><div class="filter-option-inner-inner">Select Department</div></div> </div></button><div class="dropdown-menu "><div class="bs-searchbox"><input type="search" class="form-control" autocomplete="off" placeholder="Search Options" role="combobox" aria-label="Search" aria-controls="bs-select-3" aria-autocomplete="list"></div><div class="inner show" role="listbox" id="bs-select-3" tabindex="-1"><ul class="dropdown-menu inner show" role="presentation"></ul></div></div></div>
+                    </div>
+
+                                    </div>
+            </div>
+
+            <hr class="mt-0 pt-0">
+
+            <div class="form-group row">
+                <label for="imdb_id" class="font-weight-bold col-sm-12 col-md-2 col-form-label">IMDb ID</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <input type="text" name="imdb_id" value="tt0000000" min="0" placeholder="IMDb ID" class="form-control" pattern="(nm|tt)\d{7,8}">
+
+                    <small id="imdb_id_help" class="form-text text-muted font-weight-bold">Must follow a valid IMDb ID format - <i>tt1234567</i> or <i>nm1234567</i></small>
+
+                                    </div>
+            </div>
+
+            <div class="form-group row">
+                <label for="tmdb_id" class="font-weight-bold col-sm-12 col-md-2 col-form-label">TMDb ID</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <input type="number" name="tmdb_id" value="" min="0" placeholder="TMDb ID" class="form-control">
+
+                                    </div>
+            </div>
+
+            <div class="form-group row">
+                <label for="tvdb_id" class="font-weight-bold col-sm-12 col-md-2 col-form-label">TVDb ID</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <input type="number" name="tvdb_id" value="" min="0" placeholder="TVDb ID" class="form-control">
+
+                                    </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary font-weight-bold w-100">Search</button>
+        </form>
+    </div>
+</div>
+
+                                    </li>
+                </ul>
+            </div>
+
+                <div class="px-3 px-xl-0">
+        <div class="row banner-image">
+            <div class="col-12 py-md-4">
+                <div class="container d-flex flex-column">
+                                            <img src="/images/logos/tpdb.svg" loading="lazy" class="col-md-12 col-lg-3 align-self-center" alt="The Poster Database Logo">
+                                    </div>
+
+                <form action="https://theposterdb.com/search" method="get" class="form-dark container  mt-4  p-0">
+    <div class="d-flex flex-row  justify-content-center ">
+        <div class="col-12  col-md-6  form-group m-0 p-0">
+            <div class="row no-gutters align-items-center">
+                <div class="col">
+                    <input name="term" type="text" id="term" placeholder="What would you like to search for?" class="form-control input-search-transparent no-focus rounded-pill form-control-lg" value="" required="">
+                </div>
+
+                <div class="col-auto">
+                    <div class="d-flex flex-row justify-content-between ml-n5">
+                                                    <button class="btn btn-outline-secondary border-0 rounded-pill ml-n45 no-focus" type="button" data-toggle="collapse" data-target="#advanced-search-collapse" aria-expanded="false" aria-controls="advanced-search-collapse"><i class="fa fa-filter"></i></button>
+                            <button class="btn btn-outline-secondary border-0 rounded-pill ml-n5 mr-2 no-focus" type="submit"><i class="fa fa-search"></i></button>
+                                            </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="collapse" id="advanced-search-collapse">
+    <div class="card card-body bg-dark-lighter col-12  offset-md-3  col-md-6 mt-2 ">
+        <form class="form-dark" method="GET" name="advanced_search" action="https://theposterdb.com/search/advanced/results">
+            <div class="form-group row">
+                <label for="category" class="font-weight-bold col-sm-12 col-md-2 col-form-label">Category <span class="text-danger font-weight-bold">*</span></label>
+
+                <div class="col-sm-12 col-md-10">
+                    <div class="input-group">
+                        
+                        <div class="dropdown bootstrap-select category_search border border-secondary rounded-pill flex-grow-1"><select name="category" class="category_search border border-secondary rounded-pill flex-grow-1" id="category" title="Select Category" required=""><option class="bs-title-option" value=""></option>
+                                                                                                <option value="All">All</option>
+                                                                                                                                <option value="Categories">Categories</option>
+                                                                                                                                <option value="Collections">Collections</option>
+                                                                                                                                <option value="Companies">Companies</option>
+                                                                                                                                <option value="Movies" selected="">Movies</option>
+                                                                                                                                <option value="People">People</option>
+                                                                                                                                <option value="Shows">Shows</option>
+                                                                                    </select><button type="button" tabindex="-1" class="btn dropdown-toggle btn-light" data-toggle="dropdown" role="combobox" aria-owns="bs-select-4" aria-haspopup="listbox" aria-expanded="false" data-id="category" title="Movies"><div class="filter-option"><div class="filter-option-inner"><div class="filter-option-inner-inner">Movies</div></div> </div></button><div class="dropdown-menu "><div class="bs-searchbox"><input type="search" class="form-control" autocomplete="off" placeholder="Search Options" role="combobox" aria-label="Search" aria-controls="bs-select-4" aria-autocomplete="list"></div><div class="inner show" role="listbox" id="bs-select-4" tabindex="-1"><ul class="dropdown-menu inner show" role="presentation"></ul></div></div></div>
+
+                        <div class="input-group-append category_tpdb_toggle  d-none ">
+                            <div class="input-group-text border-secondary bg-dark-lighter text-white rounded-pill-right">
+                                <div class="custom-control custom-checkbox">
+                                    <input type="checkbox" name="tpdb_collection" class="custom-control-input" id="tpdb_collection_search_page">
+                                    <label class="custom-control-label font-weight-bold" for="tpdb_collection_search_page">TPDb Collections Only</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                                    </div>
+            </div>
+
+            <hr class="mt-0 pt-0">
+
+            <div class="form-group row">
+                <label for="term" class="font-weight-bold col-sm-12 col-md-2 col-form-label">Term</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <input type="text" name="term" value="" placeholder="Term" class="form-control">
+
+                                    </div>
+            </div>
+
+            <div class="form-group row">
+                <label for="term" class="font-weight-bold col-sm-12 col-md-2 col-form-label">Year</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <div class="input-group">
+                        <div class="dropdown bootstrap-select border border-secondary rounded-pill-left"><select name="year_filter" class="border border-secondary rounded-pill-left" id="year_filter">
+                            
+                                                                                                <option value="" selected="" disabled="">Select Year Filter</option>
+                                                                                                                                <option value="between">Between</option>
+                                                                                                                                <option value="empty">Empty</option>
+                                                                                                                                <option value="equals">Equals</option>
+                                                                                                                                <option value="greater_than">Greater Than</option>
+                                                                                                                                <option value="greater_than_or_equal">Greater Than Or Equal</option>
+                                                                                                                                <option value="less_than">Less Than</option>
+                                                                                                                                <option value="less_than_or_equal">Less Than Or Equal</option>
+                                                                                                                                <option value="not_equal">Not Equal</option>
+                                                                                    </select><button type="button" tabindex="-1" class="btn dropdown-toggle btn-light bs-placeholder" data-toggle="dropdown" role="combobox" aria-owns="bs-select-5" aria-haspopup="listbox" aria-expanded="false" data-id="year_filter" title="Select Year Filter"><div class="filter-option"><div class="filter-option-inner"><div class="filter-option-inner-inner">Select Year Filter</div></div> </div></button><div class="dropdown-menu "><div class="bs-searchbox"><input type="search" class="form-control" autocomplete="off" placeholder="Search Options" role="combobox" aria-label="Search" aria-controls="bs-select-5" aria-autocomplete="list"></div><div class="inner show" role="listbox" id="bs-select-5" tabindex="-1"><ul class="dropdown-menu inner show" role="presentation"></ul></div></div></div>
+
+                        <input type="number" name="yone" value="" placeholder="Min" min="1888" max="2076" class="form-control rounded-left-0  rounded-pill-right ">
+                        <input type="number" name="ytwo" value="" placeholder="Max" min="1888" max="2076" class="form-control rounded-left-0  d-none ">
+                    </div>
+
+                    
+                                    </div>
+            </div>
+
+            <div class="form-group row people_department_filter  d-none ">
+                <label for="department" class="font-weight-bold col-sm-12 col-md-2 col-form-label">Department</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <div class="input-group">
+                        
+                        <div class="dropdown bootstrap-select department_search border border-secondary rounded-pill flex-grow-1"><select name="department" class="department_search border border-secondary rounded-pill flex-grow-1" id="department" title="Select Department"><option class="bs-title-option" value=""></option>
+                                                                                                <option value="All">All</option>
+                                                                                                                                <option value="Empty">Empty</option>
+                                                                                                                                <option value="Acting">Acting</option>
+                                                                                                                                <option value="Actors">Actors</option>
+                                                                                                                                <option value="Art">Art</option>
+                                                                                                                                <option value="Camera">Camera</option>
+                                                                                                                                <option value="Costume &amp; Make-Up">Costume &amp; Make-Up</option>
+                                                                                                                                <option value="Creator">Creator</option>
+                                                                                                                                <option value="Crew">Crew</option>
+                                                                                                                                <option value="Directing">Directing</option>
+                                                                                                                                <option value="Editing">Editing</option>
+                                                                                                                                <option value="Lighting">Lighting</option>
+                                                                                                                                <option value="Production">Production</option>
+                                                                                                                                <option value="Sound">Sound</option>
+                                                                                                                                <option value="Visual Effects">Visual Effects</option>
+                                                                                                                                <option value="Writing">Writing</option>
+                                                                                    </select><button type="button" tabindex="-1" class="btn dropdown-toggle btn-light bs-placeholder" data-toggle="dropdown" role="combobox" aria-owns="bs-select-6" aria-haspopup="listbox" aria-expanded="false" data-id="department" title="Select Department"><div class="filter-option"><div class="filter-option-inner"><div class="filter-option-inner-inner">Select Department</div></div> </div></button><div class="dropdown-menu "><div class="bs-searchbox"><input type="search" class="form-control" autocomplete="off" placeholder="Search Options" role="combobox" aria-label="Search" aria-controls="bs-select-6" aria-autocomplete="list"></div><div class="inner show" role="listbox" id="bs-select-6" tabindex="-1"><ul class="dropdown-menu inner show" role="presentation"></ul></div></div></div>
+                    </div>
+
+                                    </div>
+            </div>
+
+            <hr class="mt-0 pt-0">
+
+            <div class="form-group row">
+                <label for="imdb_id" class="font-weight-bold col-sm-12 col-md-2 col-form-label">IMDb ID</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <input type="text" name="imdb_id" value="tt0000000" min="0" placeholder="IMDb ID" class="form-control" pattern="(nm|tt)\d{7,8}">
+
+                    <small id="imdb_id_help" class="form-text text-muted font-weight-bold">Must follow a valid IMDb ID format - <i>tt1234567</i> or <i>nm1234567</i></small>
+
+                                    </div>
+            </div>
+
+            <div class="form-group row">
+                <label for="tmdb_id" class="font-weight-bold col-sm-12 col-md-2 col-form-label">TMDb ID</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <input type="number" name="tmdb_id" value="" min="0" placeholder="TMDb ID" class="form-control">
+
+                                    </div>
+            </div>
+
+            <div class="form-group row">
+                <label for="tvdb_id" class="font-weight-bold col-sm-12 col-md-2 col-form-label">TVDb ID</label>
+
+                <div class="col-sm-12 col-md-10">
+                    <input type="number" name="tvdb_id" value="" min="0" placeholder="TVDb ID" class="form-control">
+
+                                    </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary font-weight-bold w-100">Search</button>
+        </form>
+    </div>
+</div>
+
+            </div>
+        </div>
+    </div>
+
+    <div class="container mt-4">
+        <p class="h1 text-wrap w-100 text-uppercase font-weight-bold">
+            Search Results
+
+            <br>
+
+            </p><div class="d-flex flex-row align-items-baseline">
+                <p class="h6 mb-0">Powered By</p>
+                <a href="https://themoviedb.org" target="_blank" data-toggle="tooltip" title="The Movie Database"><img class="tmdb-logo ml-2" loading="lazy" src="/images/logos/powered_by_tmdb.svg" alt="The Movie Database Logo"></a>
+            </div>
+        <p></p>
+
+                                    <p class="h3 text-center">No results were found or there was an issue gathering and processing results.</p>
+
+                <p class="h3 text-center">Please refresh and try again.</p>
+                        </div>
+
+    <div class="bg-dark-lighter mt-4 py-4 card rounded-0 pro-ad-hover">
+    <div class="container text-center">
+        <p class="h5 font-weight-bold">Can't find what you're looking for?</p>
+
+            
+            <p>Feel free to reach out to us and we'll be more than happy to help you find what you're looking for! <a href="https://theposterdb.com/support" class="font-weight-bold">Contact Us!</a></p>
+        </div>
+    </div>        </main>
+
+        
+                    <footer class="mt-auto">
+    <div class="container text-center mt-4 py-2 w-100 d-block text-secondary">
+        <div class="row">
+            <div class="col-12 col-lg-3 mt-4 mt-md-0">
+                                    <a href="https://theposterdb.com"><img src="/images/logos/tpdb.svg" loading="lazy" class="w-100" alt="The Poster Database Logo"></a>
+                                
+                
+                
+
+                <ul class="list-group list-group-horizontal w-100 d-flex align-self-center justify-content-between">
+                    <li class="list-group-item bg-transparent border-0 h3 px-0"><a target="_blank" class="white_orange_link" data-toggle="tooltip" data-placement="top" title="Discord" href="https://discord.com/invite/NARZqQX"><i class="fab fa-discord"></i></a></li>
+                    <li class="list-group-item bg-transparent border-0 h3 px-0"><a target="_blank" class="white_orange_link" data-toggle="tooltip" data-placement="top" title="Facebook" href="https://www.facebook.com/theposterdb"><i class="fab fa-facebook-square"></i></a></li>
+                    <li class="list-group-item bg-transparent border-0 h3 px-0"><a target="_blank" class="white_orange_link" data-toggle="tooltip" data-placement="top" title="Instagram" href="https://www.instagram.com/theposterdb"><i class="fab fa-instagram"></i></a></li>
+                    <li class="list-group-item bg-transparent border-0 h3 px-0"><a target="_blank" class="white_orange_link" data-toggle="tooltip" data-placement="top" title="Reddit" href="https://www.reddit.com/r/ThePosterDB"><i class="fab fa-reddit"></i></a></li>
+                    <li class="list-group-item bg-transparent border-0 h3 px-0"><a target="_blank" class="white_orange_link" data-toggle="tooltip" data-placement="top" title="Twitch" href="https://twitch.com/ThePosterDB"><i class="fab fa-twitch"></i></a></li>
+                    <li class="list-group-item bg-transparent border-0 h3 px-0"><a target="_blank" class="white_orange_link" data-toggle="tooltip" data-placement="top" title="Twitter" href="https://twitter.com/ThePosterDB"><i class="fab fa-twitter"></i></a></li>
+                    <li class="list-group-item bg-transparent border-0 h3 px-0"><a target="_blank" class="white_orange_link" data-toggle="tooltip" data-placement="top" title="YouTube" href="https://youtube.com/@ThePosterDB"><i class="fab fa-youtube"></i></a></li>
+                    <li class="list-group-item bg-transparent border-0 h3 px-0"><a target="_blank" class="white_orange_link" data-toggle="tooltip" data-placement="top" title="Merch" href="https://merch.theposterdb.com"><i class="fas fa-tshirt"></i></a></li>
+                </ul>
+            </div>
+
+            <div class="col-12 offset-lg-1 col-lg-6">
+                <div class="row text-uppercase text-left text-white">
+                    <div class="col-6 col-md mt-2 mt-md-0">
+                        <p class="h3 font-weight-bold">Site Links</p>
+
+                        <ul class="list-group h6">
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/official">Official</a></li>
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/recent">Recent</a></li>
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/discover">Discover</a></li>
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/site-map">Site Map</a></li>
+                        </ul>
+                    </div>
+
+                    <div class="col-6 col-md mt-2 mt-md-0">
+                        <p class="h3 font-weight-bold">Legal</p>
+
+                        <ul class="list-group h6">
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/terms">Terms of Service</a></li>
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/privacy">Privacy Policy</a></li>
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/rules">Rules and Guidelines</a></li>
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/branding">Branding Guideline</a></li>
+                        </ul>
+                    </div>
+
+                    <div class="col-6 col-md mt-2 mt-md-0">
+                        <p class="h3 font-weight-bold">About</p>
+
+                        <ul class="list-group h6">
+                            
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/faq">Frequently Asked Questions</a></li>
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/change-log">Change Log</a></li>
+                            <li class="list-group-item bg-transparent border-0 p-0 pt-1"><a class="white_orange_link" href="https://theposterdb.com/support">Support</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <p class="font-weight-bold mb-0">This product uses the TMDb API but is not endorsed or certified by TMDb.</p>
+            </div>
+        </div>
+    </div>
+</footer>        
+        <div class="modal fade" id="report-poster" tabindex="-1" role="dialog" aria-labelledby="report-poster" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Report Issue</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">×</span></button>
+            </div>
+
+            <form action="https://theposterdb.com/poster/__poster_id__/report" method="post" id="poster_report_form" class="form-dark">
+                <input type="hidden" name="_token" value="fixture-token" autocomplete="off">
+                <input type="hidden" name="poster_id" value="">
+
+                <div class="modal-body">
+                    <div>
+                        <p class="font-weight-bold pb-0 mb-0">Issue Category</p>
+
+                        <div class="row px-3">
+                                                            <div class="custom-control custom-radio col-12 col-md-6">
+                                    <input type="radio" class="custom-control-input" id="issue_bad_image" name="issue" required="" value="bad_image">
+                                    <label class="custom-control-label" for="issue_bad_image">Bad Image</label>
+                                </div>
+                                                            <div class="custom-control custom-radio col-12 col-md-6">
+                                    <input type="radio" class="custom-control-input" id="issue_copyright" name="issue" required="" value="copyright">
+                                    <label class="custom-control-label" for="issue_copyright">Copyright Infringement</label>
+                                </div>
+                                                            <div class="custom-control custom-radio col-12 col-md-6">
+                                    <input type="radio" class="custom-control-input" id="issue_design_issue" name="issue" required="" value="design_issue">
+                                    <label class="custom-control-label" for="issue_design_issue">Design Issue</label>
+                                </div>
+                                                            <div class="custom-control custom-radio col-12 col-md-6">
+                                    <input type="radio" class="custom-control-input" id="issue_duplicate" name="issue" required="" value="duplicate">
+                                    <label class="custom-control-label" for="issue_duplicate">Duplicate</label>
+                                </div>
+                                                            <div class="custom-control custom-radio col-12 col-md-6">
+                                    <input type="radio" class="custom-control-input" id="issue_incorrect" name="issue" required="" value="incorrect">
+                                    <label class="custom-control-label" for="issue_incorrect">Incorrect Content</label>
+                                </div>
+                                                            <div class="custom-control custom-radio col-12 col-md-6">
+                                    <input type="radio" class="custom-control-input" id="issue_nudity_pornography" name="issue" required="" value="nudity_pornography">
+                                    <label class="custom-control-label" for="issue_nudity_pornography">Nudity or Pornography</label>
+                                </div>
+                                                            <div class="custom-control custom-radio col-12 col-md-6">
+                                    <input type="radio" class="custom-control-input" id="issue_offensive_spam" name="issue" required="" value="offensive_spam">
+                                    <label class="custom-control-label" for="issue_offensive_spam">Offensive or Spam</label>
+                                </div>
+                                                            <div class="custom-control custom-radio col-12 col-md-6">
+                                    <input type="radio" class="custom-control-input" id="issue_other" name="issue" required="" value="other">
+                                    <label class="custom-control-label" for="issue_other">Other</label>
+                                </div>
+                                                    </div>
+                    </div>
+
+                    <div class="form-group mt-2">
+                        <label for="reason" class="font-weight-bold">Extra Details <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="reason" rows="3" name="reason" maxlength="1000" placeholder="Please provide some extra details about this report." required=""></textarea>
+                    </div>
+
+                    <div class="form-group mt-2">
+                        <label for="reference_link" class="font-weight-bold">Reference Link</label>
+                        <input type="url" class="form-control" id="reference_link" name="reference_link" placeholder="Reference Link">
+                        <small class="form-text text-muted font-weight-bold">Do you have a reference link for the report you'd like to include?</small>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary font-weight-bold" data-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-danger font-weight-bold" id="submit-report">Report</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>        <div class="modal fade" id="share_modal" tabindex="-1" role="dialog" aria-labelledby="share_modal" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Share!</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">×</span></button>
+            </div>
+
+            <div class="modal-body d-flex justify-content-center">
+                <div class="btn-group mt-2">
+                    <a class="btn btn-info clipboard_share copy_share_link font-weight-bold" href="" onclick="if (!window.__cfRLUnblockHandlers) return false; return false;" data-clipboard-text="https://theposterdb.com/search/advanced/results" data-toggle="tooltip" data-placement="top" title="Copy Page Link"><i class="fas fa-link"></i> <span class="d-none d-md-inline">Copy Page Link</span></a>
+                    <a class="btn btn-secondary font-weight-bold" href="mailto:?subject=I%20just%20found%20this%20amazing%20page%20over%20at%20The%20Poster%20Database!&amp;body=I%20just%20found%20this%20amazing%20page%20over%20at%20The%20Poster%20Database!%20--%20https%3A%2F%2Ftheposterdb.com%2Fsearch%2Fadvanced%2Fresults" data-toggle="tooltip" data-placement="top" title="Share Through Email"><i class="fas fa-envelope"></i> <span class="d-none d-md-inline">Email</span></a>
+                    <a class="btn btn-primary font-weight-bold" href="sms:?&amp;body=I%20just%20found%20this%20amazing%20page%20over%20at%20The%20Poster%20Database!%20--%20https%3A%2F%2Ftheposterdb.com%2Fsearch%2Fadvanced%2Fresults" data-toggle="tooltip" data-placement="top" title="Share Through SMS"><i class="fas fa-sms"></i> <span class="d-none d-md-inline">SMS</span></a>
+                    <a href="https://www.facebook.com/sharer/sharer.php?u=https://theposterdb.com/search/advanced/results" target="_blank" class="social-button btn btn-share-facebook font-weight-bold " id="" data-toggle="tooltip" data-placement="top" title="Share Through Facebook"><span class="fab fa-facebook-square"></span> <span class="d-none d-md-inline">Facebook</span></a><a href="https://www.reddit.com/submit?title=I+just+found+this+amazing+page+over+at+The+Poster+Database%21&amp;url=https://theposterdb.com/search/advanced/results" target="_blank" class="social-button btn btn-share-reddit font-weight-bold " id="" data-toggle="tooltip" data-placement="top" title="Share Through Reddit"><span class="fab fa-reddit"></span> <span class="d-none d-md-inline">Reddit</span></a><a href="https://twitter.com/intent/tweet?text=I+just+found+this+amazing+page+over+at+The+Poster+Database%21&amp;url=https://theposterdb.com/search/advanced/results" target="_blank" class="social-button btn btn-share-twitter font-weight-bold " id="" data-toggle="tooltip" data-placement="top" title="Share Through Twitter"><span class="fab fa-twitter"></span> <span class="d-none d-md-inline">Twitter</span></a><a href="https://wa.me/?text=https://theposterdb.com/search/advanced/results" target="_blank" class="social-button btn btn-share-whatsapp font-weight-bold " id="" data-toggle="tooltip" data-placement="top" title="Share Through WhatsApp"><span class="fab fa-whatsapp"></span> <span class="d-none d-md-inline">WhatsApp</span></a>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary font-weight-bold" data-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+        <!-- Scripts -->
+        <script src="/js/app.js" type="text/javascript"></script>
+
+        
+        <script type="text/javascript"></script>
+    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon="{&quot;version&quot;:&quot;2024.11.0&quot;,&quot;token&quot;:&quot;85cf3bbb79d5497cbe62d53498db6d4f&quot;,&quot;spa&quot;:2}" crossorigin="anonymous"></script>
+
+<div id="lightboxOverlay" tabindex="-1" class="lightboxOverlay" style="display: none;"></div><div id="lightbox" tabindex="-1" class="lightbox" style="display: none;"><div class="lb-outerContainer"><div class="lb-container"><img class="lb-image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt=""><div class="lb-nav"><a class="lb-prev" role="button" tabindex="0" aria-label="Previous image" href=""></a><a class="lb-next" role="button" tabindex="0" aria-label="Next image" href=""></a></div><div class="lb-loader"><a class="lb-cancel" role="button" tabindex="0"></a></div></div></div><div class="lb-dataContainer"><div class="lb-data"><div class="lb-details"><span class="lb-caption"></span><span class="lb-number"></span></div><div class="lb-closeContainer"><a class="lb-close" role="button" tabindex="0"></a></div></div></div></div></body></html>

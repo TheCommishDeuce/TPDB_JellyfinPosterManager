@@ -237,8 +237,11 @@ def create_app(config=None, store=None, job_queue=None):
         mapping = override or normalize_tpdb_page(store.values('mapping').get(item_id, ''))
         use_cache = request.args.get('use_cache', 'true').lower() != 'false'
         preferred = service.preferred_uploaders()
+        provider_ids = item.get('ProviderIds', {})
+        # The IDs pick the TPDb page now, so text-search results cached before ID lookup must not be reused.
         key = cache.key({'item': item, 'seasons': seasons, 'mapping': mapping, 'limit': limit, 'set': set_url,
-                         'preferred_uploaders': preferred})
+                         'preferred_uploaders': preferred,
+                         'tpdb_ids': {'imdb': provider_ids.get('Imdb'), 'tmdb': provider_ids.get('Tmdb')}})
         cached = cache.get(key) if use_cache and not override else None
         if cached:
             return jsonify(dict(cached, from_cache=True))
@@ -246,7 +249,7 @@ def create_app(config=None, store=None, job_queue=None):
             return jsonify(cache_miss=True, from_cache=False)
         result = scraper.search_tpdb_for_poster_groups(
             item['title'], item_year=item.get('year'), item_type=item.get('type'),
-            tmdb_id=item.get('ProviderIds', {}).get('Tmdb'), eligible_seasons=seasons,
+            tmdb_id=provider_ids.get('Tmdb'), imdb_id=provider_ids.get('Imdb'), eligible_seasons=seasons,
             max_posters=limit if item.get('type') == 'Series' else Config.MAX_POSTERS_PER_ITEM,
             requested_set_urls=[set_url] if set_url else None, tpdb_item_url=mapping,
             include_base64=False, preferred_uploaders=preferred,
@@ -350,7 +353,7 @@ def create_app(config=None, store=None, job_queue=None):
             raise ValueError('Missing title')
         result = scraper.search_tpdb_for_poster_groups(
             title, item_year=request.args.get('year', type=int), item_type=request.args.get('type'),
-            tmdb_id=request.args.get('tmdb_id'),
+            tmdb_id=request.args.get('tmdb_id'), imdb_id=request.args.get('imdb_id'),
             max_posters=max(1, min(request.args.get('max_posters', default=3, type=int), 18)),
             include_base64=False,
         )
