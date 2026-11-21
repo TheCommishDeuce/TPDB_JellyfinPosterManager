@@ -51,7 +51,7 @@ selenium_lock = threading.RLock()
 SEARCH_RESULT_SELECTOR = "a.btn.btn-dark-lighter.flex-grow-1.text-truncate.py-2.text-left.position-relative"
 ITEM_POSTER_SELECTOR = "a.bg-transparent.border-0.text-white"
 TPDB_PAGE_REQUEST_DELAY_SEC = 1.25
-TPDB_ITEM_MAX_PAGES = 3  # Poster pages list ~24 cards each; later pages are only read up to this limit.
+TPDB_ITEM_MAX_PAGES = 25  # Safety cap on following a poster page's next links (~24 cards per page).
 TPDB_IMAGE_PREVIEW_DELAY_SEC = 0.75
 TPDB_IMAGE_PREVIEW_RETRY_DELAY_SEC = 3
 TPDB_PREVIEW_MAX_SIZE = (160, 242)
@@ -744,12 +744,18 @@ def _tpdb_next_page_url(soup):
     return _tpdb_absolute_url(link.get('href')) if link else None
 
 
-def _load_more_tpdb_item_cards(item_soup):
-    """Follow "next page" links from an open TPDb poster page, up to TPDB_ITEM_MAX_PAGES pages in all."""
+def _load_more_tpdb_item_cards(item_soup, preferred_uploaders=None):
+    """Page 1's cards plus preferred uploaders' cards from the poster page's later pages."""
     cards = item_soup.select(ITEM_POSTER_SELECTOR)
+    preferred = {str(name).casefold() for name in preferred_uploaders or []}
+    if not preferred:
+        return cards  # Only page 1 can be shown, so don't load the rest.
+    first_page_count = len(cards)
     next_url = _tpdb_next_page_url(item_soup)
-    for _ in range(TPDB_ITEM_MAX_PAGES - 1):
-        if not next_url:
+    pages = 1
+    while next_url:
+        if pages >= TPDB_ITEM_MAX_PAGES:
+            logging.warning("Stopped after %s TPDb pages; not loading %s.", pages, next_url)
             break
         _open_tpdb_page_with_delay(next_url)
         current_url = selenium_driver.current_url
@@ -761,9 +767,16 @@ def _load_more_tpdb_item_cards(item_soup):
         except TimeoutError:
             logging.warning("Timed out loading TPDb page %s; using the pages already loaded.", next_url)
             break
+        pages += 1
         page_soup = BeautifulSoup(selenium_driver.page_source, 'html.parser')
-        cards += page_soup.select(ITEM_POSTER_SELECTOR)
+        cards += [
+            link for link in page_soup.select(ITEM_POSTER_SELECTOR)
+            if (_extract_tpdb_card_metadata(link).get('uploader') or '').casefold() in preferred
+        ]
         next_url = _tpdb_next_page_url(page_soup)
+    if pages > 1:
+        logging.info("Read %s TPDb pages; kept %s preferred-uploader posters after page 1.",
+                     pages, len(cards) - first_page_count)
     return cards
 
 
@@ -985,7 +998,7 @@ def _search_tpdb_for_poster_groups(
 
                         # Sort before trimming so a preferred uploader on a later page isn't cut off.
                         item_cards = _order_by_preferred_uploaders(
-                            _load_more_tpdb_item_cards(item_soup), preferred_uploaders)[:set_discovery_limit]
+                            _load_more_tpdb_item_cards(item_soup, preferred_uploaders), preferred_uploaders)[:set_discovery_limit]
                         for poster_link in item_cards:
                             href = poster_link.get('href')
                             poster_url = _tpdb_absolute_url(href)
