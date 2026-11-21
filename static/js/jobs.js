@@ -146,6 +146,22 @@ async function refreshNewJobArtwork(job) {
     }
 }
 
+// Called from the page right after the job panel, so jobs and progress show while the grid is still loading.
+// The full poll (selections, failed and processed lists) starts once the page has loaded.
+function showJobQueueEarly() {
+    fetch('/jobs').then(response => (response.ok ? response.json() : null)).then(data => {
+        if (!data || jobQueueInitialized) return;
+        const jobs = data.jobs || [];
+        renderJobQueue(jobs);
+        const saved = jobs.find(job => job.job_id === getSavedActiveAutoBatchJob());
+        const active = (saved && !saved.done ? saved : null) || jobs.find(job => job.status === 'running') || jobs.find(job => !job.done);
+        if (!active) return;
+        autoBatchStartedAt = Date.parse(active.created_at);
+        setAutoBatchRunning(true);
+        updateAutoBatchProgress(active);
+    }).catch(error => console.warn('Job progress temporarily unavailable:', error));
+}
+
 async function loadJobQueue() {
     if (jobQueueLoading) return;
     jobQueueLoading = true;

@@ -81,6 +81,23 @@ test('job polls only refresh artwork for results added since the last poll', asy
     assert.ok(requested.includes('/jobs/run/results?start=1'));
 });
 
+test('the job panel and progress show before the grid has loaded', async () => {
+    const context = browser();
+    const shown = [];
+    const job = { job_id: 'run', status: 'running', done: false, created_at: '2026-01-01T00:00:00Z', result_count: 0 };
+    context.fetch = async () => ({ ok: true, json: async () => ({ jobs: [job] }) });
+    context.renderJobQueue = jobs => shown.push(['panel', jobs.length]);
+    context.setAutoBatchRunning = running => shown.push(['running', running]);
+    context.updateAutoBatchProgress = active => shown.push(['progress', active.job_id]);
+    context.showJobQueueEarly();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(shown, [['panel', 1], ['running', true], ['progress', 'run']]);
+    const page = fs.readFileSync('templates/index.html', 'utf8');
+    assert.ok(page.indexOf('showJobQueueEarly()') < page.indexOf('item-card-wrapper'));
+    const layout = fs.readFileSync('templates/layout.html', 'utf8');
+    assert.ok(layout.indexOf("filename='js/jobs.js'") < layout.indexOf('{% block content %}'));
+});
+
 test('the loading popup is armed before the picker cache check', async () => {
     const context = browser();
     const events = [];
