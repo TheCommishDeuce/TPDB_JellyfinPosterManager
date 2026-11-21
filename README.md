@@ -61,7 +61,7 @@ A modern web application for automatically finding and uploading high-quality po
 
 ## 📋 Requirements
 
-- **Python 3.10+** on macOS or Linux (the single-worker lock uses POSIX file locking)
+- **Python 3.10+** on Linux, macOS or Windows
 - **Jellyfin Server** (including Jellyfin 12.x)
 - **ThePosterDB Credentials** (free registration required)
 - **Chrome / Chromium** for Selenium-based TPDb browsing
@@ -80,13 +80,14 @@ pip install -r requirements.txt
 
 The app drives a headless Chromium to browse ThePosterDB, so a native (non-Docker) install also needs a browser **and a matching chromedriver**:
 
-| Distro | Install |
+| Platform | Install |
 |---|---|
 | Debian / Ubuntu (apt) | `sudo apt install chromium chromium-driver` |
 | Ubuntu (snap Chromium) | `sudo snap install chromium`, then set `CHROMEDRIVER_PATH=/snap/bin/chromium.chromedriver` |
 | Arch / CachyOS | `sudo pacman -S chromium` (includes `chromedriver`) |
 | Fedora | `sudo dnf install chromium chromedriver` |
 | macOS | `brew install --cask chromium` and `brew install chromedriver` |
+| Windows | Install Google Chrome; Selenium Manager downloads a matching chromedriver |
 
 If Chromium or chromedriver are not on `PATH`, set `CHROME_BINARY` and/or `CHROMEDRIVER_PATH` (environment variables or `config.py`). With neither set, Selenium Manager tries to locate or download a matching driver. If the browser can't start, the UI shows the real error (for example a Chrome/driver version mismatch) instead of a timeout.
 

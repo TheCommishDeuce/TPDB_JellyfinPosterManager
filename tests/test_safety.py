@@ -292,6 +292,24 @@ class IntegrationTests(OfflineCase):
         finally:
             first.close()
 
+    def test_worker_lock_holds_across_processes_and_is_released_on_close(self):
+        import subprocess
+        import sys
+        from jobs import JobQueue
+        # A second web process (not just a second queue in this one) must be refused too.
+        probe = ('import sys, jobs\n'
+                 'handle = open(sys.argv[1], "a")\n'
+                 'try:\n    jobs._lock_worker_file(handle)\nexcept OSError:\n    sys.exit(3)\n')
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        lock_path = self.store.path + '.worker.lock'
+        first = JobQueue(self.store, self.service)
+        try:
+            other = subprocess.run([sys.executable, '-c', probe, lock_path], cwd=root, timeout=60)
+            self.assertEqual(other.returncode, 3)
+        finally:
+            first.close()
+        JobQueue(self.store, self.service).close()  # Free again once the first worker closed.
+
     def test_auto_filter_respects_library_and_protected(self):
         movie = dict(ITEM, id='movie', type='Movie', library_id='movies')
         protected = dict(movie, id='protected')

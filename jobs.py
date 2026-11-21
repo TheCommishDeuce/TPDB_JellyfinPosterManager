@@ -1,10 +1,26 @@
 """One local worker for all uploads; checkpoints precede and follow each target."""
-import fcntl
 import threading
 import uuid
 
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+    import msvcrt
+
 import poster_scraper as scraper
 from state_store import timestamp
+
+
+def _lock_worker_file(handle):
+    """Take an exclusive, non-blocking lock on the worker lock file; OSError if another worker has it."""
+    if fcntl:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    else:
+        # Windows byte-range locks belong to the open handle, so a second handle is refused
+        # even within the same process. Locking a byte past the end of the file is allowed.
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
 
 
 class JobQueue:
@@ -22,7 +38,7 @@ class JobQueue:
         if start_worker:
             self.worker_lock = open(store.path + '.worker.lock', 'a')
             try:
-                fcntl.flock(self.worker_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _lock_worker_file(self.worker_lock)
             except OSError:
                 self.worker_lock.close()
                 raise RuntimeError('Another poster worker is using this database. Run one web process.')
