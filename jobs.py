@@ -4,7 +4,7 @@ import threading
 import uuid
 
 import poster_scraper as scraper
-from state_store import timestamp
+from state_store import summarize_errors, timestamp
 
 
 class JobQueue:
@@ -156,7 +156,7 @@ class JobQueue:
                 'item_id': item['id'], 'item_title': item.get('title', item['id']),
                 'success': success, 'uploaded_any': uploaded_any,
                 'status': 'success' if success else 'skipped' if skipped else 'partial' if pending or uploaded_any else 'failed',
-                'error': '; '.join(target.get('error') or '' for target in targets if target.get('error')) or ('Unfinished targets remain' if pending else None),
+                'error': summarize_errors(targets) or ('Unfinished targets remain' if pending else None),
                 'poster_url': next((target.get('url') for target in targets if target['target_id'] == item['id'] and target['status'] == 'success'), None),
                 'primary_uploaded': any(target['target_id'] == item['id'] and target['status'] == 'success' for target in targets),
                 'season_results': [dict(season_id=target['target_id'], season_title=target['title'],

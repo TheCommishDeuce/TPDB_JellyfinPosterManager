@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -9,6 +10,35 @@ from datetime import datetime, timezone
 
 def timestamp():
     return datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
+
+
+def _target_names(titles):
+    """Season titles become ranges ("Seasons 1-3, 5"); other titles are kept as they are."""
+    numbers = sorted({int(match.group(1)) for title in titles if (match := re.fullmatch(r'Season (\d+)', title))})
+    others = [title for title in dict.fromkeys(titles) if not re.fullmatch(r'Season \d+', title)]
+    ranges = []
+    for number in numbers:
+        if ranges and number == ranges[-1][1] + 1:
+            ranges[-1][1] = number
+        else:
+            ranges.append([number, number])
+    spans = [f'{start}' if start == end else f'{start}\u2013{end}' for start, end in ranges]
+    seasons = [f"Season{'s' if len(numbers) > 1 else ''} {', '.join(spans)}"] if spans else []
+    return ', '.join(seasons + others)
+
+
+def summarize_errors(targets, title_key='title', default=''):
+    """Each distinct error once, followed by the targets it hit: "No poster (Seasons 1-28, 30)"."""
+    grouped = {}
+    for target in targets:
+        error = target.get('error') or default
+        if error:
+            grouped.setdefault(error, []).append(target.get(title_key) or '')
+    parts = []
+    for error, titles in grouped.items():
+        names = _target_names([title for title in titles if title and title != 'Primary'])
+        parts.append(f'{error} ({names})' if names else error)
+    return '; '.join(parts) or None
 
 
 class StateStore:
@@ -122,7 +152,7 @@ class StateStore:
                 continue
             incomplete = any(entry['status'] in ('pending', 'uploading') for entry in entries)
             latest['status'] = 'failed' if failed else 'pending' if incomplete else 'success'
-            latest['error'] = '; '.join(entry.get('error') or 'Upload failed' for entry in failed) or None
+            latest['error'] = summarize_errors(failed, title_key='target_title', default='Upload failed')
             latest['failed_targets'] = [
                 {'target_id': entry['target_id'], 'title': entry['target_title'], 'url': entry.get('poster_url'),
                  'status': entry['status'], 'error': entry.get('error')}
