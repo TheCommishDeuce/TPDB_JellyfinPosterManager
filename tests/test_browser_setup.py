@@ -50,6 +50,69 @@ class BrowserSetupTests(unittest.TestCase):
                 scraper._start_chrome(scraper.Options(), None)
 
 
+class FakeBrowser:
+    def __init__(self, user_agent, error=None):
+        self.hints = {
+            'userAgent': user_agent, 'brands': [{'brand': 'Chromium', 'version': '156'}],
+            'fullVersionList': [{'brand': 'Chromium', 'version': '156.0.8078.79'}], 'platform': 'Linux',
+            'platformVersion': '6.6.0', 'architecture': 'x86', 'model': '', 'mobile': False, 'bitness': '64', 'wow64': False,
+        }
+        self.error, self.visited, self.cdp = error, [], []
+
+    def get(self, url):
+        self.visited.append(url)
+
+    def execute_script(self, _script):
+        if self.error:
+            raise self.error
+        return dict(self.hints)
+
+    def execute_cdp_cmd(self, command, params):
+        self.cdp.append((command, params))
+
+
+class UserAgentTests(unittest.TestCase):
+    HEADLESS = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36'
+
+    def test_user_agent_is_the_real_browser_without_the_headless_marker(self):
+        browser = FakeBrowser(self.HEADLESS)
+        scraper._match_user_agent_to_browser(browser)
+        self.assertEqual(browser.visited, ['chrome://version'])  # Local page: nothing is sent to TPDb.
+        (command, params), = browser.cdp
+        self.assertEqual(command, 'Network.setUserAgentOverride')
+        self.assertEqual(params['userAgent'], self.HEADLESS.replace('HeadlessChrome', 'Chrome'))
+        # Client hints keep the real browser's values; without them navigator.userAgentData goes blank.
+        metadata = params['userAgentMetadata']
+        self.assertEqual(metadata['brands'], [{'brand': 'Chromium', 'version': '156'}])
+        self.assertEqual((metadata['platform'], metadata['fullVersionList'][0]['version']), ('Linux', '156.0.8078.79'))
+        self.assertNotIn('userAgent', metadata)
+
+    def test_a_non_headless_user_agent_is_left_alone(self):
+        browser = FakeBrowser(self.HEADLESS.replace('HeadlessChrome', 'Chrome'))
+        scraper._match_user_agent_to_browser(browser)
+        self.assertEqual(browser.cdp, [])
+
+    def test_failure_to_read_the_user_agent_is_not_fatal(self):
+        browser = FakeBrowser(self.HEADLESS, error=WebDriverException('javascript error'))
+        with self.assertLogs(level='WARNING'):
+            scraper._match_user_agent_to_browser(browser)
+        self.assertEqual(browser.cdp, [])
+
+    def test_no_fixed_user_agent_is_passed_to_chrome(self):
+        started = []
+
+        def start(options, _binary):
+            started.append(options)
+            raise scraper.BrowserUnavailable('stop here')
+        with patch.object(scraper, 'selenium_driver', None), patch.object(scraper, '_chrome_binary', return_value=None), \
+                patch.object(scraper.Config, 'TPDB_EMAIL', 'fixture@example.invalid', create=True), \
+                patch.object(scraper.Config, 'TPDB_PASSWORD', 'fixture-password', create=True), \
+                patch.object(scraper, '_start_chrome', side_effect=start):
+            with self.assertRaises(scraper.BrowserUnavailable):
+                scraper.setup_selenium_and_login()
+        self.assertFalse([argument for argument in started[0].arguments if argument.startswith('--user-agent')])
+
+
 class BrowserUnavailableApiTests(OfflineCase):
     def test_posters_endpoint_reports_browser_problem_as_503(self):
         problem = scraper.BrowserUnavailable('Could not start headless Chrome: no chromedriver')

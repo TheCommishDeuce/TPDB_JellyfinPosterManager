@@ -226,6 +226,37 @@ def _start_chrome(chrome_options, chrome_binary):
         ) from error
 
 
+# Read on chrome://version: a secure page (navigator.userAgentData needs one) that loads nothing remotely.
+BROWSER_HINTS_SCRIPT = (
+    "const hints = await navigator.userAgentData.getHighEntropyValues("
+    "['architecture', 'bitness', 'fullVersionList', 'model', 'platformVersion', 'wow64']);"
+    "return Object.assign(hints, {userAgent: navigator.userAgent});"
+)
+
+
+def _match_user_agent_to_browser(driver):
+    """Drop headless Chrome's "HeadlessChrome" marker, keeping its real version and platform.
+
+    A fixed user agent goes stale as the installed Chrome updates, and one that disagrees with the
+    browser it runs in is itself a bot signal. Client hints are passed through unchanged: overriding
+    only the user agent string would blank navigator.userAgentData.
+    """
+    try:
+        driver.get("chrome://version")
+        hints = driver.execute_script(BROWSER_HINTS_SCRIPT) or {}
+        user_agent = hints.get("userAgent", "")
+        if "HeadlessChrome" not in user_agent:
+            return
+        metadata = {key: hints[key] for key in ("brands", "fullVersionList", "platform", "platformVersion",
+                                                "architecture", "model", "mobile", "bitness", "wow64") if key in hints}
+        driver.execute_cdp_cmd("Network.setUserAgentOverride", {
+            "userAgent": user_agent.replace("HeadlessChrome", "Chrome"), "userAgentMetadata": metadata,
+        })
+    except Exception as error:
+        # Non-fatal: the browser keeps its own (headless) user agent.
+        logging.warning("Could not adjust the browser user agent: %s", error)
+
+
 def setup_selenium_and_login(force=False):
     """
     Initialize a singleton Selenium driver and log into ThePosterDB.
@@ -257,10 +288,6 @@ def setup_selenium_and_login(force=False):
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
             chrome_options.add_argument("--lang=en-US")
-            chrome_options.add_argument(
-                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            )
             excluded_switches = ["enable-automation"]
             if not getattr(Config, "DEBUG", False):
                 excluded_switches.append("enable-logging")
@@ -276,6 +303,7 @@ def setup_selenium_and_login(force=False):
             except Exception:
                 # Non-fatal if CDP is unavailable in some Selenium/driver combinations.
                 pass
+            _match_user_agent_to_browser(selenium_driver)
             created_driver = True
 
         try:
