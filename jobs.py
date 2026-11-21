@@ -1,7 +1,12 @@
 """One local worker for all uploads; checkpoints precede and follow each target."""
-import fcntl
+import os
 import threading
 import uuid
+
+if os.name == 'nt':
+    import msvcrt
+else:
+    import fcntl
 
 import poster_scraper as scraper
 from state_store import timestamp
@@ -20,9 +25,15 @@ class JobQueue:
         self.start_worker = start_worker
         self.worker_lock = None
         if start_worker:
-            self.worker_lock = open(store.path + '.worker.lock', 'a')
+            self.worker_lock = open(store.path + '.worker.lock', 'ab')
             try:
-                fcntl.flock(self.worker_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if os.name == 'nt':
+                    # Always lock the same byte, even for an existing lock file.
+                    # Windows permits locking a region beyond EOF.
+                    self.worker_lock.seek(0)
+                    msvcrt.locking(self.worker_lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(self.worker_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 self.worker_lock.close()
                 raise RuntimeError('Another poster worker is using this database. Run one web process.')
