@@ -87,6 +87,7 @@ The app drives a headless Chromium to browse ThePosterDB, so a native (non-Docke
 | Arch / CachyOS | `sudo pacman -S chromium` (includes `chromedriver`) |
 | Fedora | `sudo dnf install chromium chromedriver` |
 | macOS | `brew install --cask chromium` and `brew install chromedriver` |
+| Windows | Install Google Chrome for automatic driver setup, or use Chromium with a compatible ChromeDriver. Set `CHROME_BINARY` and `CHROMEDRIVER_PATH` if automatic detection fails. |
 
 If Chromium or chromedriver are not on `PATH`, set `CHROME_BINARY` and/or `CHROMEDRIVER_PATH` (environment variables or `config.py`). With neither set, Selenium Manager tries to locate or download a matching driver. If the browser can't start, the UI shows the real error (for example a Chrome/driver version mismatch) instead of a timeout.
 
@@ -127,7 +128,7 @@ Visit `http://localhost:5001` in your web browser, or use your configured `WEB_P
 
 ### Windows (PowerShell)
 
-Install Python 3.10+ and Google Chrome, then run these commands from the cloned repository:
+Install Python 3.10+ and set up Chrome or Chromium as described in the table above, then run these commands from the cloned repository:
 
 ```powershell
 py -m venv .venv
