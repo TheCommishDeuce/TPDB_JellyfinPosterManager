@@ -17,6 +17,7 @@ A modern web application for automatically finding and uploading high-quality po
 ### 🔍 **Smart Poster Discovery**
 - Automatically searches ThePosterDB for high-quality movie and TV series posters
 - Uses Jellyfin and TMDB metadata to improve title, year, movie, and series matching
+- Looks items up on TPDb by their IMDb/TMDb ID first (TPDb's advanced search, which needs a Pro Lite or Pro account), then falls back to a title search
 - Groups TPDb poster sets and shows compact set metadata such as uploader and source links
 - Supports movie, series, season, and movie collection poster discovery
 - Remembers corrected TPDb entry pages and can reuse cached picker/set results for faster repeat searches

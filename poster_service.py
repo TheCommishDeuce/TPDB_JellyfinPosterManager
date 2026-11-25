@@ -171,8 +171,8 @@ class PosterService:
         mapping = normalize_tpdb_page(self.store.values('mapping').get(item['id']))
         result = scraper.search_tpdb_for_poster_groups(
             item['title'], item_year=item.get('year'), item_type=item.get('type'),
-            tmdb_id=item.get('ProviderIds', {}).get('Tmdb'), eligible_seasons=seasons,
-            max_posters=1, include_base64=False, tpdb_item_url=mapping, require_exact=not bool(mapping),
+            tmdb_id=item.get('ProviderIds', {}).get('Tmdb'), imdb_id=item.get('ProviderIds', {}).get('Imdb'),
+            eligible_seasons=seasons, max_posters=1, include_base64=False, tpdb_item_url=mapping, require_exact=not bool(mapping),
             preferred_uploaders=options.get('preferred_uploaders', self.preferred_uploaders()),
         )
         group = result.get('best_group')
