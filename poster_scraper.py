@@ -54,6 +54,11 @@ tpdb_advanced_search_available = True
 tpdb_account_checked = False
 # TMDb's names for an item (title, original title, alternative titles), kept from the search-title lookup.
 tmdb_names = {}
+# The years a TMDb movie premiered or opened in theaters in the US or its own country (plus its main release
+# date), for the ID year check. Limited re-releases, home-video dates and other countries' dates are left out:
+# TPDb doesn't list a film under those.
+tmdb_years = {}
+TMDB_PREMIERE, TMDB_THEATRICAL = 1, 3
 
 SEARCH_RESULT_SELECTOR = "a.btn.btn-dark-lighter.flex-grow-1.text-truncate.py-2.text-left.position-relative"
 ITEM_POSTER_SELECTOR = "a.bg-transparent.border-0.text-white"
@@ -683,8 +688,9 @@ def _resolve_tpdb_search_query(item_title, item_type=None, tmdb_id=None):
     search_query = item_title
     if tmdb_id and tmdb_type:
         try:
-            # Alternative titles come in the same response, for the ID title check.
-            extra = "&append_to_response=alternative_titles" if tmdb_type in ("movie", "tv") else ""
+            # Alternative titles (and a movie's release dates) come in the same response, for the ID checks.
+            extra = {"movie": "&append_to_response=alternative_titles,release_dates",
+                     "tv": "&append_to_response=alternative_titles"}.get(tmdb_type, "")
             tmdb_response = requests.get(
                 f"https://api.themoviedb.org/3/{tmdb_type}/{tmdb_id}?api_key={Config.TMDB_API_KEY}&language=en-US{extra}",
                 timeout=10
@@ -698,6 +704,19 @@ def _resolve_tpdb_search_query(item_title, item_type=None, tmdb_id=None):
                     tmdb_data.get("original_name"), tmdb_data.get("original_title"),
                     *(entry.get("title") for entry in alternatives.get("results") or alternatives.get("titles") or []),
                 ] if name
+            }
+            # TPDb dates a film by where it was made as well as by its US release.
+            release_countries = {"US", *(tmdb_data.get("origin_country") or []),
+                                 *(country.get("iso_3166_1") for country in tmdb_data.get("production_countries") or [])}
+            tmdb_years[(tmdb_type, str(tmdb_id))] = {
+                date[:4] for date in [
+                    tmdb_data.get("release_date") or "",
+                    *(release.get("release_date") or ""
+                      for country in (tmdb_data.get("release_dates") or {}).get("results") or []
+                      if country.get("iso_3166_1") in release_countries
+                      for release in country.get("release_dates") or []
+                      if release.get("type") in (TMDB_PREMIERE, TMDB_THEATRICAL)),
+                ] if date[:4].isdigit()
             }
             if tmdb_type == "tv":
                 tmdb_title = tmdb_data.get("name")
@@ -782,12 +801,14 @@ def _tpdb_id_candidate(title, url, index, is_collection):
     }
 
 
-def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection, other_names=()):
+def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection, other_names=(), other_years=()):
     """Whether an ID match's TPDb title is the Jellyfin item's own title (and year, for non-collections).
 
     Jellyfin's provider IDs can be wrong (e.g. a "[REC] Collection" identified as the Decoys
     collection), so unattended uploads only trust an ID match that also agrees on the title.
     The year may be one off: TPDb often uses the wide-release year where Jellyfin has the premiere's.
+    A bigger gap is fine when both years are among ``other_years``, the years TMDb lists releases in
+    (The Evil Dead: premiere 1981, theatrical 1983).
     A series prefix may be missing on TPDb ("The Simpsons: The Good, the Bart, and the Loki"), and
     either side may add a country tag ("Accused (US)"), a ": The Series" suffix ("Blade: The Series"),
     or a possessive of up to three words ("Disney's Adventures of ...", "Anne Rice's Mayfair Witches").
@@ -806,6 +827,8 @@ def _id_match_agrees_with_item(candidate, item_title, item_year, is_collection, 
         return False
     item_year = None if is_collection else (extract_title_year(item_title or '') or (str(item_year) if item_year else None))
     if not (item_year and candidate.get('match_year')):
+        return True
+    if {str(item_year), str(candidate['match_year'])} <= set(other_years):
         return True
     try:
         return abs(int(candidate['match_year']) - int(item_year)) <= 1
@@ -1043,7 +1066,8 @@ def _search_tpdb_for_poster_groups(
                         tmdb_type = {"Movie": "movie", "Series": "tv", "Collection": "collection"}.get(item_type)
                         if require_exact and (len(id_candidates) != 1 or not _id_match_agrees_with_item(
                                 id_candidates[0], item_title, item_year, is_collection,
-                                tmdb_names.get((tmdb_type, str(tmdb_id)), ()))):
+                                tmdb_names.get((tmdb_type, str(tmdb_id)), ()),
+                                tmdb_years.get((tmdb_type, str(tmdb_id)), ()))):
                             logging.info("TPDb ID match for '%s' needs review: %s", item_title,
                                          ', '.join(candidate['title'] for candidate in id_candidates[:3]))
                             return {'posters': [], 'groups': [], 'best_group': None,

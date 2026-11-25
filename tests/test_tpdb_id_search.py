@@ -201,6 +201,34 @@ class IdSearchFlowTests(TPDbIdSearchCase):
             self.assertEqual(scraper.tmdb_names[('movie', '1111873')], {'Abigail', 'Magic Forest'})
         self.assertIn('append_to_response=alternative_titles', get.call_args.args[0])
 
+    def test_batch_mode_allows_a_bigger_year_gap_when_tmdb_lists_both_years(self):
+        # TPDb's page says 2024; Jellyfin has the earlier 2021 premiere. TMDb lists releases in both years.
+        for years, needs_review in (({'2021', '2024'}, False), ({'2024'}, True), ({'2021'}, True), (set(), True)):
+            with self.subTest(years=years), patch.dict(scraper.tmdb_years, {('movie', '1111873'): years}, clear=True):
+                self.use_driver({IMDB_URL: (ITEM_URL, ITEM_PAGE)})
+                result = scraper.search_tpdb_for_poster_groups(
+                    'Abigail', item_year=2021, item_type='Movie', imdb_id='tt27489557', tmdb_id='1111873',
+                    require_exact=True, include_base64=False)
+                self.assertEqual(result.get('review_needed', False), needs_review)
+
+    def test_tmdb_release_years_come_from_the_search_title_lookup(self):
+        response = Mock(json=Mock(return_value={
+            'title': 'The Evil Dead', 'release_date': '1981-10-15', 'origin_country': ['IT'],
+            'release_dates': {'results': [
+                {'iso_3166_1': 'US', 'release_dates': [
+                    {'type': 1, 'release_date': '1981-10-15T00:00:00.000Z'},    # premiere
+                    {'type': 5, 'release_date': '1983-04-15T00:00:00.000Z'},    # VHS
+                    {'type': 3, 'release_date': '1983-04-15T00:00:00.000Z'},    # theatrical
+                    {'type': 2, 'release_date': '2009-01-08T00:00:00.000Z'},    # Grindhouse re-release
+                    {'type': 5, 'release_date': '2026-07-07T00:00:00.000Z'}]},  # SteelBook
+                {'iso_3166_1': 'IT', 'release_dates': [{'type': 3, 'release_date': '1984-03-02T00:00:00.000Z'}]},   # its own country
+                {'iso_3166_1': 'GB', 'release_dates': [{'type': 3, 'release_date': '1982-06-01T00:00:00.000Z'}]},   # not US or its own
+            ]}}))
+        with patch.object(scraper.requests, 'get', return_value=response) as get, patch.dict(scraper.tmdb_years, clear=True):
+            resolve_tpdb_search_query('The Evil Dead', item_type='Movie', tmdb_id='764')
+            self.assertEqual(scraper.tmdb_years[('movie', '764')], {'1981', '1983', '1984'})
+        self.assertIn('release_dates', get.call_args.args[0])
+
     def test_batch_mode_reviews_an_id_match_for_another_title_or_year(self):
         for title, year in (('Some Other Film', 2024), ('Abigail', 2019), ('Abigail: Part Two', 2024)):
             with self.subTest(title=title, year=year):
